@@ -12,6 +12,11 @@ yarn dev
 pnpm dev
 # or
 bun dev
+
+pnpm dev:all
+#Eso hace:
+# [next] — arranca Next.js en localhost:3000
+# [python] — chequea si el puerto 8001 ya está escuchando; si sí, imprime un aviso y queda en espera; si no, arranca python -m uvicorn transcribe_service:app --port 8001 --reload desde ./python/
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.

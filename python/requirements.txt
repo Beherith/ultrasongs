@@ -1,0 +1,11 @@
+faster-whisper
+demucs
+librosa
+lameenc
+torchcrepe
+torchaudio
+fastapi
+uvicorn[standard]
+python-multipart
+soundfile
+numpy
