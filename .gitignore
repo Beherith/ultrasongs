@@ -49,3 +49,8 @@ AGENTS.md
 
 # temp files
 /tmp/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
