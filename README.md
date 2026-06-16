@@ -1,5 +1,7 @@
 # Ultrasongs
 
+> **Work in progress** — functional but rough around the edges.
+
 Generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` song files from any audio or video file + song lyrics. Runs fully local — no external AI APIs required.
 
 **Pipeline:** Demucs vocal separation → torchcrepe pitch detection → faster-whisper transcription → fuzzy lyric alignment → BPM-based beat mapping → `.txt` export with optional visual timeline editor.
