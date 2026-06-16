@@ -18,7 +18,7 @@ Generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` son
 - Fuzzy Levenshtein alignment of Whisper words → user lyrics
 - BPM detection + beat-accurate note placement
 - Syllable splitting (20+ languages via TeX hyphenation patterns)
-- Visual timeline editor to fine-tune notes before export
+- Visual timeline editor with audio playback, per-note preview, and real-time microphone pitch tracking
 - ZIP download with `.txt` + separated audio tracks
 
 ## Requirements
