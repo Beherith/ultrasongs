@@ -2,6 +2,8 @@ import asyncio
 import gc
 import json
 import os
+import subprocess
+import sys
 
 import lameenc
 import numpy as np
@@ -18,6 +20,8 @@ from faster_whisper import WhisperModel
 app = FastAPI()
 
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "medium")
+ALIGN_ENGINE = os.environ.get("ALIGN_ENGINE", "whisper").lower()
+WHISPERX_MODEL = os.environ.get("WHISPERX_MODEL", "small")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # large models need int8_float16 to share 8 GB VRAM with Demucs activations
 COMPUTE_TYPE = "int8" if "large" in WHISPER_MODEL and DEVICE == "cuda" else "auto"
@@ -29,10 +33,10 @@ CREPE_HOP = 160   # 10 ms hop at 16 kHz
 DEMUCS_SR = 44100
 DEMUCS_VOCALS_IDX = 3  # sources: ['drums', 'bass', 'other', 'vocals']
 
-print(f"[startup] device={DEVICE}  whisper={WHISPER_MODEL}  compute={COMPUTE_TYPE}")
+print(f"[startup] device={DEVICE}  whisper={WHISPER_MODEL}  compute={COMPUTE_TYPE}  align={ALIGN_ENGINE}")
 print("[startup] Loading Whisper (Demucs loaded per-request to save VRAM)…")
-whisper_model = WhisperModel(WHISPER_MODEL, device=DEVICE, compute_type=COMPUTE_TYPE)
-print("[startup] Whisper ready")
+whisper_model = None if ALIGN_ENGINE == "whisperx" else WhisperModel(WHISPER_MODEL, device=DEVICE, compute_type=COMPUTE_TYPE)
+print("[startup] WhisperX ready" if ALIGN_ENGINE == "whisperx" else "[startup] Whisper ready")
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -129,6 +133,77 @@ def get_midi_for_word(times, freqs, confs, start_sec, end_sec) -> int:
         if len(sel) > 0:
             return hz_to_midi(float(np.median(sel)))
     return 60
+
+
+def get_pitch_frames_for_word(times, freqs, confs, start_sec, end_sec) -> list:
+    mask = (times >= start_sec) & (times <= end_sec) & (confs > 0.1) & (freqs > 0)
+    return [
+        {
+            "time": float(t),
+            "midi": int(hz_to_midi(float(f))),
+            "confidence": float(c),
+        }
+        for t, f, c in zip(times[mask], freqs[mask], confs[mask])
+    ]
+
+
+def add_pitch_to_words(raw_words, times, freqs, confs) -> list:
+    words = []
+    for w in raw_words:
+        start = float(w["start"])
+        end = float(w["end"])
+        words.append({
+            "word": str(w["word"]).strip(),
+            "start": start,
+            "end": end,
+            "midi": get_midi_for_word(times, freqs, confs, start, end),
+            "pitchFrames": get_pitch_frames_for_word(times, freqs, confs, start, end),
+        })
+    return words
+
+
+def transcribe_with_whisperx(vocals_wav_path: str, prompt: str = "") -> tuple[list, str]:
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.abspath(os.path.join(here, ".."))
+    default_python = os.path.join(here, ".venv-whisperx", "Scripts", "python.exe")
+    worker = os.path.join(here, "whisperx_worker.py")
+    python_exe = os.environ.get("WHISPERX_PYTHON", default_python)
+
+    if not os.path.exists(python_exe):
+        raise RuntimeError(f"WhisperX Python not found: {python_exe}")
+    if not os.path.exists(worker):
+        raise RuntimeError(f"WhisperX worker not found: {worker}")
+
+    env = os.environ.copy()
+    env.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
+    cmd = [
+        python_exe,
+        worker,
+        "--audio", vocals_wav_path,
+        "--model", WHISPERX_MODEL,
+    ]
+    language = os.environ.get("WHISPERX_LANGUAGE", "")
+    if language:
+        cmd.extend(["--language", language])
+    if prompt:
+        cmd.extend(["--prompt", prompt])
+
+    proc = subprocess.run(
+        cmd,
+        cwd=root,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.stderr:
+        print(proc.stderr.strip())
+    if proc.returncode != 0:
+        raise RuntimeError(f"WhisperX failed with code {proc.returncode}: {proc.stderr.strip()}")
+
+    payload = json.loads(proc.stdout)
+    return payload.get("words", []), payload.get("language") or language or "en"
 
 
 def detect_pauses(
@@ -234,27 +309,30 @@ async def transcribe(mp3_path: str = Form(...), lyrics: str = Form("")):
                 print(f"[transcribe] Pauses: {len(pauses)} silence regions detected")
 
                 await queue.put(sse("Transcribiendo letra con Whisper…"))
-                prompt = lyrics.strip()[:800] if lyrics.strip() else None
+                prompt = lyrics.strip() if lyrics.strip() else None
 
                 def do_whisper():
                     # Use the original mix (not vocals WAV) — Whisper timestamps
                     # are more reliable with full audio; Demucs artifacts in the
                     # vocals-only track often cause large timestamp drift.
+                    if ALIGN_ENGINE == "whisperx":
+                        raw_words, language = transcribe_with_whisperx(vocals_wav_path, prompt=prompt or "")
+                        return add_pitch_to_words(raw_words, times, freqs, confs), language
+
                     segs, info = whisper_model.transcribe(
-                        mp3_path,
+                        vocals_wav_path,
                         word_timestamps=True,
                         initial_prompt=prompt,
                     )
-                    words = []
+                    raw_words = []
                     for seg in segs:
                         for w in seg.words:
-                            words.append({
+                            raw_words.append({
                                 "word": w.word.strip(),
                                 "start": w.start,
                                 "end": w.end,
-                                "midi": get_midi_for_word(times, freqs, confs, w.start, w.end),
                             })
-                    return words, info.language
+                    return add_pitch_to_words(raw_words, times, freqs, confs), info.language
 
                 words, language = await asyncio.to_thread(do_whisper)
 

@@ -1,41 +1,134 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Ultrasongs
 
-## Getting Started
+Generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` song files from any audio or video file + song lyrics. Runs fully local — no external AI APIs required.
 
-First, run the development server:
+**Pipeline:** Demucs vocal separation → torchcrepe pitch detection → faster-whisper transcription → fuzzy lyric alignment → BPM-based beat mapping → `.txt` export with optional visual timeline editor.
+
+## Features
+
+- Upload any audio or video format (MP4, MKV, MP3, FLAC, WAV, …)
+- Automatic vocal separation via [Demucs](https://github.com/facebookresearch/demucs) `htdemucs`
+- Per-word MIDI pitch via [torchcrepe](https://github.com/maxrmorrison/torchcrepe)
+- Transcription via [faster-whisper](https://github.com/guillaumekynast/faster-whisper), biased by your provided lyrics
+- Fuzzy Levenshtein alignment of Whisper words → user lyrics
+- BPM detection + beat-accurate note placement
+- Syllable splitting (20+ languages via TeX hyphenation patterns)
+- Visual timeline editor to fine-tune notes before export
+- ZIP download with `.txt` + separated audio tracks
+
+## Requirements
+
+- Node.js 20+ and [pnpm](https://pnpm.io/)
+- Python 3.10+
+- [FFmpeg](https://ffmpeg.org/) (or install via `@ffmpeg-installer/ffmpeg` — already in `package.json`)
+- PyTorch with CUDA recommended (CPU works but is slow)
+
+### Python dependencies
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-
-pnpm dev:all
-#Eso hace:
-# [next] — arranca Next.js en localhost:3000
-# [python] — chequea si el puerto 8001 ya está escuchando; si sí, imprime un aviso y queda en espera; si no, arranca python -m uvicorn transcribe_service:app --port 8001 --reload desde ./python/
+pip install faster-whisper torchcrepe torch torchaudio demucs lameenc soundfile fastapi uvicorn python-multipart
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Setup
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# 1. Install Node dependencies
+pnpm install
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+# 2. Configure environment
+cp .env.example .env.local
+# Edit .env.local if needed (defaults work out of the box)
+```
 
-## Learn More
+`.env.local` defaults:
 
-To learn more about Next.js, take a look at the following resources:
+```
+PYTHON_SERVICE_URL=http://localhost:8001
+TMP_DIR=./tmp
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Running
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+pnpm dev:all   # Starts Next.js (port 3000) + Python service (port 8001) together
+```
 
-## Deploy on Vercel
+Or start them separately:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+pnpm dev                                                           # Next.js only
+cd python && python -m uvicorn transcribe_service:app --port 8001  # Python only
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`pnpm dev:all` checks if port 8001 is already listening before spawning uvicorn, so it's safe to run repeatedly.
+
+## Pipeline
+
+```
+Upload
+  └─ FFmpeg: any format → mono 128 kbps MP3
+
+Transcribe (Python microservice via SSE stream)
+  ├─ Demucs:    separate vocals + accompaniment
+  ├─ torchcrepe: pitch analysis on vocals track
+  ├─ Pause detection: RMS silence regions
+  └─ Whisper:   transcribe vocals, prompted by user lyrics
+
+Generate
+  ├─ Mode A (auto):   alignLyrics() → BPM detect → msToBeats → .txt
+  └─ Mode B (editor): TimelineEditor notes (already in beat format) → .txt
+```
+
+## Tech stack
+
+| Layer            | Technology                                 |
+| ---------------- | ------------------------------------------ |
+| Framework        | Next.js 16 + App Router, TypeScript strict |
+| Styling          | Tailwind CSS v4                            |
+| Audio extraction | FFmpeg via `fluent-ffmpeg`                 |
+| Vocal separation | Demucs `htdemucs` (Python)                 |
+| Transcription    | faster-whisper (Python)                    |
+| Pitch detection  | torchcrepe (Python)                        |
+| BPM detection    | `music-tempo`                              |
+| Syllabification  | `hyphen` (TeX patterns)                    |
+| ZIP export       | JSZip                                      |
+| Package manager  | pnpm                                       |
+
+## Performance
+
+Tested on an NVIDIA GTX 1080 (8 GB VRAM). A 4-minute song takes roughly 40–60 s (Demucs + torchcrepe + Whisper running sequentially).
+
+Default Whisper model: `medium`. For tighter VRAM budgets, set `WHISPER_MODEL=large-v3` to use `int8_float16` compute.
+
+## Ultrastar .txt format
+
+```
+#TITLE:Song Title
+#ARTIST:Artist Name
+#MP3:song.mp3
+#BPM:120
+#GAP:1200
+: 0 4 60 Hel-
+: 4 4 62 lo
+- 16
+: 20 4 60 World
+E
+```
+
+- `:` normal note · `*` golden note · `-` line break · `E` end of song
+- Note: `[type] [start_beat] [duration_beats] [midi_pitch] [syllable]`
+- `GAP` = milliseconds before beat 0; beat formula: `((ms − GAP) / 1000) × (BPM / 60) × 4`
+
+## Credits
+
+Built by [Pablo Pramparo](https://github.com/pablopramparo).
+
+Powered by:
+
+- [Demucs](https://github.com/facebookresearch/demucs) — vocal separation (Meta Research)
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — speech transcription
+- [torchcrepe](https://github.com/maxrmorrison/torchcrepe) — pitch estimation
+
+## License
+
+MIT

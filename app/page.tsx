@@ -49,16 +49,37 @@ export default function Home() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [aligning, setAligning] = useState(false);
 
-  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [currentDraftId, setCurrentDraftId] = useState<string | null>(null);
   const [draftsRefreshKey, setDraftsRefreshKey] = useState(0);
   const [saving, setSaving] = useState(false);
   // true when audio is already on the server (from a saved draft or prior upload)
   const [hasUploadedAudio, setHasUploadedAudio] = useState(false);
+  const [reprocessOpen, setReprocessOpen] = useState(false);
+  const [newFormOpen, setNewFormOpen] = useState(false);
 
   const uploadRef = useRef<UploadResult | null>(null);
   const transcribeRef = useRef<TranscribeResult | null>(null);
   const prevDownloadUrl = useRef<string | null>(null);
+  const infoAudioRef = useRef<HTMLAudioElement | null>(null);
+  const infoVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Sync info-card video to audio player
+  useEffect(() => {
+    const audio = infoAudioRef.current;
+    const video = infoVideoRef.current;
+    if (!audio || !video) return;
+    const onPlay = () => { video.currentTime = audio.currentTime; video.play().catch(() => {}); };
+    const onPause = () => video.pause();
+    const onSeeked = () => { video.currentTime = audio.currentTime; };
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("seeked", onSeeked);
+    return () => {
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("seeked", onSeeked);
+    };
+  }, [transcribed, audioUrl, videoUrl]);
 
   // Elapsed timer — runs during transcribing phase
   useEffect(() => {
@@ -161,6 +182,8 @@ export default function Home() {
     setCurrentDraftId(id);
     setDownloadUrl(null);
     setEditorOpen(false);
+    setReprocessOpen(false);
+    setNewFormOpen(false);
     setError(null);
     setPhase("idle");
     setPendingAudioFile(null);
@@ -293,6 +316,21 @@ export default function Home() {
       if (result.vocalsPath) uploadRef.current!.vocalsPath = result.vocalsPath;
       if (result.accompanimentPath) uploadRef.current!.accompanimentPath = result.accompanimentPath;
 
+      setCurrentStage("Alineando letra...");
+      const alignRes = await fetch("/api/align", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mp3: uploadRef.current!.mp3,
+          words: result.words,
+          language: result.language,
+          lyrics,
+          pauses: result.pauses,
+        }),
+      });
+      if (!alignRes.ok) throw new Error((await alignRes.json()).message);
+      setAlignResult(await alignRes.json());
+
       setAudioUrl(`/api/audio?mp3=${encodeURIComponent(uploadRef.current!.mp3)}`);
       if (uploadRef.current!.videoPath) {
         setVideoUrl(`/api/video?path=${encodeURIComponent(uploadRef.current!.videoPath)}`);
@@ -300,6 +338,7 @@ export default function Home() {
 
       setCurrentStage("Listo");
       setTranscribed(true);
+      setReprocessOpen(false);
       setPhase("idle");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falló el procesamiento");
@@ -343,6 +382,8 @@ export default function Home() {
   // ── Open timeline editor ─────────────────────────────────────────────────
   const handleOpenEditor = useCallback(async () => {
     if (!uploadRef.current || !transcribeRef.current) return;
+    // If we already have an alignment (e.g. loaded from draft), use it directly
+    if (alignResult) { setEditorOpen(true); return; }
     setAligning(true);
     setError(null);
     try {
@@ -365,7 +406,7 @@ export default function Home() {
     } finally {
       setAligning(false);
     }
-  }, [lyrics]);
+  }, [lyrics, alignResult]);
 
   // ── Export from editor ───────────────────────────────────────────────────
   const handleEditorExport = useCallback(async (notes: EditorNote[], bpm: number, gap: number) => {
@@ -397,89 +438,189 @@ export default function Home() {
   }, [title, artist]);
 
   // ── Render ───────────────────────────────────────────────────────────────
+
+  // Full-screen editor mode — hides everything else
+  if (editorOpen && alignResult && audioUrl) {
+    return (
+      <div className="fixed inset-0 z-50 overflow-hidden bg-zinc-950">
+        <TimelineEditor
+          initialNotes={alignResult.notes}
+          bpm={alignResult.bpm}
+          gap={alignResult.gap}
+          audioUrl={audioUrl}
+          videoUrl={videoUrl ?? undefined}
+          title={title}
+          artist={artist}
+          draftId={currentDraftId ?? undefined}
+          onExport={handleEditorExport}
+          onClose={() => setEditorOpen(false)}
+        />
+      </div>
+    );
+  }
+
   return (
     <>
     <div className="flex min-h-dvh">
       <DraftsSidebar
-        open={sidebarOpen}
-        onToggle={() => setSidebarOpen((v) => !v)}
+        onHome={() => {
+          setTranscribed(false);
+          setNewFormOpen(false);
+          setAlignResult(null);
+          setAudioUrl(null);
+          setVideoUrl(null);
+          setCurrentDraftId(null);
+          setDownloadUrl(null);
+          setEditorOpen(false);
+          setError(null);
+          setPhase("idle");
+          uploadRef.current = null;
+          transcribeRef.current = null;
+        }}
         onLoad={handleLoadDraft}
         onImport={handleImportTxt}
         refreshKey={draftsRefreshKey}
         currentDraftId={currentDraftId}
       />
     {/* Left padding matches sidebar width (w-64=16rem open, w-10=2.5rem closed) */}
-    <div className={`flex flex-1 flex-col min-w-0 transition-all duration-200 ${sidebarOpen ? "pl-64" : "pl-10"}`}>
+    <div className="flex flex-1 flex-col min-w-0 pl-64">
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-12">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-50">
-          Ultrastar Song Creator
-        </h1>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          Completá todos los campos y hacé clic en Procesar.
-        </p>
-      </div>
 
-      <section className="flex flex-col gap-4">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Audio</h2>
-          <FileUpload onFile={handleFile} disabled={busy} filename={filename || undefined} />
-          <div className="flex items-center gap-2">
-            <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
-            <span className="text-xs text-zinc-400">+ video opcional (sin audio)</span>
-            <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+      {/* ── MODE A: no song yet ── */}
+      {!transcribed && !newFormOpen && (
+        <div className="flex flex-col items-center justify-center gap-8 py-16">
+          <img src="/ultrasong.png" alt="Ultrasong" className="w-80 object-contain drop-shadow-md" />
+          <div className="flex flex-col items-center gap-1 text-center">
+            <p className="text-sm text-zinc-400 dark:text-zinc-500">
+              Generá archivos Ultrastar Deluxe desde audio + letra
+            </p>
           </div>
-          <FileUpload
-            onFile={handleVideoFile}
-            disabled={busy}
-            filename={videoFilename || undefined}
-            accept="video"
-            label="Drop video file here (optional)"
-            sublabel="mp4, mkv, webm, mov — used as background in Ultrastar"
-          />
+          <button
+            onClick={() => {
+              setTitle("");
+              setArtist("");
+              setLyrics("");
+              setFilename("");
+              setVideoFilename("");
+              setPendingAudioFile(null);
+              setPendingVideoFile(null);
+              setError(null);
+              uploadRef.current = null;
+              transcribeRef.current = null;
+              setHasUploadedAudio(false);
+              setNewFormOpen(true);
+            }}
+            className="flex items-center gap-2 rounded-xl bg-zinc-900 px-6 py-3 text-sm font-semibold text-white shadow transition-colors hover:bg-zinc-700 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            Nueva canción
+          </button>
         </div>
+      )}
 
-        <div className="flex flex-col gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Info &amp; letra</h2>
-          <LyricsInput
-            title={title} artist={artist} lyrics={lyrics}
-            onTitle={setTitle} onArtist={setArtist} onLyrics={setLyrics}
-            disabled={busy}
-          />
-        </div>
+      {/* ── MODE A: new song form ── */}
+      {!transcribed && newFormOpen && (
+        <section className="flex flex-col gap-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setNewFormOpen(false)}
+              className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+              Volver
+            </button>
+            <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">Nueva canción</h2>
+          </div>
 
-        {/* Procesar button */}
-        <button
-          onClick={handleProcess}
-          disabled={!canProcess}
-          className="flex items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
-        >
-          {busy ? <><Spinner />{phase === "uploading" ? "Subiendo…" : "Procesando…"}</> : transcribed ? "Re-procesar" : "Procesar"}
-        </button>
-
-        {/* Stage progress */}
-        {(phase === "uploading" || phase === "transcribing") && currentStage && (
-          <div className="flex items-center gap-2 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-800/50">
-            <Spinner />
-            <div className="flex min-w-0 flex-1 flex-col">
-              <span className="text-xs font-medium text-zinc-700 dark:text-zinc-200">{currentStage}</span>
-              {phase === "transcribing" && transcribeElapsed > 0 && (
-                <span className="text-[10px] text-zinc-400">{fmtTime(transcribeElapsed)} transcurrido</span>
-              )}
+          <div className="flex flex-col gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Audio</h3>
+            <FileUpload onFile={handleFile} disabled={busy} filename={filename || undefined} />
+            <div className="flex items-center gap-2">
+              <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+              <span className="text-xs text-zinc-400">+ video opcional (sin audio)</span>
+              <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
             </div>
+            <FileUpload
+              onFile={handleVideoFile}
+              disabled={busy}
+              filename={videoFilename || undefined}
+              accept="video"
+              label="Drop video file here (optional)"
+              sublabel="mp4, mkv, webm, mov — used as background in Ultrastar"
+            />
           </div>
-        )}
 
-        {error && !transcribed && (
-          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-        )}
-      </section>
+          <div className="flex flex-col gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Info &amp; letra</h3>
+            <LyricsInput
+              title={title} artist={artist} lyrics={lyrics}
+              onTitle={setTitle} onArtist={setArtist} onLyrics={setLyrics}
+              disabled={busy}
+            />
+          </div>
 
-      {/* Generate section */}
+          <button
+            onClick={handleProcess}
+            disabled={!canProcess}
+            className="flex items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+          >
+            {busy ? <><Spinner />{phase === "uploading" ? "Subiendo…" : "Procesando…"}</> : "Procesar"}
+          </button>
+
+          {(phase === "uploading" || phase === "transcribing") && currentStage && (
+            <div className="flex items-center gap-2 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-800/50">
+              <Spinner />
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="text-xs font-medium text-zinc-700 dark:text-zinc-200">{currentStage}</span>
+                {phase === "transcribing" && transcribeElapsed > 0 && (
+                  <span className="text-[10px] text-zinc-400">{fmtTime(transcribeElapsed)} transcurrido</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          )}
+        </section>
+      )}
+
+      {/* ── MODE B: song ready — info card + actions ── */}
       {transcribed && (
         <section className="flex flex-col gap-3">
-          <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Generar</h2>
+          {/* Song info card */}
+          <div className="flex flex-col gap-3 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+            <div>
+              <p className="text-base font-semibold text-zinc-900 dark:text-zinc-50">{title}</p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">{artist}</p>
+            </div>
 
+            {videoUrl && (
+              <video
+                ref={infoVideoRef}
+                src={videoUrl}
+                muted
+                className="w-full rounded-lg"
+                style={{ maxHeight: "240px" }}
+              />
+            )}
+
+            {audioUrl && (
+              <audio ref={infoAudioRef} src={audioUrl} controls className="w-full" />
+            )}
+
+            {lyrics && (
+              <pre className="max-h-48 overflow-y-auto rounded-lg bg-zinc-50 px-3 py-2.5 text-xs leading-relaxed whitespace-pre-wrap text-zinc-600 dark:bg-zinc-800/50 dark:text-zinc-300">
+                {lyrics}
+              </pre>
+            )}
+          </div>
+
+          {/* Primary actions */}
           <div className="grid grid-cols-2 gap-2">
             <GenerateButton phase={phase} onClick={handleGenerate} disabled={!canAct} />
             <button
@@ -498,38 +639,89 @@ export default function Home() {
 
           <DownloadPanel url={downloadUrl} title={title} error={error} />
 
+          {/* Re-process expander */}
           <button
-            onClick={handleSaveDraft}
-            disabled={saving}
-            className="flex items-center justify-center gap-2 rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+            onClick={() => setReprocessOpen((v) => !v)}
+            className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-500 transition-colors hover:bg-zinc-50 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
           >
-            {saving ? <Spinner /> : (
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-              </svg>
-            )}
-            {currentDraftId ? "Actualizar borrador" : "Guardar borrador"}
+            <svg className={`h-4 w-4 transition-transform ${reprocessOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+            </svg>
+            Modificar / Re-procesar
           </button>
+
+          {/* Collapsible re-process form */}
+          {reprocessOpen && (
+            <div className="flex flex-col gap-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+              <div className="flex flex-col gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Audio</h3>
+                <FileUpload onFile={handleFile} disabled={busy} filename={filename || undefined} />
+                <div className="flex items-center gap-2">
+                  <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+                  <span className="text-xs text-zinc-400">+ video opcional (sin audio)</span>
+                  <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
+                </div>
+                <FileUpload
+                  onFile={handleVideoFile}
+                  disabled={busy}
+                  filename={videoFilename || undefined}
+                  accept="video"
+                  label="Drop video file here (optional)"
+                  sublabel="mp4, mkv, webm, mov — used as background in Ultrastar"
+                />
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Info &amp; letra</h3>
+                <LyricsInput
+                  title={title} artist={artist} lyrics={lyrics}
+                  onTitle={setTitle} onArtist={setArtist} onLyrics={setLyrics}
+                  disabled={busy}
+                />
+              </div>
+
+              <button
+                onClick={handleSaveDraft}
+                disabled={saving}
+                className="flex items-center justify-center gap-2 rounded-xl border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
+              >
+                {saving ? <Spinner /> : (
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                  </svg>
+                )}
+                {currentDraftId ? "Actualizar borrador" : "Guardar borrador"}
+              </button>
+
+              <button
+                onClick={handleProcess}
+                disabled={!canProcess}
+                className="flex items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+              >
+                {busy ? <><Spinner />{phase === "uploading" ? "Subiendo…" : "Procesando…"}</> : "Re-procesar"}
+              </button>
+
+              {(phase === "uploading" || phase === "transcribing") && currentStage && (
+                <div className="flex items-center gap-2 rounded-lg border border-zinc-100 bg-zinc-50 px-3 py-2.5 dark:border-zinc-800 dark:bg-zinc-800/50">
+                  <Spinner />
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-xs font-medium text-zinc-700 dark:text-zinc-200">{currentStage}</span>
+                    {phase === "transcribing" && transcribeElapsed > 0 && (
+                      <span className="text-[10px] text-zinc-400">{fmtTime(transcribeElapsed)} transcurrido</span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              )}
+            </div>
+          )}
         </section>
       )}
     </div>
 
-    {editorOpen && alignResult && audioUrl && (
-      <div className="w-full px-4 pb-12">
-        <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-zinc-400">Timeline editor</h2>
-        <TimelineEditor
-          initialNotes={alignResult.notes}
-          bpm={alignResult.bpm}
-          gap={alignResult.gap}
-          audioUrl={audioUrl}
-          videoUrl={videoUrl ?? undefined}
-          title={title}
-          artist={artist}
-          onExport={handleEditorExport}
-          onClose={() => setEditorOpen(false)}
-        />
-      </div>
-    )}
     </div>
     </div>
     </>

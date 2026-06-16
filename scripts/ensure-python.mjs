@@ -28,7 +28,17 @@ function loadEnvLocal() {
   } catch { return {}; }
 }
 const envLocal = loadEnvLocal();
-const PYTHON_VARS = ["WHISPER_MODEL", "TMP_DIR"];
+const PYTHON_VARS = [
+  "WHISPER_MODEL",
+  "TMP_DIR",
+  "ALIGN_ENGINE",
+  "WHISPERX_MODEL",
+  "WHISPERX_LANGUAGE",
+  "WHISPERX_PYTHON",
+  "WHISPERX_DEVICE",
+  "WHISPERX_COMPUTE_TYPE",
+  "WHISPERX_BATCH_SIZE",
+];
 const extraEnv = Object.fromEntries(
   PYTHON_VARS.filter((k) => envLocal[k]).map((k) => [k, envLocal[k]])
 );

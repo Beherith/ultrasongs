@@ -15,6 +15,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Ultrastar Song Creator",
   description: "Generate Ultrastar Deluxe karaoke files from any audio or video.",
+  icons: { icon: "/favico.png" },
 };
 
 export default function RootLayout({

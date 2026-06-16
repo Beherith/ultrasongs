@@ -1,5 +1,5 @@
 /**
- * YIN pitch detection algorithm.
+ * YIN pitch detection algorithm with octave-error correction.
  * Returns frequency in Hz, or -1 if no reliable pitch is found.
  * Expects mono float32 PCM buffer at the given sample rate.
  */
@@ -27,16 +27,28 @@ export function detectPitch(buffer: Float32Array, sampleRate: number): number {
     cmnd[tau] = sum === 0 ? 0 : (d[tau] * tau) / sum;
   }
 
-  // Step 3: absolute threshold — find first dip below 0.15
+  // Step 3: find first dip below threshold
   const threshold = 0.15;
+
+  function parabolicInterp(t: number): number {
+    if (t < 1 || t >= half - 1) return t;
+    const prev = cmnd[t - 1], curr = cmnd[t], next = cmnd[t + 1];
+    const denom = 2 * (2 * curr - prev - next);
+    return denom === 0 ? t : t + (next - prev) / denom;
+  }
+
   let tau = 2;
   while (tau < half - 1) {
     if (cmnd[tau] < threshold) {
-      // Parabolic interpolation for sub-sample precision
-      const prev = cmnd[tau - 1];
-      const curr = cmnd[tau];
-      const next = cmnd[tau + 1];
-      const betterTau = tau + (next - prev) / (2 * (2 * curr - prev - next));
+      const betterTau = parabolicInterp(tau);
+
+      // Octave-too-high correction: if 2×tau also dips below threshold×1.8,
+      // the true fundamental is one octave lower — prefer it.
+      const doubleTau = Math.round(tau * 2);
+      if (doubleTau < half - 1 && cmnd[doubleTau] < threshold * 1.8) {
+        return sampleRate / parabolicInterp(doubleTau);
+      }
+
       return sampleRate / betterTau;
     }
     tau++;

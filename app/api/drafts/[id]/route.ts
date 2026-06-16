@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFile, rm } from "fs/promises";
+import { readFile, writeFile, rm } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 
@@ -24,6 +24,26 @@ export async function GET(
       vocalsPath: data.vocalsFilename ? path.join(dir, data.vocalsFilename) : undefined,
       accompanimentPath: data.accompanimentFilename ? path.join(dir, data.accompanimentFilename) : undefined,
     });
+  } catch (err) {
+    return NextResponse.json({ message: err instanceof Error ? err.message : "Failed" }, { status: 500 });
+  }
+}
+
+export async function PATCH(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await ctx.params;
+    const jsonPath = path.join(path.resolve(process.env.DRAFTS_DIR ?? "./drafts"), id, "draft.json");
+    if (!existsSync(jsonPath)) {
+      return NextResponse.json({ message: "Draft not found" }, { status: 404 });
+    }
+    const existing = JSON.parse(await readFile(jsonPath, "utf-8"));
+    const updates = await req.json();
+    const merged = { ...existing, ...updates, savedAt: new Date().toISOString() };
+    await writeFile(jsonPath, JSON.stringify(merged));
+    return NextResponse.json({ ok: true });
   } catch (err) {
     return NextResponse.json({ message: err instanceof Error ? err.message : "Failed" }, { status: 500 });
   }

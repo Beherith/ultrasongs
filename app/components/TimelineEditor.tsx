@@ -25,19 +25,25 @@ interface Props {
   videoUrl?: string;
   title: string;
   artist: string;
+  draftId?: string;
   onExport: (notes: EditorNote[], bpm: number, gap: number) => void;
   onClose?: () => void;
 }
 
 export default function TimelineEditor({
-  initialNotes, bpm, gap, audioUrl, videoUrl, title, artist, onExport, onClose,
+  initialNotes, bpm, gap, audioUrl, videoUrl, title, artist, draftId, onExport, onClose,
 }: Props) {
   const [notes, setNotes] = useState<EditorNote[]>(initialNotes);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pxPerSec, setPxPerSec] = useState(120);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playheadSec, setPlayheadSec] = useState(0);
+  const [isNotePlaying, setIsNotePlaying] = useState(false);
+  const [addMode, setAddMode] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [isMicTracePlaying, setIsMicTracePlaying] = useState(false);
   const [micEnabled, setMicEnabled] = useState(false);
+  const [micPlayEnabled, setMicPlayEnabled] = useState(false);
   const [micMidi, setMicMidi] = useState<number | null>(null);
   const [micDevices, setMicDevices] = useState<MediaDeviceInfo[]>([]);
   const [micDeviceId, setMicDeviceId] = useState<string>("");
@@ -53,13 +59,36 @@ export default function TimelineEditor({
   const micStreamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const previewCtxRef = useRef<AudioContext | null>(null);
+  const notePlayCtxRef = useRef<AudioContext | null>(null);
+  const notePlayStartRef = useRef<number>(0);
+  const notePlayOffsetRef = useRef<number>(0);
+  const micTracePlayCtxRef = useRef<AudioContext | null>(null);
+  const micTracePlayStartRef = useRef<number>(0);
+  const micTracePlayOffsetRef = useRef<number>(0);
+  const micPlayCtxRef = useRef<AudioContext | null>(null);
+  const micPlayOscRef = useRef<OscillatorNode | null>(null);
+  const micPlayGainRef = useRef<GainNode | null>(null);
+  const micPlayEnabledRef = useRef(false);
+  useEffect(() => { micPlayEnabledRef.current = micPlayEnabled; }, [micPlayEnabled]);
+  const [micThreshold, setMicThreshold] = useState(0.02);
+  const micThresholdRef = useRef(0.02);
+  useEffect(() => { micThresholdRef.current = micThreshold; }, [micThreshold]);
+  const [micOctaveShift, setMicOctaveShift] = useState(0);
+  const micOctaveShiftRef = useRef(0);
+  useEffect(() => { micOctaveShiftRef.current = micOctaveShift; }, [micOctaveShift]);
   const syllableInputRef = useRef<HTMLInputElement>(null);
   const pxPerSecRef = useRef(pxPerSec);
   useEffect(() => { pxPerSecRef.current = pxPerSec; }, [pxPerSec]);
 
-  // Ref so the mic tick can read isPlaying without stale closure
+  // Refs so mic tick can read playback state without stale closures
   const isPlayingRef = useRef(false);
   useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+  const isNotePlayingRef = useRef(false);
+  useEffect(() => { isNotePlayingRef.current = isNotePlaying; }, [isNotePlaying]);
+  const isMicTracePlayingRef = useRef(false);
+  useEffect(() => { isMicTracePlayingRef.current = isMicTracePlaying; }, [isMicTracePlaying]);
+  const playheadSecRef = useRef(0);
+  useEffect(() => { playheadSecRef.current = playheadSec; }, [playheadSec]);
 
   // Pending mic points flushed to state every ~6 frames to avoid per-frame re-renders
   const micPendingRef = useRef<Array<{ timeSec: number; midi: number }>>([]);
@@ -70,7 +99,121 @@ export default function TimelineEditor({
   const selectedNote = notes.find((n) => n.id === selectedId) ?? null;
 
   // ── Playback ──────────────────────────────────────────────────────────────
+  const saveDraft = useCallback(async () => {
+    if (!draftId) return;
+    setSaveStatus("saving");
+    try {
+      const res = await fetch(`/api/drafts/${draftId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes, bpm, gap }),
+      });
+      setSaveStatus(res.ok ? "saved" : "error");
+    } catch {
+      setSaveStatus("error");
+    }
+    setTimeout(() => setSaveStatus("idle"), 2000);
+  }, [draftId, notes, bpm, gap]);
+
+  const stopNotePlay = useCallback(() => {
+    notePlayCtxRef.current?.close();
+    notePlayCtxRef.current = null;
+    cancelAnimationFrame(rafRef.current);
+    setIsNotePlaying(false);
+  }, []);
+
+  const stopMicTracePlay = useCallback(() => {
+    micTracePlayCtxRef.current?.close();
+    micTracePlayCtxRef.current = null;
+    cancelAnimationFrame(rafRef.current);
+    setIsMicTracePlaying(false);
+  }, []);
+
+  const toggleMicTracePlay = useCallback(() => {
+    if (isMicTracePlaying) { stopMicTracePlay(); return; }
+    if (isPlaying) { audioRef.current?.pause(); videoRef.current?.pause(); cancelAnimationFrame(rafRef.current); setIsPlaying(false); }
+    if (isNotePlaying) stopNotePlay();
+
+    // Group trace points into continuous segments (gap > 200ms = new segment)
+    const pts = [...micTrace].sort((a, b) => a.timeSec - b.timeSec);
+    const segs: Array<{ start: number; end: number; midi: number }> = [];
+    let segStart = -1, segEnd = -1, segPitches: number[] = [];
+    for (const pt of pts) {
+      if (segStart < 0 || pt.timeSec - segEnd > 0.2) {
+        if (segStart >= 0) {
+          const sp = [...segPitches].sort((a, b) => a - b);
+          segs.push({ start: segStart, end: segEnd, midi: sp[Math.floor(sp.length / 2)] });
+        }
+        segStart = pt.timeSec; segEnd = pt.timeSec + 0.12; segPitches = [pt.midi];
+      } else {
+        segEnd = pt.timeSec + 0.12; segPitches.push(pt.midi);
+      }
+    }
+    if (segStart >= 0) {
+      const sp = [...segPitches].sort((a, b) => a - b);
+      segs.push({ start: segStart, end: segEnd, midi: sp[Math.floor(sp.length / 2)] });
+    }
+    if (segs.length === 0) return;
+
+    const ctx = new AudioContext();
+    micTracePlayCtxRef.current = ctx;
+    const offset = playheadSec;
+    micTracePlayStartRef.current = ctx.currentTime;
+    micTracePlayOffsetRef.current = offset;
+
+    for (const seg of segs) {
+      const startDelay = seg.start - offset;
+      if (startDelay + (seg.end - seg.start) < 0) continue;
+      const scheduleAt = ctx.currentTime + Math.max(0, startDelay);
+      const dur = seg.end - seg.start;
+      // Normalize octave to nearest note at this time
+      const nearestNote = notes.reduce<EditorNote | null>((best, n) => {
+        const mid = n.startSec + n.durationSec / 2;
+        const segMid = (seg.start + seg.end) / 2;
+        if (!best) return n;
+        return Math.abs(mid - segMid) < Math.abs((best.startSec + best.durationSec / 2) - segMid) ? n : best;
+      }, null);
+      let midi = seg.midi;
+      if (nearestNote) {
+        const pitchClass = ((seg.midi % 12) + 12) % 12;
+        const baseOctave = Math.floor(nearestNote.pitch / 12);
+        const candidates = [
+          (baseOctave - 1) * 12 + pitchClass,
+          baseOctave * 12 + pitchClass,
+          (baseOctave + 1) * 12 + pitchClass,
+        ];
+        midi = candidates.reduce((best, c) =>
+          Math.abs(c - nearestNote.pitch) < Math.abs(best - nearestNote.pitch) ? c : best
+        );
+      }
+      const hz = 440 * Math.pow(2, (midi - 69) / 12);
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.type = "sine"; osc.frequency.value = hz;
+      const release = Math.min(0.08, dur * 0.15);
+      gain.gain.setValueAtTime(0, scheduleAt);
+      gain.gain.linearRampToValueAtTime(0.25, scheduleAt + 0.02);
+      gain.gain.setValueAtTime(0.25, scheduleAt + dur - release);
+      gain.gain.exponentialRampToValueAtTime(0.001, scheduleAt + dur);
+      osc.start(scheduleAt); osc.stop(scheduleAt + dur + 0.05);
+    }
+
+    const endTime = segs[segs.length - 1].end;
+    setIsMicTracePlaying(true);
+    const tick = () => {
+      const c = micTracePlayCtxRef.current;
+      if (!c) return;
+      const songTime = micTracePlayOffsetRef.current + (c.currentTime - micTracePlayStartRef.current);
+      setPlayheadSec(songTime);
+      if (songTime >= endTime + 0.5) { stopMicTracePlay(); return; }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }, [isMicTracePlaying, isPlaying, isNotePlaying, micTrace, playheadSec, stopMicTracePlay, stopNotePlay]);
+
   const togglePlay = useCallback(() => {
+    if (isNotePlaying) stopNotePlay();
     const a = audioRef.current;
     if (!a) return;
     if (isPlaying) {
@@ -92,7 +235,56 @@ export default function TimelineEditor({
       };
       rafRef.current = requestAnimationFrame(tick);
     }
-  }, [isPlaying]);
+  }, [isPlaying, isNotePlaying, stopNotePlay]);
+
+  const toggleNotePlay = useCallback(() => {
+    if (isNotePlaying) { stopNotePlay(); return; }
+    if (isPlaying) {
+      audioRef.current?.pause();
+      videoRef.current?.pause();
+      cancelAnimationFrame(rafRef.current);
+      setIsPlaying(false);
+    }
+    const ctx = new AudioContext();
+    notePlayCtxRef.current = ctx;
+    const offset = playheadSec;
+    notePlayStartRef.current = ctx.currentTime;
+    notePlayOffsetRef.current = offset;
+
+    for (const note of notes) {
+      const startDelay = note.startSec - offset;
+      if (startDelay + note.durationSec < 0) continue;
+      const scheduleAt = ctx.currentTime + Math.max(0, startDelay);
+      const hz = 440 * Math.pow(2, (note.pitch - 69) / 12);
+      const dur = note.durationSec;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.value = hz;
+      const release = Math.min(0.08, dur * 0.15);
+      gain.gain.setValueAtTime(0, scheduleAt);
+      gain.gain.linearRampToValueAtTime(0.25, scheduleAt + 0.02);
+      gain.gain.setValueAtTime(0.25, scheduleAt + dur - release);
+      gain.gain.exponentialRampToValueAtTime(0.001, scheduleAt + dur);
+      osc.start(scheduleAt);
+      osc.stop(scheduleAt + dur + 0.05);
+    }
+
+    setMicTrace([]);
+    micPendingRef.current = [];
+    setIsNotePlaying(true);
+    const tick = () => {
+      const c = notePlayCtxRef.current;
+      if (!c) return;
+      const songTime = notePlayOffsetRef.current + (c.currentTime - notePlayStartRef.current);
+      setPlayheadSec(songTime);
+      if (songTime >= duration + 1) { stopNotePlay(); return; }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+  }, [isNotePlaying, isPlaying, playheadSec, notes, duration, stopNotePlay]);
 
   const seekTo = useCallback((sec: number) => {
     const clamped = Math.max(0, sec);
@@ -115,8 +307,10 @@ export default function TimelineEditor({
     gain.connect(ctx.destination);
     osc.type = "sine";
     osc.frequency.value = hz;
+    const release = Math.min(0.08, dur * 0.15);
     gain.gain.setValueAtTime(0, now);
     gain.gain.linearRampToValueAtTime(0.35, now + 0.02);
+    gain.gain.setValueAtTime(0.35, now + dur - release);
     gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
     osc.start(now);
     osc.stop(now + dur);
@@ -124,14 +318,14 @@ export default function TimelineEditor({
 
   // Auto-scroll playhead into view
   useEffect(() => {
-    if (!isPlaying || !scrollRef.current) return;
+    if ((!isPlaying && !isNotePlaying) || !scrollRef.current) return;
     const x = playheadSec * pxPerSec;
     const container = scrollRef.current;
     const visible = container.scrollLeft + container.clientWidth - KEYS_W;
     if (x > visible - 40 || x < container.scrollLeft) {
       container.scrollLeft = Math.max(0, x - 80);
     }
-  }, [isPlaying, playheadSec, pxPerSec]);
+  }, [isPlaying, isNotePlaying, playheadSec, pxPerSec]);
 
   // ── Microphone ────────────────────────────────────────────────────────────
   const startMic = useCallback(async (deviceId?: string) => {
@@ -167,14 +361,32 @@ export default function TimelineEditor({
     micFrameRef.current = 0;
     const tick = () => {
       analyser.getFloatTimeDomainData(buf);
-      const hz = detectPitch(buf, ctx.sampleRate);
-      const midi = hz > 0 ? hzToMidi(hz) : null;
-      const valid = midi !== null && midi >= MIN_PITCH && midi <= MAX_PITCH ? midi : null;
+      // RMS amplitude gate — reject silence/ambient noise below threshold
+      let rms = 0;
+      for (let i = 0; i < buf.length; i++) rms += buf[i] * buf[i];
+      rms = Math.sqrt(rms / buf.length);
+      const hz = rms >= micThresholdRef.current ? detectPitch(buf, ctx.sampleRate) : -1;
+      const rawMidi = hz > 0 ? hzToMidi(hz) : null;
+      const shifted = rawMidi !== null ? rawMidi + micOctaveShiftRef.current * 12 : null;
+      const valid = shifted !== null && shifted >= MIN_PITCH && shifted <= MAX_PITCH ? shifted : null;
       setMicMidi(valid);
 
-      // Record pitch when playing (~10 points/sec, every 6 frames at 60fps)
-      if (isPlayingRef.current && valid !== null) {
-        micPendingRef.current.push({ timeSec: audioRef.current?.currentTime ?? 0, midi: valid });
+      // Drive real-time tone from mic
+      if (micPlayEnabledRef.current && micPlayCtxRef.current && micPlayOscRef.current && micPlayGainRef.current) {
+        const mctx = micPlayCtxRef.current;
+        if (valid !== null) {
+          const hz = 440 * Math.pow(2, (valid - 69) / 12);
+          micPlayOscRef.current.frequency.setTargetAtTime(hz, mctx.currentTime, 0.04);
+          micPlayGainRef.current.gain.setTargetAtTime(0.2, mctx.currentTime, 0.1);
+        } else {
+          micPlayGainRef.current.gain.setTargetAtTime(0, mctx.currentTime, 0.1);
+        }
+      }
+
+      // Record pitch when any playback is active (~10 points/sec, every 6 frames at 60fps)
+      const anyPlaying = isPlayingRef.current || isNotePlayingRef.current || isMicTracePlayingRef.current;
+      if (anyPlaying && valid !== null) {
+        micPendingRef.current.push({ timeSec: playheadSecRef.current, midi: valid });
       }
       micFrameRef.current++;
       if (micFrameRef.current % 6 === 0 && micPendingRef.current.length > 0) {
@@ -195,6 +407,11 @@ export default function TimelineEditor({
       micStreamRef.current = null;
       analyserRef.current = null;
       audioCtxRef.current = null;
+      micPlayCtxRef.current?.close();
+      micPlayCtxRef.current = null;
+      micPlayOscRef.current = null;
+      micPlayGainRef.current = null;
+      setMicPlayEnabled(false);
       setMicMidi(null);
       setMicLabel("");
       setMicEnabled(false);
@@ -208,6 +425,35 @@ export default function TimelineEditor({
     }
   }, [micEnabled, micDeviceId, startMic]);
 
+  // ── Mic monitor tone ─────────────────────────────────────────────────────
+  const toggleMicPlay = useCallback(() => {
+    if (micPlayEnabled) {
+      if (micPlayGainRef.current && micPlayCtxRef.current) {
+        micPlayGainRef.current.gain.setTargetAtTime(0, micPlayCtxRef.current.currentTime, 0.05);
+      }
+      setTimeout(() => {
+        micPlayCtxRef.current?.close();
+        micPlayCtxRef.current = null;
+        micPlayOscRef.current = null;
+        micPlayGainRef.current = null;
+      }, 300);
+      setMicPlayEnabled(false);
+    } else {
+      const ctx = new AudioContext();
+      micPlayCtxRef.current = ctx;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      osc.start();
+      micPlayOscRef.current = osc;
+      micPlayGainRef.current = gain;
+      setMicPlayEnabled(true);
+    }
+  }, [micPlayEnabled]);
+
   // ── Apply mic trace to note pitches ──────────────────────────────────────
   const applyMicTrace = useCallback(() => {
     if (micTrace.length === 0) return;
@@ -217,8 +463,21 @@ export default function TimelineEditor({
           (p) => p.timeSec >= note.startSec && p.timeSec <= note.startSec + note.durationSec
         );
         if (pts.length === 0) return note;
-        const sorted = pts.map((p) => p.midi).sort((a, b) => a - b);
-        return { ...note, pitch: sorted[Math.floor(sorted.length / 2)] };
+        const rawMidis = pts.map((p) => p.midi).sort((a, b) => a - b);
+        const rawMedian = rawMidis[Math.floor(rawMidis.length / 2)];
+        // Normalize to the octave closest to the note's current pitch
+        // so male/female voices (an octave apart) both map correctly
+        const pitchClass = ((rawMedian % 12) + 12) % 12;
+        const baseOctave = Math.floor(note.pitch / 12);
+        const candidates = [
+          (baseOctave - 1) * 12 + pitchClass,
+          baseOctave * 12 + pitchClass,
+          (baseOctave + 1) * 12 + pitchClass,
+        ];
+        const normalized = candidates.reduce((best, c) =>
+          Math.abs(c - note.pitch) < Math.abs(best - note.pitch) ? c : best
+        );
+        return { ...note, pitch: Math.max(MIN_PITCH, Math.min(MAX_PITCH, normalized)) };
       })
     );
   }, [micTrace]);
@@ -230,6 +489,9 @@ export default function TimelineEditor({
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
       audioCtxRef.current?.close();
       previewCtxRef.current?.close();
+      notePlayCtxRef.current?.close();
+      micTracePlayCtxRef.current?.close();
+      micPlayCtxRef.current?.close();
     };
   }, []);
 
@@ -297,31 +559,27 @@ export default function TimelineEditor({
   );
 
   // ── Seek on grid single-click ─────────────────────────────────────────────
+  const addModeRef = useRef(false);
+  useEffect(() => { addModeRef.current = addMode; }, [addMode]);
+
   const handleGridClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (e.detail > 1) return; // skip double-click
       const rect = e.currentTarget.getBoundingClientRect();
-      const sec = (e.clientX - rect.left) / pxPerSec;
-      seekTo(sec);
+      if (addModeRef.current) {
+        const sec = Math.max(0, (e.clientX - rect.left) / pxPerSecRef.current);
+        const yRel = e.clientY - rect.top;
+        const pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, Math.round(MAX_PITCH - yRel / PX_PITCH)));
+        const id = crypto.randomUUID();
+        const newNote: EditorNote = { id, startSec: sec, durationSec: 0.3, pitch, syllable: "+", type: ":" };
+        setNotes((prev) => [...prev, newNote].sort((a, b) => a.startSec - b.startSec));
+        setSelectedId(id);
+        setTimeout(() => { syllableInputRef.current?.focus(); syllableInputRef.current?.select(); }, 0);
+      } else {
+        const sec = (e.clientX - rect.left) / pxPerSecRef.current;
+        seekTo(sec);
+      }
     },
-    [pxPerSec, seekTo]
-  );
-
-  // ── Add note on grid double-click ─────────────────────────────────────────
-  const handleGridDblClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const sec = Math.max(0, (e.clientX - rect.left) / pxPerSecRef.current);
-      const yRel = e.clientY - rect.top;
-      const pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, Math.round(MAX_PITCH - yRel / PX_PITCH)));
-      const id = crypto.randomUUID();
-      const newNote: EditorNote = { id, startSec: sec, durationSec: 0.3, pitch, syllable: "+", type: ":" };
-      setNotes((prev) => [...prev, newNote].sort((a, b) => a.startSec - b.startSec));
-      setSelectedId(id);
-      // Focus syllable input so user can type the syllable immediately
-      setTimeout(() => { syllableInputRef.current?.focus(); syllableInputRef.current?.select(); }, 0);
-    },
-    []
+    [seekTo]
   );
 
   // ── Split selected note ───────────────────────────────────────────────────
@@ -368,7 +626,7 @@ export default function TimelineEditor({
   const micY = micMidi !== null ? pitchToY(micMidi) + PX_PITCH / 2 : null;
 
   return (
-    <div className="flex flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden dark:border-zinc-700 dark:bg-zinc-900">
+    <div className="flex h-full flex-col rounded-xl border border-zinc-200 bg-white overflow-hidden dark:border-zinc-700 dark:bg-zinc-900">
       {/* ── Header ── */}
       <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-3 py-2 dark:border-zinc-700">
         <span className="truncate text-sm font-semibold text-zinc-700 dark:text-zinc-200">
@@ -395,6 +653,44 @@ export default function TimelineEditor({
             >
               🎤 {micEnabled ? (micLabel ? micLabel.split("(")[0].trim() : "Mic on") : "Mic"}
             </button>
+            {micEnabled && (
+              <label className="flex items-center gap-1 text-xs text-zinc-400" title="Umbral de volumen — subí para ignorar más ruido ambiente">
+                <span>Sens</span>
+                <input
+                  type="range" min={0.005} max={0.08} step={0.005} value={micThreshold}
+                  onChange={(e) => setMicThreshold(Number(e.target.value))}
+                  className="w-16 accent-green-500"
+                />
+              </label>
+            )}
+            {micEnabled && (
+              <div className="flex items-center gap-1 text-xs">
+                <button
+                  onClick={() => setMicOctaveShift((s) => Math.max(-2, s - 1))}
+                  className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-600 dark:hover:bg-zinc-800"
+                >↓8va</button>
+                <span className="w-6 text-center text-zinc-400">
+                  {micOctaveShift > 0 ? `+${micOctaveShift}` : micOctaveShift === 0 ? "0" : micOctaveShift}
+                </span>
+                <button
+                  onClick={() => setMicOctaveShift((s) => Math.min(2, s + 1))}
+                  className="rounded border border-zinc-300 px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-600 dark:hover:bg-zinc-800"
+                >↑8va</button>
+              </div>
+            )}
+            {micEnabled && (
+              <button
+                onClick={toggleMicPlay}
+                title="Escuchar pitch del mic en tiempo real"
+                className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                  micPlayEnabled
+                    ? "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-400"
+                    : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                }`}
+              >
+                🔊
+              </button>
+            )}
             {micDevices.length > 1 && (
               <select
                 value={micDeviceId}
@@ -415,6 +711,19 @@ export default function TimelineEditor({
               </select>
             )}
           </div>
+          {draftId && (
+            <button
+              onClick={saveDraft}
+              disabled={saveStatus === "saving"}
+              className={`rounded px-3 py-1 text-xs font-semibold transition-colors ${
+                saveStatus === "saved" ? "bg-green-600 text-white" :
+                saveStatus === "error" ? "bg-red-600 text-white" :
+                "bg-zinc-600 text-white hover:bg-zinc-700"
+              }`}
+            >
+              {saveStatus === "saving" ? "Guardando…" : saveStatus === "saved" ? "Guardado ✓" : saveStatus === "error" ? "Error ✗" : "💾 Guardar"}
+            </button>
+          )}
           <button
             onClick={() => onExport(notes, bpm, gap)}
             className="rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700"
@@ -444,6 +753,28 @@ export default function TimelineEditor({
               <polygon points="2,1 9,5 2,9" />
             </svg>
           )}
+        </button>
+        <button
+          onClick={() => setAddMode((v) => !v)}
+          title="Modo agregar nota — click en el grid para insertar"
+          className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold transition-colors ${
+            addMode
+              ? "bg-emerald-500 text-white hover:bg-emerald-600"
+              : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
+          }`}
+        >
+          +
+        </button>
+        <button
+          onClick={toggleNotePlay}
+          title="Reproducir solo notas (sin audio)"
+          className={`flex h-7 w-7 items-center justify-center rounded-full text-sm transition-colors ${
+            isNotePlaying
+              ? "bg-amber-500 text-white hover:bg-amber-600"
+              : "bg-zinc-200 text-zinc-600 hover:bg-zinc-300 dark:bg-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-600"
+          }`}
+        >
+          ♪
         </button>
         <span className="font-mono text-zinc-500">{playheadSec.toFixed(2)} s</span>
 
@@ -501,6 +832,16 @@ export default function TimelineEditor({
           <>
             <span className="text-xs text-zinc-400">{micTrace.length} pts</span>
             <button
+              onClick={toggleMicTracePlay}
+              className={`rounded px-2 py-0.5 text-xs font-semibold transition-colors ${
+                isMicTracePlaying
+                  ? "bg-amber-500 text-white hover:bg-amber-600"
+                  : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              }`}
+            >
+              {isMicTracePlaying ? "■ Mic" : "♪ Mic"}
+            </button>
+            <button
               onClick={applyMicTrace}
               className="rounded bg-green-600 px-2 py-0.5 text-xs font-semibold text-white hover:bg-green-700"
             >
@@ -527,7 +868,7 @@ export default function TimelineEditor({
       )}
 
       {/* ── Piano roll ── */}
-      <div ref={scrollRef} className="overflow-auto" style={{ maxHeight: 480 }}>
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto">
         <div style={{ width: totalW, height: ROLL_H, position: "relative" }}>
 
           {/* Piano keys */}
@@ -548,7 +889,11 @@ export default function TimelineEditor({
                       : "bg-white text-zinc-400 border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700"
                   }`}
                 >
-                  {p % 12 === 0 && <span className="ml-1">{noteName(p)}</span>}
+                  {!black && (
+                    <span className="ml-1">
+                      {p % 12 === 0 ? noteName(p) : NOTE_NAMES[p % 12]}
+                    </span>
+                  )}
                 </div>
               );
             })}
@@ -556,9 +901,8 @@ export default function TimelineEditor({
 
           {/* Grid rows + beat lines */}
           <div
-            style={{ position: "absolute", left: KEYS_W, top: 0, right: 0, height: ROLL_H, zIndex: 1 }}
+            style={{ position: "absolute", left: KEYS_W, top: 0, right: 0, height: ROLL_H, zIndex: 1, cursor: addMode ? "crosshair" : "default" }}
             onClick={handleGridClick}
-            onDoubleClick={handleGridDblClick}
           >
             {Array.from({ length: MAX_PITCH - MIN_PITCH + 1 }, (_, i) => {
               const p = MAX_PITCH - i;

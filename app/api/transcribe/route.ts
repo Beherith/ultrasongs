@@ -8,6 +8,11 @@ export interface WordTimestamp {
   start: number;
   end: number;
   midi: number;
+  pitchFrames?: Array<{
+    time: number;
+    midi: number;
+    confidence: number;
+  }>;
 }
 
 export interface Pause {
