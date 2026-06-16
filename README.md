@@ -6,11 +6,14 @@ Generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` son
 
 **Pipeline:** Demucs vocal separation → torchcrepe pitch detection → faster-whisper transcription → fuzzy lyric alignment → BPM-based beat mapping → `.txt` export with optional visual timeline editor.
 
+**Runs in the browser** — no desktop app to install. Clone the repo, run two commands, open `localhost:3000`.
+
 ## Features
 
+- Runs in the browser — no installer, no Electron, no desktop app
 - Upload any audio or video format (MP4, MKV, MP3, FLAC, WAV, …)
 - Automatic vocal separation via [Demucs](https://github.com/facebookresearch/demucs) `htdemucs`
-- Per-word MIDI pitch via [torchcrepe](https://github.com/maxrmorrison/torchcrepe)
+- Per-word MIDI pitch via [torchcrepe](https://github.com/maxrmorrison/torchcrepe) — neural pitch estimation tuned for singing voices
 - Transcription via [faster-whisper](https://github.com/guillaumekynast/faster-whisper), biased by your provided lyrics
 - Fuzzy Levenshtein alignment of Whisper words → user lyrics
 - BPM detection + beat-accurate note placement
