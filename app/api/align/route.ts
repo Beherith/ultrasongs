@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { existsSync, writeFile } from "fs/promises";
+import { existsSync } from "fs";
+import { writeFile } from "fs/promises";
 import { alignLyrics } from "@/app/lib/align";
 import { detectBpm } from "@/app/lib/ultrastar";
 import path from "path";
