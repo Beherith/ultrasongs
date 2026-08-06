@@ -92,7 +92,7 @@ export default function DraftsSidebar({
       {/* Logo → home */}
       <button
         onClick={onHome}
-        title="Ir al inicio"
+        title="Go to home"
         className="flex h-26 w-full shrink-0 items-center border-b border-zinc-200 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800 mx-auto"
       >
         <Image
@@ -107,7 +107,7 @@ export default function DraftsSidebar({
       <>
         <div className="px-3 py-2">
           <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
-            Borradores
+            Drafts
           </span>
         </div>
 
@@ -130,12 +130,12 @@ export default function DraftsSidebar({
                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
               />
             </svg>
-            Importar .txt
+            Import .txt
           </button>
           {showImport && (
             <div className="mt-1.5 flex flex-col gap-1.5 rounded-lg border border-zinc-200 bg-white p-2 dark:border-zinc-700 dark:bg-zinc-800">
               <label className="text-[10px] text-zinc-500">
-                Archivo .txt *
+                .txt file *
                 <input
                   ref={txtRef}
                   type="file"
@@ -145,7 +145,7 @@ export default function DraftsSidebar({
                 />
               </label>
               <label className="text-[10px] text-zinc-500">
-                Archivo .mp3 *
+                .mp3 file *
                 <input
                   ref={mp3Ref}
                   type="file"
@@ -155,7 +155,7 @@ export default function DraftsSidebar({
                 />
               </label>
               <label className="text-[10px] text-zinc-500">
-                Video (opcional)
+                Video (optional)
                 <input
                   ref={vidRef}
                   type="file"
@@ -169,7 +169,7 @@ export default function DraftsSidebar({
                 disabled={!importTxt || !importMp3 || importing}
                 className="mt-0.5 rounded bg-zinc-900 px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
               >
-                {importing ? "Importando…" : "Importar"}
+                {importing ? "Importing…" : "Import"}
               </button>
             </div>
           )}
@@ -178,7 +178,7 @@ export default function DraftsSidebar({
         <div className="flex flex-col gap-1 overflow-y-auto px-2 pt-2 pb-4">
           {drafts.length === 0 && (
             <p className="px-1 py-4 text-center text-xs text-zinc-400">
-              Sin borradores
+              No drafts
             </p>
           )}
           {drafts.map((d) => (
@@ -195,7 +195,7 @@ export default function DraftsSidebar({
               }`}
             >
               <span className="truncate text-xs font-semibold text-zinc-800 dark:text-zinc-100">
-                {d.title || "Sin título"}
+                {d.title || "Untitled"}
               </span>
               <span className="truncate text-[10px] text-zinc-500 dark:text-zinc-400">
                 {d.artist || "—"}
@@ -215,7 +215,7 @@ export default function DraftsSidebar({
               <button
                 onClick={(e) => handleDelete(e, d.id)}
                 disabled={deleting === d.id}
-                title="Eliminar borrador"
+                title="Delete draft"
                 className="absolute right-2 top-2 hidden rounded p-0.5 text-zinc-300 hover:bg-red-50 hover:text-red-500 group-hover:flex dark:text-zinc-600 dark:hover:bg-red-950 dark:hover:text-red-400"
               >
                 <svg

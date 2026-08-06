@@ -243,7 +243,7 @@ export default function Home() {
       // 1 — upload (skip if audio already on server from a draft/prior upload)
       if (pendingAudioFile) {
         setPhase("uploading");
-        setCurrentStage("Subiendo archivo…");
+        setCurrentStage("Uploading file…");
         uploadRef.current = null;
         const fd = new FormData();
         fd.append("file", pendingAudioFile);
@@ -256,8 +256,8 @@ export default function Home() {
 
       // 2 — transcribe via SSE stream
       setPhase("transcribing");
-      setCurrentStage("Conectando…");
-      if (!uploadRef.current) throw new Error("No hay audio para procesar");
+      setCurrentStage("Connecting…");
+      if (!uploadRef.current) throw new Error("No audio to process");
 
       // Short timeout only for the initial connection — once the stream starts
       // we clear it so it never cancels an in-progress transcription.
@@ -275,7 +275,7 @@ export default function Home() {
       } catch (fetchErr) {
         clearTimeout(connectTimeout);
         const isAbort = fetchErr instanceof DOMException && fetchErr.name === "AbortError";
-        throw new Error(isAbort ? "El servicio no respondió en 60 s — ¿está corriendo Python?" : "No se pudo conectar al servicio de transcripción");
+        throw new Error(isAbort ? "Service did not respond in 60 s — is Python running?" : "Could not connect to transcription service");
       }
       clearTimeout(connectTimeout); // connected — release the abort signal
 
@@ -292,7 +292,7 @@ export default function Home() {
         try {
           chunk = await reader.read();
         } catch {
-          throw new Error("Se cortó la conexión con el servicio durante el procesamiento");
+          throw new Error("Connection to service was interrupted during processing");
         }
         if (chunk.done) break;
 
@@ -310,13 +310,13 @@ export default function Home() {
         }
       }
 
-      if (!result) throw new Error("El servicio no devolvió resultado");
+      if (!result) throw new Error("Service did not return a result");
 
       transcribeRef.current = result;
       if (result.vocalsPath) uploadRef.current!.vocalsPath = result.vocalsPath;
       if (result.accompanimentPath) uploadRef.current!.accompanimentPath = result.accompanimentPath;
 
-      setCurrentStage("Alineando letra...");
+      setCurrentStage("Aligning lyrics...");
       const alignRes = await fetch("/api/align", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -336,12 +336,12 @@ export default function Home() {
         setVideoUrl(`/api/video?path=${encodeURIComponent(uploadRef.current!.videoPath)}`);
       }
 
-      setCurrentStage("Listo");
+      setCurrentStage("Ready");
       setTranscribed(true);
       setReprocessOpen(false);
       setPhase("idle");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falló el procesamiento");
+      setError(err instanceof Error ? err.message : "Processing failed");
       setPhase("error");
     }
   }, [pendingAudioFile, pendingVideoFile, lyrics]);
@@ -374,7 +374,7 @@ export default function Home() {
       setDownloadUrl(url);
       setPhase("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falló la generación");
+      setError(err instanceof Error ? err.message : "Generation failed");
       setPhase("error");
     }
   }, [lyrics, title, artist]);
@@ -402,7 +402,7 @@ export default function Home() {
       setAlignResult(await res.json());
       setEditorOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falló el alineado");
+      setError(err instanceof Error ? err.message : "Alignment failed");
     } finally {
       setAligning(false);
     }
@@ -432,7 +432,7 @@ export default function Home() {
       setDownloadUrl(url);
       setPhase("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falló la generación");
+      setError(err instanceof Error ? err.message : "Generation failed");
       setPhase("error");
     }
   }, [title, artist]);
@@ -492,7 +492,7 @@ export default function Home() {
           <img src="/ultrasong.png" alt="Ultrasong" className="w-80 object-contain drop-shadow-md" />
           <div className="flex flex-col items-center gap-1 text-center">
             <p className="text-sm text-zinc-400 dark:text-zinc-500">
-              Generá archivos Ultrastar Deluxe desde audio + letra
+              Generate Ultrastar Deluxe files from audio + lyrics
             </p>
           </div>
           <button
@@ -515,7 +515,7 @@ export default function Home() {
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
             </svg>
-            Nueva canción
+            New song
           </button>
         </div>
       )}
@@ -531,9 +531,9 @@ export default function Home() {
               <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
-              Volver
+              Back
             </button>
-            <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">Nueva canción</h2>
+            <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">New song</h2>
           </div>
 
           <div className="flex flex-col gap-2">
@@ -541,7 +541,7 @@ export default function Home() {
             <FileUpload onFile={handleFile} disabled={busy} filename={filename || undefined} />
             <div className="flex items-center gap-2">
               <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
-              <span className="text-xs text-zinc-400">+ video opcional (sin audio)</span>
+              <span className="text-xs text-zinc-400">+ optional video (no audio)</span>
               <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
             </div>
             <FileUpload
@@ -555,7 +555,7 @@ export default function Home() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Info &amp; letra</h3>
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Info &amp; lyrics</h3>
             <LyricsInput
               title={title} artist={artist} lyrics={lyrics}
               onTitle={setTitle} onArtist={setArtist} onLyrics={setLyrics}
@@ -568,7 +568,7 @@ export default function Home() {
             disabled={!canProcess}
             className="flex items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
           >
-            {busy ? <><Spinner />{phase === "uploading" ? "Subiendo…" : "Procesando…"}</> : "Procesar"}
+            {busy ? <><Spinner />{phase === "uploading" ? "Uploading…" : "Processing…"}</> : "Process"}
           </button>
 
           {(phase === "uploading" || phase === "transcribing") && currentStage && (
@@ -577,7 +577,7 @@ export default function Home() {
               <div className="flex min-w-0 flex-1 flex-col">
                 <span className="text-xs font-medium text-zinc-700 dark:text-zinc-200">{currentStage}</span>
                 {phase === "transcribing" && transcribeElapsed > 0 && (
-                  <span className="text-[10px] text-zinc-400">{fmtTime(transcribeElapsed)} transcurrido</span>
+                  <span className="text-[10px] text-zinc-400">{fmtTime(transcribeElapsed)} elapsed</span>
                 )}
               </div>
             </div>
@@ -633,7 +633,7 @@ export default function Home() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
                 </svg>
               )}
-              Editar Timeline
+              Edit Timeline
             </button>
           </div>
 
@@ -647,7 +647,7 @@ export default function Home() {
             <svg className={`h-4 w-4 transition-transform ${reprocessOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
             </svg>
-            Modificar / Re-procesar
+            Modify / Re-process
           </button>
 
           {/* Collapsible re-process form */}
@@ -658,7 +658,7 @@ export default function Home() {
                 <FileUpload onFile={handleFile} disabled={busy} filename={filename || undefined} />
                 <div className="flex items-center gap-2">
                   <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
-                  <span className="text-xs text-zinc-400">+ video opcional (sin audio)</span>
+                  <span className="text-xs text-zinc-400">+ optional video (no audio)</span>
                   <div className="h-px flex-1 bg-zinc-200 dark:bg-zinc-700" />
                 </div>
                 <FileUpload
@@ -672,7 +672,7 @@ export default function Home() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Info &amp; letra</h3>
+                <h3 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Info &amp; lyrics</h3>
                 <LyricsInput
                   title={title} artist={artist} lyrics={lyrics}
                   onTitle={setTitle} onArtist={setArtist} onLyrics={setLyrics}
@@ -690,7 +690,7 @@ export default function Home() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
                   </svg>
                 )}
-                {currentDraftId ? "Actualizar borrador" : "Guardar borrador"}
+                {currentDraftId ? "Update draft" : "Save draft"}
               </button>
 
               <button
@@ -698,7 +698,7 @@ export default function Home() {
                 disabled={!canProcess}
                 className="flex items-center justify-center gap-2 rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
               >
-                {busy ? <><Spinner />{phase === "uploading" ? "Subiendo…" : "Procesando…"}</> : "Re-procesar"}
+                {busy ? <><Spinner />{phase === "uploading" ? "Uploading…" : "Processing…"}</> : "Re-process"}
               </button>
 
               {(phase === "uploading" || phase === "transcribing") && currentStage && (
@@ -707,7 +707,7 @@ export default function Home() {
                   <div className="flex min-w-0 flex-1 flex-col">
                     <span className="text-xs font-medium text-zinc-700 dark:text-zinc-200">{currentStage}</span>
                     {phase === "transcribing" && transcribeElapsed > 0 && (
-                      <span className="text-[10px] text-zinc-400">{fmtTime(transcribeElapsed)} transcurrido</span>
+                      <span className="text-[10px] text-zinc-400">{fmtTime(transcribeElapsed)} elapsed</span>
                     )}
                   </div>
                 </div>

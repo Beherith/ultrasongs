@@ -344,7 +344,7 @@ export default function TimelineEditor({
     micStreamRef.current = stream;
 
     const track = stream.getAudioTracks()[0];
-    setMicLabel(track.label || "Micrófono");
+    setMicLabel(track.label || "Microphone");
 
     // Enumerate after getUserMedia so labels are populated (browser policy)
     const all = await navigator.mediaDevices.enumerateDevices();
@@ -654,7 +654,7 @@ export default function TimelineEditor({
               🎤 {micEnabled ? (micLabel ? micLabel.split("(")[0].trim() : "Mic on") : "Mic"}
             </button>
             {micEnabled && (
-              <label className="flex items-center gap-1 text-xs text-zinc-400" title="Umbral de volumen — subí para ignorar más ruido ambiente">
+              <label className="flex items-center gap-1 text-xs text-zinc-400" title="Volume threshold — raise to ignore more ambient noise">
                 <span>Sens</span>
                 <input
                   type="range" min={0.005} max={0.08} step={0.005} value={micThreshold}
@@ -681,7 +681,7 @@ export default function TimelineEditor({
             {micEnabled && (
               <button
                 onClick={toggleMicPlay}
-                title="Escuchar pitch del mic en tiempo real"
+                title="Listen to mic pitch in real time"
                 className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
                   micPlayEnabled
                     ? "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-400"
@@ -705,7 +705,7 @@ export default function TimelineEditor({
               >
                 {micDevices.map((d) => (
                   <option key={d.deviceId} value={d.deviceId}>
-                    {d.label || `Micrófono ${d.deviceId.slice(0, 6)}`}
+                    {d.label || `Microphone ${d.deviceId.slice(0, 6)}`}
                   </option>
                 ))}
               </select>
@@ -721,7 +721,7 @@ export default function TimelineEditor({
                 "bg-zinc-600 text-white hover:bg-zinc-700"
               }`}
             >
-              {saveStatus === "saving" ? "Guardando…" : saveStatus === "saved" ? "Guardado ✓" : saveStatus === "error" ? "Error ✗" : "💾 Guardar"}
+              {saveStatus === "saving" ? "Saving…" : saveStatus === "saved" ? "Saved ✓" : saveStatus === "error" ? "Error ✗" : "💾 Save"}
             </button>
           )}
           <button
@@ -756,7 +756,7 @@ export default function TimelineEditor({
         </button>
         <button
           onClick={() => setAddMode((v) => !v)}
-          title="Modo agregar nota — click en el grid para insertar"
+          title="Add note mode — click on the grid to insert"
           className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold transition-colors ${
             addMode
               ? "bg-emerald-500 text-white hover:bg-emerald-600"
@@ -767,7 +767,7 @@ export default function TimelineEditor({
         </button>
         <button
           onClick={toggleNotePlay}
-          title="Reproducir solo notas (sin audio)"
+          title="Play notes only (no audio)"
           className={`flex h-7 w-7 items-center justify-center rounded-full text-sm transition-colors ${
             isNotePlaying
               ? "bg-amber-500 text-white hover:bg-amber-600"
@@ -845,13 +845,13 @@ export default function TimelineEditor({
               onClick={applyMicTrace}
               className="rounded bg-green-600 px-2 py-0.5 text-xs font-semibold text-white hover:bg-green-700"
             >
-              Aplicar mic
+              Apply mic
             </button>
             <button
               onClick={() => { setMicTrace([]); micPendingRef.current = []; }}
               className="rounded border border-zinc-300 px-2 py-0.5 text-xs text-zinc-500 hover:bg-zinc-100 dark:border-zinc-600 dark:hover:bg-zinc-800"
             >
-              Limpiar
+              Clear
             </button>
           </>
         )}
