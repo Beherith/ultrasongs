@@ -280,7 +280,7 @@ async def transcribe(mp3_path: str = Form(...), lyrics: str = Form("")):
 
                 audio, sr = await asyncio.to_thread(load_audio)
 
-                await queue.put(sse("Separando voz de la música…"))
+                await queue.put(sse("Separating vocals from music…"))
                 vocals, accompaniment, out_sr = await asyncio.to_thread(separate_all, audio, sr)
 
                 if DEVICE == "cuda":
