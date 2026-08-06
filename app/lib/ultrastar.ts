@@ -1,6 +1,7 @@
 import ffmpegInstaller from "@ffmpeg-installer/ffmpeg";
 import ffmpeg from "fluent-ffmpeg";
 import MusicTempo from "music-tempo";
+import { statSync } from "fs";
 
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
@@ -56,22 +57,33 @@ export function buildUltrastarTxt(notes: UltrastarNote[], meta: UltrastarMeta): 
 function extractPcm(mp3Path: string, sampleRate = 44100): Promise<Float32Array> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
 
-    ffmpeg(mp3Path)
+    const cmd = ffmpeg(mp3Path)
       .noVideo()
       .audioChannels(1)
       .audioFrequency(sampleRate)
       .audioCodec("pcm_f32le")
       .format("f32le")
-      .on("error", reject)
-      .pipe()
+      .on("error", (err) => {
+        const stderr = Buffer.concat(stderrChunks).toString().trim();
+        const msg = stderr ? `${err.message}\nFFmpeg stderr:\n${stderr}` : err.message;
+        reject(Object.assign(new Error(msg), { cause: err }));
+      })
+      .on("stderr", (line: string) => stderrChunks.push(Buffer.from(line + "\n")));
+
+    cmd.pipe()
       .on("data", (chunk: Buffer) => chunks.push(chunk))
       .on("end", () => {
         const buf = Buffer.concat(chunks);
         const floats = new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
         resolve(floats);
       })
-      .on("error", reject);
+      .on("error", (err) => {
+        const stderr = Buffer.concat(stderrChunks).toString().trim();
+        const msg = stderr ? `${err.message}\nFFmpeg stderr:\n${stderr}` : err.message;
+        reject(Object.assign(new Error(msg), { cause: err }));
+      });
   });
 }
 
@@ -80,10 +92,33 @@ function extractPcm(mp3Path: string, sampleRate = 44100): Promise<Float32Array> 
  * Returns { bpm, beats } where beats are timestamps in seconds.
  */
 export async function detectBpm(mp3Path: string): Promise<{ bpm: number; beats: number[] }> {
-  const samples = await extractPcm(mp3Path);
-  // MusicTempo expects a plain Array or Float32Array of non-interleaved mono float32 PCM
-  const mt = new MusicTempo(samples);
-  return { bpm: parseFloat(String(mt.tempo)), beats: mt.beats };
+  try {
+    const stats = statSync(mp3Path);
+    console.log(`[detectBpm] File: ${mp3Path}, size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+
+    console.log("[detectBpm] Extracting PCM via FFmpeg...");
+    const samples = await extractPcm(mp3Path);
+    console.log(`[detectBpm] PCM extracted: ${samples.length} samples (~${(samples.length / 44100).toFixed(1)}s)`);
+
+    console.log("[detectBpm] Running MusicTempo analysis...");
+    const mt = new MusicTempo(samples);
+    console.log("[detectBpm] MusicTempo constructor succeeded, accessing tempo...");
+    const bpm = parseFloat(String(mt.tempo));
+    console.log(`[detectBpm] Detected BPM: ${bpm}, beats: ${mt.beats.length}`);
+    return { bpm, beats: mt.beats };
+  } catch (err) {
+    console.error("[detectBpm] Tempo extraction failed, using fallback 120 BPM");
+    if (err instanceof Error) {
+      console.error(`[detectBpm]   name:    ${err.name}`);
+      console.error(`[detectBpm]   message: ${err.message}`);
+      console.error(`[detectBpm]   stack:   ${err.stack ?? "(no stack)"}`);
+      console.error(`[detectBpm]   cause:   ${err.cause ?? "(none)"}`);
+    } else {
+      console.error(`[detectBpm]   type:    ${typeof err}`);
+      console.error(`[detectBpm]   value:   ${JSON.stringify(err)}`);
+    }
+    return { bpm: 120, beats: [] };
+  }
 }
 
 export interface ParsedUltrastar {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFile } from "fs/promises";
+import { readFile, writeFile } from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
 import JSZip from "jszip";
@@ -122,6 +122,12 @@ export async function POST(request: NextRequest) {
     const mp3Filename = path.basename(mp3);
     const videoFilename = videoPath ? path.basename(videoPath) : undefined;
     const txt = buildUltrastarTxt(ultraNotes, { title, artist, mp3: mp3Filename, bpm, gap, video: videoFilename });
+
+    // Save generation result as JSON
+    const jsonPath = path.join(path.dirname(mp3), path.basename(mp3, ".mp3")) + "_generate.json";
+    const genResult = { title, artist, bpm, gap, mp3Filename, videoFilename, notes: ultraNotes, txt };
+    await writeFile(jsonPath, JSON.stringify(genResult, null, 2));
+    console.log(`[generate] Saved result: ${jsonPath}`);
 
     const zip = new JSZip();
     zip.file(`${title}.txt`, txt);

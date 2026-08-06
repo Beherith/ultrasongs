@@ -336,15 +336,21 @@ async def transcribe(mp3_path: str = Form(...), lyrics: str = Form("")):
 
                 words, language = await asyncio.to_thread(do_whisper)
 
+                result = {
+                    "done": True,
+                    "words": words,
+                    "language": language,
+                    "vocalsPath": vocals_mp3_path,
+                    "accompanimentPath": acc_mp3_path,
+                    "pauses": pauses,
+                }
+                json_path = base + ".json"
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(result, f, ensure_ascii=False, indent=2)
+                print(f"[transcribe] Saved result: {json_path}")
+
                 await queue.put(
-                    "data: " + json.dumps({
-                        "done": True,
-                        "words": words,
-                        "language": language,
-                        "vocalsPath": vocals_mp3_path,
-                        "accompanimentPath": acc_mp3_path,
-                        "pauses": pauses,
-                    }) + "\n\n"
+                    "data: " + json.dumps(result) + "\n\n"
                 )
 
             except Exception as exc:

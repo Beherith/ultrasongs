@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { existsSync } from "fs";
+import { existsSync, writeFile } from "fs/promises";
 import { alignLyrics } from "@/app/lib/align";
 import { detectBpm } from "@/app/lib/ultrastar";
+import path from "path";
 import type { WordTimestamp, Pause } from "@/app/api/transcribe/route";
 import type { EditorNote } from "@/app/lib/editorNote";
 
@@ -46,7 +47,14 @@ export async function POST(request: NextRequest) {
     const firstStart = notes[0]?.startSec ?? 0;
     const gap = Math.max(0, firstStart * 1000 - 500);
 
-    return NextResponse.json({ notes, bpm, gap, duration });
+    const result = { notes, bpm, gap, duration };
+
+    // Save alignment result as JSON
+    const jsonPath = path.join(path.dirname(mp3), path.basename(mp3, ".mp3")) + "_alignment.json";
+    await writeFile(jsonPath, JSON.stringify(result, null, 2));
+    console.log(`[align] Saved alignment: ${jsonPath}`);
+
+    return NextResponse.json(result);
   } catch (err) {
     console.error("[align]", err);
     return NextResponse.json(
