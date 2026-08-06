@@ -22,7 +22,48 @@ interface WordWithPitch extends WordTimestamp {
 const MAX_FORWARD_SEARCH_SEC = 90;
 const MAX_IN_LINE_GAP_SEC = 4;
 
-/** Levenshtein distance between two strings. */
+/**
+ * Phonetic substitution cost between two characters.
+ * Groups are based on articulation class and common ASR confusions.
+ * Returns 0 for identical, 1 for completely different.
+ */
+function phoneticCost(x: string, y: string): number {
+  if (x === y) return 0;
+  const groups: string[][] = [
+    ["a", "e", "i"],       // front vowels
+    ["o", "u"],             // back vowels
+    ["s", "z", "c"],        // sibilants / voiceless-voiced
+    ["t", "d"],             // alveolar stops
+    ["p", "b"],             // bilabial stops
+    ["k", "g"],             // velar stops
+    ["f", "v", "w"],        // labiodental / bilabial approximant
+    ["m", "n"],             // nasals
+    ["l", "r"],             // liquids
+    ["y", "i"],             // palatal / front vowel
+    ["h", "j"],             // glottal / palatal
+    ["b", "v"],             // bilabial-labiodental confusion
+    ["d", "th"],            // alveolar-dental (single-char proxy)
+  ];
+  for (const g of groups) {
+    const ix = g.indexOf(x);
+    const iy = g.indexOf(y);
+    if (ix >= 0 && iy >= 0) {
+      return 0.3 + 0.15 * Math.abs(ix - iy); // same group: 0.3..0.45
+    }
+  }
+  // Cross-group phonetic similarities
+  const cross: [string, string][] = [
+    ["a", "o"], ["a", "u"], ["e", "i"], ["e", "o"], ["i", "y"],
+    ["s", "sh"], ["z", "zh"], ["f", "ph"], ["c", "k"], ["q", "k"],
+    ["w", "u"], ["r", "l"], ["b", "p"], ["d", "t"], ["g", "k"],
+  ];
+  for (const [a, b] of cross) {
+    if ((x === a && y === b) || (x === b && y === a)) return 0.4;
+  }
+  return 1;
+}
+
+/** Weighted Levenshtein distance using phonetic substitution costs. */
 function levenshtein(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
@@ -32,10 +73,12 @@ function levenshtein(a: string, b: string): number {
 
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
-      dp[i][j] =
-        a[i - 1] === b[j - 1]
-          ? dp[i - 1][j - 1]
-          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      const subCost = phoneticCost(a[i - 1], b[j - 1]);
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,                // deletion
+        dp[i][j - 1] + 1,                // insertion
+        dp[i - 1][j - 1] + subCost       // substitution (phonetic)
+      );
     }
   }
 
@@ -56,8 +99,8 @@ function normalize(w: string): string {
  */
 function wordScore(lNorm: string, wNorm: string): number {
   if (wNorm === lNorm) return 0;
-  if (lNorm.length >= 3 && wNorm.length > lNorm.length && wNorm.endsWith(lNorm)) return 0.05;
-  if (lNorm.length >= 3 && wNorm.startsWith(lNorm)) return 0.1;
+  if (lNorm.length >= 3 && wNorm.length > lNorm.length && wNorm.endsWith(lNorm)) return 0.03;
+  if (lNorm.length >= 3 && wNorm.startsWith(lNorm)) return 0.06;
 
   const dist = levenshtein(lNorm, wNorm);
   return dist / Math.max(lNorm.length, wNorm.length, 1);
@@ -65,9 +108,9 @@ function wordScore(lNorm: string, wNorm: string): number {
 
 function maxTextScore(lNorm: string): number {
   if (lNorm.length <= 2) return 0.05;
-  if (lNorm.length === 3) return 0.26;
-  if (lNorm.length <= 5) return 0.42;
-  return 0.45;
+  if (lNorm.length === 3) return 0.35;
+  if (lNorm.length <= 5) return 0.55;
+  return 0.55;
 }
 
 function matchLine(
