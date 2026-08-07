@@ -236,6 +236,41 @@ function matchLine(
   let lmt = lastMatchTime;
   const matchedIndices: Array<number | null> = [];
 
+  // ── Anchor detection: find exact matches to establish temporal guardrails ──
+
+  const rawAnchors: Array<{ pos: number; idx: number }> = [];
+  for (let wi = 0; wi < lineWords.length; wi++) {
+    const lNorm = normalize(lineWords[wi]);
+    if (!lNorm) continue;
+    for (let i = ss; i < whisperWords.length; i++) {
+      const wStart = whisperWords[i].start;
+      if (lmt >= 0 && wStart > lmt + MAX_FORWARD_SEARCH_SEC) break;
+      if (lmt < 0 && wStart > MAX_FORWARD_SEARCH_SEC) break;
+      if (whisperNorm[i] === lNorm) {
+        rawAnchors.push({ pos: wi, idx: i });
+        break;
+      }
+    }
+  }
+
+  const consistentAnchors: Array<{ pos: number; idx: number }> = [];
+  for (const a of rawAnchors) {
+    if (consistentAnchors.length > 0) {
+      const prev = consistentAnchors[consistentAnchors.length - 1];
+      if (a.idx <= prev.idx || whisperWords[a.idx].start < whisperWords[prev.idx].start) continue;
+    }
+    consistentAnchors.push(a);
+  }
+
+  const anchorMap = new Map<number, number>();
+  for (const a of consistentAnchors) {
+    anchorMap.set(a.pos, a.idx);
+  }
+
+  if (consistentAnchors.length > 0) {
+    log("match:anchors", `  Found ${consistentAnchors.length} anchor(s): ${consistentAnchors.map(a => `"${lineWords[a.pos]}"→Whisper[${a.idx}]`).join(", ")}`);
+  }
+
   for (let wi = 0; wi < lineWords.length; wi++) {
     const lw = lineWords[wi];
     const lNorm = normalize(lw);
@@ -278,6 +313,12 @@ function matchLine(
     for (let i = ss; i < whisperWords.length; i++) {
       const wStart = whisperWords[i].start;
 
+      const nextAnchorIdx = anchorMap.get(wi + 1);
+      if (nextAnchorIdx !== undefined && wStart > whisperWords[nextAnchorIdx].end) {
+        log("match:word", `    → Whisper[${i}] "${whisperWords[i].word}" at ${wStart.toFixed(2)}s PASSES anchor for "${lineWords[wi + 1]}" (Whisper[${nextAnchorIdx}] ends ${whisperWords[nextAnchorIdx].end.toFixed(2)}s), stopping search`);
+        break;
+      }
+
       if (lmt >= 0 && wStart > lmt + MAX_FORWARD_SEARCH_SEC) {
         log("match:word", `    → Whisper[${i}] "${whisperWords[i].word}" at ${wStart.toFixed(2)}s EXCEEDS forward search (${lmt.toFixed(2)} + ${MAX_FORWARD_SEARCH_SEC}s = ${searchEnd.toFixed(2)}s), stopping search`);
         break;
@@ -296,9 +337,9 @@ function matchLine(
       candidatesPassedText++;
 
       const jump = lmt >= 0
-        ? Math.max(0, wStart - lmt - 20)
+        ? Math.max(0, wStart - lmt - 3)
         : Math.max(0, wStart - 20);
-      const score = textScore + jump * (lmt >= 0 ? 0.015 : 0.05);
+      const score = textScore + jump * (lmt >= 0 ? 0.03 : 0.05);
 
       if (i - ss < 5 || score < bestScore) {
         log("match:word", `      Whisper[${i}] "${whisperWords[i].word}" (${whisperNorm[i]}): textScore=${textScore.toFixed(3)}, jump=${jump.toFixed(2)}s, combined=${score.toFixed(3)} ${score < bestScore ? "← NEW BEST" : ""}`);
