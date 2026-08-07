@@ -295,7 +295,7 @@ async def transcribe(mp3_path: str = Form(...), lyrics: str = Form("")):
 
                 await asyncio.to_thread(save_stems)
 
-                await queue.put(sse("Detectando pitch con torchcrepe…"))
+                await queue.put(sse("Detecting pitch with torchcrepe…"))
                 times, freqs, confs = await asyncio.to_thread(analyze_pitch, vocals, out_sr)
                 pct = 100 * (confs > 0.5).sum() / max(len(confs), 1)
                 print(f"[transcribe] Pitch: {len(times)} frames, {pct:.0f}% confident")
@@ -308,7 +308,7 @@ async def transcribe(mp3_path: str = Form(...), lyrics: str = Form("")):
                 pauses = await asyncio.to_thread(detect_pauses, vocals, out_sr)
                 print(f"[transcribe] Pauses: {len(pauses)} silence regions detected")
 
-                await queue.put(sse("Transcribiendo letra con Whisper…"))
+                await queue.put(sse("Transcribing lyrics with Whisper…"))
                 prompt = lyrics.strip() if lyrics.strip() else None
 
                 def do_whisper():
