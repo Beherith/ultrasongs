@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
 
       ({ bpm } = await detectBpm(mp3));
 
-      const aligned = alignLyrics(lyrics, words, language, pauses);
+      const aligned = alignLyrics(lyrics, words, language, pauses, `${artist} - ${title}`);
       const firstSyl = aligned.find((s) => !s.isLineBreak && s.start > 0);
       gap = firstSyl ? Math.max(0, firstSyl.start * 1000 - 500) : 0;
       let prevEnd = -1;
@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
     const txt = buildUltrastarTxt(ultraNotes, { title, artist, mp3: mp3Filename, bpm, gap, video: videoFilename });
 
     // Save generation result as JSON
-    const jsonPath = path.join(path.dirname(mp3), path.basename(mp3, ".mp3")) + "_generate.json";
+    const jsonPath = path.join(path.dirname(mp3), path.basename(mp3, ".mp3")) + "_generate_result.json";
     const genResult = { title, artist, bpm, gap, mp3Filename, videoFilename, notes: ultraNotes, txt };
     await writeFile(jsonPath, JSON.stringify(genResult, null, 2));
     console.log(`[generate] Saved result: ${jsonPath}`);

@@ -26,8 +26,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ message: "Audio file not found" }, { status: 404 });
     }
 
+    const songId = path.basename(mp3, ".mp3");
     const [aligned, { bpm }] = await Promise.all([
-      Promise.resolve(alignLyrics(lyrics, words, language, pauses)),
+      Promise.resolve(alignLyrics(lyrics, words, language, pauses, songId)),
       detectBpm(mp3),
     ]);
 
@@ -51,7 +52,7 @@ export async function POST(request: NextRequest) {
     const result = { notes, bpm, gap, duration };
 
     // Save alignment result as JSON
-    const jsonPath = path.join(path.dirname(mp3), path.basename(mp3, ".mp3")) + "_alignment.json";
+    const jsonPath = path.join(path.dirname(mp3), path.basename(mp3, ".mp3")) + "_align_notes.json";
     await writeFile(jsonPath, JSON.stringify(result, null, 2));
     console.log(`[align] Saved alignment: ${jsonPath}`);
 

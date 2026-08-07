@@ -344,7 +344,7 @@ async def transcribe(mp3_path: str = Form(...), lyrics: str = Form("")):
                     "accompanimentPath": acc_mp3_path,
                     "pauses": pauses,
                 }
-                json_path = base + ".json"
+                json_path = base + "_transcribe.json"
                 with open(json_path, "w", encoding="utf-8") as f:
                     json.dump(result, f, ensure_ascii=False, indent=2)
                 print(f"[transcribe] Saved result: {json_path}")

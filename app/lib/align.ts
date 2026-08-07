@@ -1,5 +1,7 @@
 import { splitWord } from "./syllabify";
 import type { WordTimestamp, Pause } from "../api/transcribe/route";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
 export interface AlignedSyllable {
   syllable: string;
@@ -321,7 +323,8 @@ export function alignLyrics(
   lyrics: string,
   whisperWords: WordTimestamp[],
   lang: string,
-  _pauses: Pause[] = []
+  _pauses: Pause[] = [],
+  _songId?: string
 ): AlignedSyllable[] {
   const lines = lyrics.split("\n").map((l) => l.trim()).filter(Boolean);
   const whisperNorm = whisperWords.map((w) => normalize(w.word));
@@ -372,6 +375,28 @@ export function alignLyrics(
       output.push({ syllable: "", start: nextLineStart, end: nextLineStart, midi: 0, isLineBreak: true });
     }
   }
+
+  const tmpDir = path.resolve("./tmp");
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const safeId = _songId ? _songId.replace(/[^a-zA-Z0-9_\-\s]/g, "").trim().replace(/\s+/g, "_") : "alignment";
+  const debugData = lines.flatMap((line, li) => {
+    const lineWords = line.split(/\s+/).filter(Boolean);
+    return lineWords.map((lw, wi) => {
+      const globalIdx = lines.slice(0, li).reduce((sum, l) => sum + l.split(/\s+/).filter(Boolean).length, 0) + wi;
+      const ts = interpolated[globalIdx];
+      return {
+        line: li,
+        lyricWord: lw,
+        lyricNorm: normalize(lw),
+        matchedWord: ts?.word ?? null,
+        matchedNorm: ts ? normalize(ts.word) : null,
+        start: ts?.start ?? null,
+        end: ts?.end ?? null,
+        midi: ts?.midi ?? null,
+      };
+    });
+  });
+  fs.writeFileSync(path.join(tmpDir, `${safeId}_align_debug.json`), JSON.stringify(debugData, null, 2));
 
   return output;
 }
