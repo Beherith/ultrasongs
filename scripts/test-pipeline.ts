@@ -8,6 +8,7 @@
  *   --title <string>    Song title
  *   --artist <string>   Artist name
  *   --url <url>         Next.js server URL (default: http://localhost:3000)
+ *   --timeout <ms>      Fetch timeout in ms (default: 600000 = 10 min)
  *   --stage <stage>     Stage to run: upload | transcribe | align | generate | all (default: all)
  *   --from-json <path>  Skip earlier stages, load input from this JSON file
  *   --to-json <path>    Override output JSON path (default: auto-generated)
@@ -37,6 +38,18 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { resolve, basename, dirname, extname } from "path";
 
 const BASE_URL = process.env.NEXT_DEV_URL ?? "http://localhost:3000";
+
+// Node's undici defaults to a 30s headers timeout.
+// The generate endpoint can take a long time (alignment + BPM + ZIP).
+const DEFAULT_TIMEOUT_MS = 600_000; // 10 minutes
+
+let fetchTimeoutMs = DEFAULT_TIMEOUT_MS;
+
+function makeFetchOptions() {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), fetchTimeoutMs);
+  return { signal: controller.signal };
+}
 
 type Stage = "upload" | "transcribe" | "align" | "generate" | "all";
 
@@ -102,6 +115,7 @@ function parseArgs(): {
   fromJson?: string;
   toJson?: string;
   url: string;
+  timeout: number;
 } {
   const args = process.argv.slice(2);
   const parsed: Record<string, string | undefined> = {};
@@ -127,6 +141,7 @@ function parseArgs(): {
     fromJson: parsed["from-json"] ? resolve(parsed["from-json"]) : undefined,
     toJson: parsed["to-json"],
     url: parsed.url ?? BASE_URL,
+    timeout: parsed.timeout ? parseInt(parsed.timeout, 10) : DEFAULT_TIMEOUT_MS,
   };
 }
 
@@ -149,6 +164,7 @@ async function runUpload(url: string, mp3Path: string): Promise<UploadResult> {
     method: "POST",
     headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
     body,
+    ...makeFetchOptions(),
   });
 
   if (!res.ok) throw new Error(`Upload failed (${res.status}): ${await res.text()}`);
@@ -166,6 +182,7 @@ async function runTranscribe(url: string, input: TranscribeInput): Promise<Trans
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ mp3: input.mp3, lyrics: input.lyrics }),
+    ...makeFetchOptions(),
   });
 
   if (!res.ok) throw new Error(`Transcribe failed (${res.status}): ${await res.text()}`);
@@ -233,6 +250,7 @@ async function runAlign(url: string, input: AlignInput): Promise<AlignResult> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+    ...makeFetchOptions(),
   });
 
   if (!res.ok) throw new Error(`Align failed (${res.status}): ${await res.text()}`);
@@ -261,6 +279,7 @@ async function runGenerate(url: string, input: GenerateInput): Promise<string> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
+    ...makeFetchOptions(),
   });
 
   if (!res.ok) throw new Error(`Generate failed (${res.status}): ${await res.text()}`);
@@ -300,8 +319,9 @@ function defaultToJsonPath(stage: Stage, sourcePath: string): string {
 async function main() {
   const args = parseArgs();
   const url = args.url;
+  fetchTimeoutMs = args.timeout;
 
-  console.log(`\n  Pipeline test — stage: ${args.stage}, server: ${url}\n`);
+  console.log(`\n  Pipeline test — stage: ${args.stage}, server: ${url}, timeout: ${args.timeout / 1000}s\n`);
 
   try {
     if (args.stage === "all" || args.stage === "upload") {
