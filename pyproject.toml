@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ultrasongs"
+version = "0.1.0"
+description = "Generate and validate Ultrastar songs with a Python and Dash pipeline."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = [
+  "dash>=3.0,<5",
+  "pydantic>=2.10,<3",
+  "pyphen>=0.17,<1",
+]
+
+[project.optional-dependencies]
+runtime = [
+  "diskcache>=5.6,<6",
+  "librosa>=0.11,<1",
+  "numpy>=2.0,<3",
+  "soundfile>=0.13,<1",
+]
+gpu = [
+  "demucs>=4.0,<5",
+  "faster-whisper>=1.1,<2",
+  "lameenc>=1.8,<2",
+  "torchcrepe>=0.0.23,<1",
+  "torchaudio>=2.6,<3",
+]
+test = [
+  "pytest>=8.3,<9",
+  "pytest-cov>=6.0,<8",
+]
+dev = [
+  "mypy>=1.14,<2",
+  "ruff>=0.9,<1",
+]
+
+[project.scripts]
+ultrasongs = "ultrasongs.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ultrasongs"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+  "parity: optional checks against large local legacy fixtures",
+  "e2e: optional real-model end-to-end checks requiring local media and ML dependencies",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

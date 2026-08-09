@@ -13,6 +13,7 @@
 
 # testing
 /coverage
+/.pytest_cache/
 
 # next.js
 /.next/
@@ -42,10 +43,12 @@ yarn-error.log*
 next-env.d.ts
 
 CLAUDE.md
-AGENTS.md
 
 # drafts (local working files, audio, generated content)
 /drafts/
+/projects/
+/reports/
+/exports/
 
 # temp files
 /tmp/
@@ -54,3 +57,4 @@ AGENTS.md
 __pycache__/
 *.pyc
 *.pyo
+*.egg-info/

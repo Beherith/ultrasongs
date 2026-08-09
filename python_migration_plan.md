@@ -17,6 +17,34 @@ The initial Python port covers the automatic pipeline only:
 9. Validate a generated song against an existing MP3 + Ultrastar TXT pair.
 10. Produce a unified visual HTML report for intermediate and final results.
 
+## Current implementation status (2026-08-09)
+
+- [x] Phase 1 foundation: installable `src/ultrasongs` package, typed centralized
+  configuration, effective snapshots, CLI entry point, and schema-driven UI overrides.
+- [x] Phase 2 domain layer: canonical Ultrastar models, parser/writer, beat mapping,
+  reference lyric reconstruction, and immutable reference artifacts.
+- [x] Phase 3 deterministic pipeline: lyric alignment, syllabification, pitch/pause
+  aggregation, note generation, and archive creation.
+- [x] Phase 4 service boundaries: injected FFmpeg, Demucs, pitch, transcription,
+  WhisperX, and tempo adapters with lazy optional dependencies.
+- [x] Phase 5 validation: canonical similarity implementation, validation thresholds,
+  and `score_songs.py` compatibility wrapper.
+- [x] Phase 6 report: one self-contained HTML report for transcription, pitch, pauses,
+  candidate/reference charts, configuration, similarity, and pass/fail reasons.
+- [x] Phase 7 workflow skeleton: MP3/video + optional reference TXT submission,
+  background execution, project/run manifests, and downloadable artifacts.
+- [x] Phase 8 Dash shell: Generate/Validate modes, metadata and reconstructed-lyrics
+  review, Advanced Settings, progress polling, and ownership-checked downloads.
+- [x] Automated baseline: 105 unit tests, one frozen Diggy downstream parity test,
+  Ruff, application-factory smoke test, and `score_songs.py` CLI smoke test.
+- [x] Add a reusable `ultrasongs repair` command and opt-in real-model E2E test for
+  an existing MP3 + UltraStar TXT pair. Export the original chart, reconstructed or
+  corrected lyrics, updated chart, ZIP, score JSON, and unified visual comparison.
+- [ ] Run the full pipeline with the real locally installed GPU/ML stack using an
+  uploaded MP3 + known Ultrastar TXT, inspect the unified report, and tune parity.
+- [ ] Complete cutover documentation and archive (do not delete) the TypeScript app
+  only after the real-model end-to-end gate passes.
+
 ## Explicitly out of scope
 
 - [ ] Do not port `TimelineEditor.tsx` in this migration.
