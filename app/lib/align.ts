@@ -21,9 +21,6 @@ interface WordWithPitch extends WordTimestamp {
   pitchFrames?: PitchFrame[];
 }
 
-const MAX_FORWARD_SEARCH_SEC = 90;
-const MAX_IN_LINE_GAP_SEC = 4;
-
 // ── File-based logger ─────────────────────────────────────────────────────
 
 let logFd: number | null = null;
@@ -34,7 +31,6 @@ function openLog(songId: string) {
   fs.mkdirSync(tmpDir, { recursive: true });
   const safeId = songId ? songId.replace(/[^a-zA-Z0-9_\-\s]/g, "").trim().replace(/\s+/g, "_") : "alignment";
   logPath = path.join(tmpDir, `${safeId}_align.log`);
-  // Truncate then open for writing
   fs.writeFileSync(logPath, "");
   logFd = fs.openSync(logPath, "a");
 }
@@ -54,54 +50,56 @@ function log(tag: string, msg: string) {
   }
 }
 
-// ── Debug collection ──────────────────────────────────────────────────────
+// ── Debug types ────────────────────────────────────────────────────────────
+
+interface DebugBacktrackStep {
+  i: number;
+  j: number;
+  matrix: "M" | "X" | "Y";
+  score: number;
+  lyricChar: string;
+  whisperChar: string;
+  whisperWordIdx: number;
+  whisperWord: string;
+}
 
 interface DebugWordMatch {
   lyricWord: string;
   lyricNorm: string;
-  matchedWord: string | null;
-  matchedNorm: string | null;
-  matchedWhisperIdx: number | null;
-  textScore: number | null;
-  combinedScore: number | null;
-  maxTextScore: number;
-  timeJump: number | null;
+  lyricCharRange: [number, number];
+  matchedWhisperWordIdxs: number[];
+  matchedWhisperWords: string[];
   start: number | null;
   end: number | null;
   midi: number | null;
-  reason: string;
+  source: "sw_aligned" | "interpolated_before" | "interpolated_between" | "interpolated_after" | "no_pitch_data";
+  charAlignments: Array<{ lyricChar: string; whisperChar: string; whisperWordIdx: number; score: number }>;
 }
 
 interface DebugLine {
   lineIdx: number;
   lyricLine: string;
   words: DebugWordMatch[];
-  searchStart: number;
-  lastMatchTimeBefore: number;
-  lastMatchTimeAfter: number;
-  clusters: Array<{ positions: number[]; whisperIdxs: number[]; spanSec: number }>;
-  clusterResolution: string | null;
-  validation: string | null;
-  interpolated: Array<{ word: string; start: number; end: number; midi: number; source: string }>;
   syllables: Array<{ syllable: string; start: number; end: number; midi: number; pitchFrameCount: number }>;
 }
 
 interface DebugRoot {
   songId: string;
   language: string;
-  lyricLineCount: number;
-  lyricWordCount: number;
+  lyricCharCount: number;
+  whisperCharCount: number;
   whisperWordCount: number;
   whisperTimeRange: [number, number];
+  swMaxScore: number;
+  swMaxPos: [number, number];
+  swBacktrackLength: number;
+  backtrack: DebugBacktrackStep[];
   pauses: Pause[];
   lines: DebugLine[];
   summary: {
     totalLyricWords: number;
-    matchedWords: number;
-    unmatchedWords: number;
-    interpolatedBefore: number;
-    interpolatedBetween: number;
-    interpolatedAfter: number;
+    alignedWords: number;
+    interpolatedWords: number;
     totalSyllables: number;
     lineBreaks: number;
   };
@@ -110,28 +108,35 @@ interface DebugRoot {
 const debug: DebugRoot = {
   songId: "",
   language: "",
-  lyricLineCount: 0,
-  lyricWordCount: 0,
+  lyricCharCount: 0,
+  whisperCharCount: 0,
   whisperWordCount: 0,
   whisperTimeRange: [0, 0],
+  swMaxScore: 0,
+  swMaxPos: [0, 0],
+  swBacktrackLength: 0,
+  backtrack: [],
   pauses: [],
   lines: [],
   summary: {
     totalLyricWords: 0,
-    matchedWords: 0,
-    unmatchedWords: 0,
-    interpolatedBefore: 0,
-    interpolatedBetween: 0,
-    interpolatedAfter: 0,
+    alignedWords: 0,
+    interpolatedWords: 0,
     totalSyllables: 0,
     lineBreaks: 0,
   },
 };
 
-// ── Phonetic matching ─────────────────────────────────────────────────────
+// ── Character normalization ────────────────────────────────────────────────
 
-function phoneticCost(x: string, y: string): number {
-  if (x === y) return 0;
+function normalizeChar(c: string): string {
+  return c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+// ── Phonetic character matching ────────────────────────────────────────────
+
+function phoneticScore(x: string, y: string): number {
+  if (x === y) return 1;
   const groups: string[][] = [
     ["a", "e", "i"],
     ["o", "u"],
@@ -145,13 +150,12 @@ function phoneticCost(x: string, y: string): number {
     ["y", "i"],
     ["h", "j"],
     ["b", "v"],
-    ["d", "th"],
   ];
   for (const g of groups) {
     const ix = g.indexOf(x);
     const iy = g.indexOf(y);
     if (ix >= 0 && iy >= 0) {
-      return 0.3 + 0.15 * Math.abs(ix - iy);
+      return 0.6 - 0.1 * Math.abs(ix - iy);
     }
   }
   const cross: [string, string][] = [
@@ -160,505 +164,111 @@ function phoneticCost(x: string, y: string): number {
     ["w", "u"], ["r", "l"], ["b", "p"], ["d", "t"], ["g", "k"],
   ];
   for (const [a, b] of cross) {
-    if ((x === a && y === b) || (x === b && y === a)) return 0.4;
+    if ((x === a && y === b) || (x === b && y === a)) return 0.5;
   }
-  return 1;
+  return -0.3;
 }
 
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
-  );
+// ── Smith-Waterman with affine gap penalties ──────────────────────────────
 
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const subCost = phoneticCost(a[i - 1], b[j - 1]);
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,
-        dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + subCost
-      );
-    }
-  }
+const MATCH_SCORE = 4;
+const GAP_OPEN = 4;
+const GAP_EXTEND = 0.5;
 
-  return dp[m][n];
+interface SWCell {
+  score: number;
+  trace: 0 | 1 | 2 | 3;
 }
 
-function normalize(w: string): string {
-  return w
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, "");
-}
-
-function wordScore(lNorm: string, wNorm: string): number {
-  if (wNorm === lNorm) return 0;
-  if (lNorm.length >= 3 && wNorm.length > lNorm.length && wNorm.endsWith(lNorm)) return 0.03;
-  if (lNorm.length >= 3 && wNorm.startsWith(lNorm)) return 0.06;
-
-  const dist = levenshtein(lNorm, wNorm);
-  return dist / Math.max(lNorm.length, wNorm.length, 1);
-}
-
-function maxTextScore(lNorm: string): number {
-  if (lNorm.length <= 2) return 0.05;
-  if (lNorm.length === 3) return 0.35;
-  if (lNorm.length <= 5) return 0.55;
-  return 0.55;
-}
-
-// ── Line matching ─────────────────────────────────────────────────────────
-
-function matchLine(
-  lineIdx: number,
-  lineWords: string[],
-  whisperWords: WordTimestamp[],
-  whisperNorm: string[],
-  searchStart: number,
-  lastMatchTime: number
+function smithWaterman(
+  lyricChars: string[],
+  whisperChars: string[],
 ): {
-  matched: Array<WordTimestamp | null>;
-  searchStart: number;
-  lastMatchTime: number;
-  debugWords: DebugWordMatch[];
-  clusters: Array<{ positions: number[]; whisperIdxs: number[]; spanSec: number }>;
-  clusterResolution: string | null;
-  validation: string | null;
+  maxScore: number;
+  maxI: number;
+  maxJ: number;
+  backtrack: Array<{ i: number; j: number; matrix: "M" | "X" | "Y"; score: number }>;
 } {
-  log("match:line", `Line ${lineIdx}: "${lineWords.join(" ")}" (${lineWords.length} words), searchStart=${searchStart}, lastMatchTime=${lastMatchTime.toFixed(2)}s`);
+  const L = lyricChars.length;
+  const W = whisperChars.length;
 
-  const matched: Array<WordTimestamp | null> = [];
-  const debugWords: DebugWordMatch[] = [];
-  let ss = searchStart;
-  let lmt = lastMatchTime;
-  const matchedIndices: Array<number | null> = [];
+  const M: number[][] = Array.from({ length: L + 1 }, () => Array.from({ length: W + 1 }, () => 0));
+  const X: number[][] = Array.from({ length: L + 1 }, () => Array.from({ length: W + 1 }, () => 0));
+  const Y: number[][] = Array.from({ length: L + 1 }, () => Array.from({ length: W + 1 }, () => 0));
 
-  // ── Anchor detection: find exact matches to establish temporal guardrails ──
+  const traceM: number[][] = Array.from({ length: L + 1 }, () => Array.from({ length: W + 1 }, () => 0));
+  const traceX: number[][] = Array.from({ length: L + 1 }, () => Array.from({ length: W + 1 }, () => 0));
+  const traceY: number[][] = Array.from({ length: L + 1 }, () => Array.from({ length: W + 1 }, () => 0));
 
-  const rawAnchors: Array<{ pos: number; idx: number }> = [];
-  for (let wi = 0; wi < lineWords.length; wi++) {
-    const lNorm = normalize(lineWords[wi]);
-    if (!lNorm) continue;
-    for (let i = ss; i < whisperWords.length; i++) {
-      const wStart = whisperWords[i].start;
-      if (lmt >= 0 && wStart > lmt + MAX_FORWARD_SEARCH_SEC) break;
-      if (lmt < 0 && wStart > MAX_FORWARD_SEARCH_SEC) break;
-      if (whisperNorm[i] === lNorm) {
-        rawAnchors.push({ pos: wi, idx: i });
-        break;
+  let maxScore = 0;
+  let maxI = 0;
+  let maxJ = 0;
+
+  for (let i = 1; i <= L; i++) {
+    for (let j = 1; j <= W; j++) {
+      const s = phoneticScore(lyricChars[i - 1], whisperChars[j - 1]) * MATCH_SCORE;
+
+      M[i][j] = Math.max(0, s + M[i - 1][j - 1], s - GAP_OPEN + Math.max(X[i - 1][j - 1], Y[i - 1][j - 1]));
+      if (M[i][j] === 0) traceM[i][j] = 0;
+      else if (M[i][j] === s + M[i - 1][j - 1]) traceM[i][j] = 1;
+      else traceM[i][j] = 2;
+
+      X[i][j] = Math.max(-GAP_OPEN + M[i - 1][j], -GAP_EXTEND + X[i - 1][j]);
+      traceX[i][j] = X[i][j] === -GAP_OPEN + M[i - 1][j] ? 3 : 4;
+
+      Y[i][j] = Math.max(-GAP_OPEN + M[i][j - 1], -GAP_EXTEND + Y[i][j - 1]);
+      traceY[i][j] = Y[i][j] === -GAP_OPEN + M[i][j - 1] ? 5 : 6;
+
+      const best = Math.max(M[i][j], X[i][j], Y[i][j]);
+      if (best > maxScore) {
+        maxScore = best;
+        maxI = i;
+        maxJ = j;
       }
     }
   }
 
-  const consistentAnchors: Array<{ pos: number; idx: number }> = [];
-  for (const a of rawAnchors) {
-    if (consistentAnchors.length > 0) {
-      const prev = consistentAnchors[consistentAnchors.length - 1];
-      if (a.idx <= prev.idx || whisperWords[a.idx].start < whisperWords[prev.idx].start) continue;
-    }
-    consistentAnchors.push(a);
-  }
+  const backtrack: Array<{ i: number; j: number; matrix: "M" | "X" | "Y"; score: number }> = [];
+  let ci = maxI, cj = maxJ;
 
-  const anchorMap = new Map<number, number>();
-  for (const a of consistentAnchors) {
-    anchorMap.set(a.pos, a.idx);
-  }
+  let cmat: "M" | "X" | "Y";
+  let cscore: number;
+  if (M[ci][cj] >= X[ci][cj] && M[ci][cj] >= Y[ci][cj]) { cmat = "M"; cscore = M[ci][cj]; }
+  else if (X[ci][cj] >= Y[ci][cj]) { cmat = "X"; cscore = X[ci][cj]; }
+  else { cmat = "Y"; cscore = Y[ci][cj]; }
 
-  if (consistentAnchors.length > 0) {
-    log("match:anchors", `  Found ${consistentAnchors.length} anchor(s): ${consistentAnchors.map(a => `"${lineWords[a.pos]}"→Whisper[${a.idx}]`).join(", ")}`);
-  }
+  while (cscore > 0 && (ci > 0 || cj > 0)) {
+    backtrack.push({ i: ci, j: cj, matrix: cmat, score: cscore });
 
-  for (let wi = 0; wi < lineWords.length; wi++) {
-    const lw = lineWords[wi];
-    const lNorm = normalize(lw);
-    const mts = maxTextScore(lNorm);
-
-    log("match:word", `  Line ${lineIdx} word ${wi}: "${lw}" → norm "${lNorm}", maxTextScore=${mts.toFixed(2)}`);
-
-    if (!lNorm) {
-      log("match:word", `    → SKIPPED (empty after normalization)`);
-      matched.push(null);
-      matchedIndices.push(null);
-      debugWords.push({
-        lyricWord: lw,
-        lyricNorm: lNorm,
-        matchedWord: null,
-        matchedNorm: null,
-        matchedWhisperIdx: null,
-        textScore: null,
-        combinedScore: null,
-        maxTextScore: mts,
-        timeJump: null,
-        start: null,
-        end: null,
-        midi: null,
-        reason: "empty_after_normalize",
-      });
-      continue;
-    }
-
-    let bestIdx = -1;
-    let bestScore = Infinity;
-    let bestTextScore = Infinity;
-    let bestJump = 0;
-    let candidatesConsidered = 0;
-    let candidatesPassedText = 0;
-
-    const searchEnd = lmt >= 0 ? lmt + MAX_FORWARD_SEARCH_SEC : MAX_FORWARD_SEARCH_SEC;
-    log("match:word", `    Search window: Whisper[${ss}..${Math.min(ss + 200, whisperWords.length - 1)}], time limit ${searchEnd.toFixed(2)}s`);
-
-    for (let i = ss; i < whisperWords.length; i++) {
-      const wStart = whisperWords[i].start;
-
-      const nextAnchorIdx = anchorMap.get(wi + 1);
-      if (nextAnchorIdx !== undefined && wStart > whisperWords[nextAnchorIdx].end) {
-        log("match:word", `    → Whisper[${i}] "${whisperWords[i].word}" at ${wStart.toFixed(2)}s PASSES anchor for "${lineWords[wi + 1]}" (Whisper[${nextAnchorIdx}] ends ${whisperWords[nextAnchorIdx].end.toFixed(2)}s), stopping search`);
-        break;
-      }
-
-      if (lmt >= 0 && wStart > lmt + MAX_FORWARD_SEARCH_SEC) {
-        log("match:word", `    → Whisper[${i}] "${whisperWords[i].word}" at ${wStart.toFixed(2)}s EXCEEDS forward search (${lmt.toFixed(2)} + ${MAX_FORWARD_SEARCH_SEC}s = ${searchEnd.toFixed(2)}s), stopping search`);
-        break;
-      }
-      if (lmt < 0 && wStart > MAX_FORWARD_SEARCH_SEC) {
-        log("match:word", `    → Whisper[${i}] "${whisperWords[i].word}" at ${wStart.toFixed(2)}s EXCEEDS initial search window (${MAX_FORWARD_SEARCH_SEC}s), stopping search`);
-        break;
-      }
-
-      candidatesConsidered++;
-      const textScore = wordScore(lNorm, whisperNorm[i]);
-
-      if (textScore > mts) {
-        continue;
-      }
-      candidatesPassedText++;
-
-      const jump = lmt >= 0
-        ? Math.max(0, wStart - lmt - 3)
-        : Math.max(0, wStart - 20);
-      const score = textScore + jump * (lmt >= 0 ? 0.03 : 0.05);
-
-      if (i - ss < 5 || score < bestScore) {
-        log("match:word", `      Whisper[${i}] "${whisperWords[i].word}" (${whisperNorm[i]}): textScore=${textScore.toFixed(3)}, jump=${jump.toFixed(2)}s, combined=${score.toFixed(3)} ${score < bestScore ? "← NEW BEST" : ""}`);
-      }
-
-      if (score < bestScore) {
-        bestScore = score;
-        bestTextScore = textScore;
-        bestIdx = i;
-        bestJump = jump;
-      }
-      if (bestScore === 0) {
-        log("match:word", `      → Perfect match, breaking early`);
-        break;
-      }
-    }
-
-    log("match:word", `    Searched ${candidatesConsidered} candidates, ${candidatesPassedText} passed text threshold`);
-
-    if (bestIdx >= 0 && bestTextScore <= mts) {
-      const ww = whisperWords[bestIdx];
-      ss = bestIdx + 1;
-      lmt = ww.start;
-      matched.push(ww);
-      matchedIndices.push(bestIdx);
-
-      log("match:word", `    → MATCHED: Whisper[${bestIdx}] "${ww.word}" (${whisperNorm[bestIdx]}) at ${ww.start.toFixed(2)}s-${ww.end.toFixed(2)}s, textScore=${bestTextScore.toFixed(3)}, combined=${bestScore.toFixed(3)}, jump=${bestJump.toFixed(2)}s, midi=${ww.midi}`);
-
-      debugWords.push({
-        lyricWord: lw,
-        lyricNorm: lNorm,
-        matchedWord: ww.word,
-        matchedNorm: whisperNorm[bestIdx],
-        matchedWhisperIdx: bestIdx,
-        textScore: bestTextScore,
-        combinedScore: bestScore,
-        maxTextScore: mts,
-        timeJump: bestJump,
-        start: ww.start,
-        end: ww.end,
-        midi: ww.midi,
-        reason: "matched",
-      });
+    if (cmat === "M") {
+      const t = traceM[ci][cj];
+      if (t === 1) { ci--; cj--; }
+      else { ci--; cj--; }
+    } else if (cmat === "X") {
+      const t = traceX[ci][cj];
+      if (t === 3) { ci--; }
+      else { ci--; }
     } else {
-      matched.push(null);
-      matchedIndices.push(null);
-
-      log("match:word", `    → NO MATCH (bestIdx=${bestIdx}, bestTextScore=${bestTextScore === Infinity ? "∞" : bestTextScore.toFixed(3)}, maxTextScore=${mts.toFixed(2)})`);
-
-      debugWords.push({
-        lyricWord: lw,
-        lyricNorm: lNorm,
-        matchedWord: null,
-        matchedNorm: null,
-        matchedWhisperIdx: null,
-        textScore: bestTextScore === Infinity ? null : bestTextScore,
-        combinedScore: bestScore === Infinity ? null : bestScore,
-        maxTextScore: mts,
-        timeJump: null,
-        start: null,
-        end: null,
-        midi: null,
-        reason: bestIdx < 0 ? "no_candidates_in_window" : "text_score_exceeds_threshold",
-      });
+      const t = traceY[ci][cj];
+      if (t === 5) { cj--; }
+      else { cj--; }
     }
+
+    if (ci < 0) ci = 0;
+    if (cj < 0) cj = 0;
+
+    if (M[ci][cj] >= X[ci][cj] && M[ci][cj] >= Y[ci][cj]) { cmat = "M"; cscore = M[ci][cj]; }
+    else if (X[ci][cj] >= Y[ci][cj]) { cmat = "X"; cscore = X[ci][cj]; }
+    else { cmat = "Y"; cscore = Y[ci][cj]; }
+
+    if (cscore <= 0) break;
   }
 
-  // ── Cluster resolution ─────────────────────────────────────────────────
-
-  const clusters: Array<{ positions: number[]; whisperIdxs: number[]; spanSec: number }> = [];
-  const clusterGroups: Array<Array<number>> = [];
-
-  for (let pos = 0; pos < matched.length; pos++) {
-    const idx = matchedIndices[pos];
-    if (idx === null) continue;
-    const prevCluster = clusterGroups[clusterGroups.length - 1];
-    const prevPos = prevCluster?.[prevCluster.length - 1];
-    const prevIdx = prevPos === undefined ? null : matchedIndices[prevPos];
-    const startsNewCluster =
-      prevIdx !== null &&
-      whisperWords[idx].start - whisperWords[prevIdx].start > MAX_IN_LINE_GAP_SEC;
-
-    if (!prevCluster || startsNewCluster) clusterGroups.push([pos]);
-    else prevCluster.push(pos);
-  }
-
-  for (const group of clusterGroups) {
-    const idxs = group.map((p) => matchedIndices[p]!).filter((i): i is number => i !== null);
-    const times = idxs.map((i) => whisperWords[i].start);
-    const span = times.length > 1 ? Math.max(...times) - Math.min(...times) : 0;
-    clusters.push({
-      positions: group,
-      whisperIdxs: idxs,
-      spanSec: span,
-    });
-  }
-
-  let clusterResolution: string | null = null;
-
-  if (clusters.length > 1) {
-    log("match:cluster", `  Line ${lineIdx}: ${clusters.length} clusters detected:`);
-    clusters.forEach((c, ci) => {
-      log("match:cluster", `    Cluster ${ci}: positions=${JSON.stringify(c.positions)}, whisperIdxs=${JSON.stringify(c.whisperIdxs)}, span=${c.spanSec.toFixed(2)}s`);
-    });
-
-    const keep = clusters.reduce((best, cluster) =>
-      cluster.positions.length > best.positions.length ? cluster : best
-    );
-    clusterResolution = `multi_cluster: kept cluster with ${keep.positions.length} matches, discarded ${clusters.length - 1} other cluster(s)`;
-    log("match:cluster", `    → Keeping cluster with ${keep.positions.length} matches`);
-
-    const keepSet = new Set(keep.positions);
-    for (let pos = 0; pos < matched.length; pos++) {
-      if (!keepSet.has(pos)) {
-        const discardedWord = lineWords[pos];
-        const discardedIdx = matchedIndices[pos];
-        log("match:cluster", `    → Discarding position ${pos} "${discardedWord}" (was Whisper[${discardedIdx}])`);
-        debugWords[pos].reason = "discarded_by_cluster_resolution";
-        matched[pos] = null;
-        matchedIndices[pos] = null;
-      }
-    }
-    const lastKeptPos = keep.positions[keep.positions.length - 1];
-    const lastKeptIdx = matchedIndices[lastKeptPos];
-    if (lastKeptIdx !== null) {
-      ss = lastKeptIdx + 1;
-      lmt = whisperWords[lastKeptIdx].start;
-    }
-  } else if (clusters.length === 1) {
-    clusterResolution = `single_cluster: ${clusters[0].positions.length} matches, span=${clusters[0].spanSec.toFixed(2)}s`;
-    log("match:cluster", `  Line ${lineIdx}: single cluster, ${clusters[0].positions.length} matches, span=${clusters[0].spanSec.toFixed(2)}s`);
-  } else {
-    clusterResolution = "no_clusters: no matches found";
-    log("match:cluster", `  Line ${lineIdx}: no clusters (no matches)`);
-  }
-
-  // ── Line validation ────────────────────────────────────────────────────
-
-  const keptIndices = matchedIndices.filter((idx): idx is number => idx !== null);
-  const keptTimes = keptIndices.map((idx) => whisperWords[idx].start);
-  const keptSignificantMatches = matched.filter((m) => m && normalize(m.word).length > 2).length;
-  const lineSpan = keptTimes.length > 1 ? Math.max(...keptTimes) - Math.min(...keptTimes) : 0;
-  const maxLineSpan = Math.max(12, lineWords.length * 3);
-
-  let validation: string | null = null;
-
-  if (lineWords.length >= 4 && keptSignificantMatches === 0) {
-    validation = `rejected: ${lineWords.length} words but 0 significant matches`;
-    log("match:validate", `  Line ${lineIdx}: REJECTED — ${lineWords.length} words, ${keptSignificantMatches} significant matches (need ≥1)`);
-    const nullDebug = lineWords.map((lw) => ({
-      lyricWord: lw,
-      lyricNorm: normalize(lw),
-      matchedWord: null as string | null,
-      matchedNorm: null as string | null,
-      matchedWhisperIdx: null as number | null,
-      textScore: null as number | null,
-      combinedScore: null as number | null,
-      maxTextScore: maxTextScore(normalize(lw)),
-      timeJump: null as number | null,
-      start: null as number | null,
-      end: null as number | null,
-      midi: null as number | null,
-      reason: "line_rejected_no_significant_matches",
-    }));
-    return {
-      matched: lineWords.map(() => null),
-      searchStart,
-      lastMatchTime,
-      debugWords: nullDebug,
-      clusters,
-      clusterResolution,
-      validation,
-    };
-  }
-
-  if (lineWords.length >= 4 && lineSpan > maxLineSpan) {
-    validation = `rejected: span ${lineSpan.toFixed(2)}s exceeds max ${maxLineSpan}s`;
-    log("match:validate", `  Line ${lineIdx}: REJECTED — span ${lineSpan.toFixed(2)}s > maxLineSpan ${maxLineSpan}s`);
-    const nullDebug = lineWords.map((lw) => ({
-      lyricWord: lw,
-      lyricNorm: normalize(lw),
-      matchedWord: null as string | null,
-      matchedNorm: null as string | null,
-      matchedWhisperIdx: null as number | null,
-      textScore: null as number | null,
-      combinedScore: null as number | null,
-      maxTextScore: maxTextScore(normalize(lw)),
-      timeJump: null as number | null,
-      start: null as number | null,
-      end: null as number | null,
-      midi: null as number | null,
-      reason: "line_rejected_span_exceeds_max",
-    }));
-    return {
-      matched: lineWords.map(() => null),
-      searchStart,
-      lastMatchTime,
-      debugWords: nullDebug,
-      clusters,
-      clusterResolution,
-      validation,
-    };
-  }
-
-  if (lineWords.length >= 4) {
-    validation = `passed: ${keptSignificantMatches} significant matches, span ${lineSpan.toFixed(2)}s ≤ ${maxLineSpan}s`;
-    log("match:validate", `  Line ${lineIdx}: PASSED — ${keptSignificantMatches} significant matches, span ${lineSpan.toFixed(2)}s ≤ ${maxLineSpan}s`);
-  } else {
-    validation = `skipped: line has ${lineWords.length} words (<4, no validation)`;
-    log("match:validate", `  Line ${lineIdx}: VALIDATION SKIPPED — only ${lineWords.length} words (<4)`);
-  }
-
-  const matchCount = matched.filter((m) => m !== null).length;
-  log("match:line", `  Line ${lineIdx} result: ${matchCount}/${lineWords.length} matched, searchStart→${ss}, lastMatchTime→${lmt.toFixed(2)}s`);
-
-  return { matched, searchStart: ss, lastMatchTime: lmt, debugWords, clusters, clusterResolution, validation };
+  backtrack.reverse();
+  return { maxScore, maxI, maxJ, backtrack };
 }
 
-// ── Interpolation ─────────────────────────────────────────────────────────
-
-function interpolateMissing(
-  matched: Array<WordTimestamp | null>,
-  lyricWords: string[]
-): { result: WordTimestamp[]; debug: Array<{ word: string; start: number; end: number; midi: number; source: string }> } {
-  log("interpolate", `Starting interpolation: ${matched.length} words, ${matched.filter((m) => m !== null).length} matched, ${matched.filter((m) => m === null).length} unmatched`);
-
-  const result: Array<WordTimestamp> = matched.map((m, i) =>
-    m ?? { word: lyricWords[i], start: -1, end: -1, midi: 60 }
-  );
-
-  const debugInterp: Array<{ word: string; start: number; end: number; midi: number; source: string }> = [];
-  const anchors = result.map((r, i) => (r.start >= 0 ? i : -1)).filter((i) => i >= 0);
-
-  log("interpolate", `Anchors at indices: [${anchors.join(", ")}]`);
-
-  if (anchors.length === 0) {
-    log("interpolate", `  No anchors — all words unmatched, returning defaults`);
-    for (let i = 0; i < result.length; i++) {
-      debugInterp.push({ word: lyricWords[i], start: -1, end: -1, midi: 60, source: "no_anchors_default" });
-    }
-    return { result, debug: debugInterp };
-  }
-
-  const first = anchors[0];
-  const last = anchors[anchors.length - 1];
-
-  // Before first anchor
-  if (first > 0) {
-    const firstAnchorStart = result[first].start;
-    const start = Math.max(0, firstAnchorStart - first);
-    const slot = (firstAnchorStart - start) / first;
-    log("interpolate", `  Before first anchor [${first}]: ${first} words, start=${start.toFixed(3)}s, slot=${slot.toFixed(3)}s, anchorStart=${firstAnchorStart.toFixed(3)}s`);
-    for (let i = 0; i < first; i++) {
-      result[i].start = start + i * slot;
-      result[i].end = start + (i + 1) * slot;
-      result[i].midi = result[first].midi;
-      log("interpolate", `    Word ${i} "${lyricWords[i]}": ${result[i].start.toFixed(3)}s-${result[i].end.toFixed(3)}s, midi=${result[i].midi}`);
-      debugInterp.push({ word: lyricWords[i], start: result[i].start, end: result[i].end, midi: result[i].midi, source: `interpolated_before_anchor_${first}` });
-    }
-  } else {
-    for (let i = 0; i < first; i++) {
-      debugInterp.push({ word: lyricWords[i], start: result[i].start, end: result[i].end, midi: result[i].midi, source: "anchor" });
-    }
-  }
-
-  // Between anchors
-  for (let ai = 0; ai < anchors.length - 1; ai++) {
-    const a = anchors[ai];
-    const b = anchors[ai + 1];
-    const gap = b - a;
-
-    if (a < first) {
-      debugInterp.push({ word: lyricWords[a], start: result[a].start, end: result[a].end, midi: result[a].midi, source: "anchor" });
-      continue;
-    }
-
-    if (gap <= 1) {
-      debugInterp.push({ word: lyricWords[a], start: result[a].start, end: result[a].end, midi: result[a].midi, source: "anchor" });
-      continue;
-    }
-
-    const tStart = result[a].end;
-    const tEnd = result[b].start;
-    const duration = tEnd - tStart;
-    const midiA = result[a].midi;
-    const midiB = result[b].midi;
-
-    log("interpolate", `  Between anchors [${a}] and [${b}]: ${gap - 1} words, tStart=${tStart.toFixed(3)}s, tEnd=${tEnd.toFixed(3)}s, duration=${duration.toFixed(3)}s, midi ${midiA}→${midiB}`);
-
-    debugInterp.push({ word: lyricWords[a], start: result[a].start, end: result[a].end, midi: result[a].midi, source: "anchor" });
-
-    for (let k = 1; k < gap; k++) {
-      const frac = k / gap;
-      result[a + k].start = tStart + frac * duration;
-      result[a + k].end = tStart + ((k + 1) / gap) * duration;
-      result[a + k].midi = Math.round(midiA + frac * (midiB - midiA));
-      log("interpolate", `    Word ${a + k} "${lyricWords[a + k]}": frac=${frac.toFixed(3)}, ${result[a + k].start.toFixed(3)}s-${result[a + k].end.toFixed(3)}s, midi=${result[a + k].midi}`);
-      debugInterp.push({ word: lyricWords[a + k], start: result[a + k].start, end: result[a + k].end, midi: result[a + k].midi, source: `interpolated_between_${a}_${b}` });
-    }
-  }
-
-  // After last anchor
-  log("interpolate", `  After last anchor [${last}]: ${result.length - 1 - last} words, fallback=0.3s/word, anchorEnd=${result[last].end.toFixed(3)}s`);
-  debugInterp.push({ word: lyricWords[last], start: result[last].start, end: result[last].end, midi: result[last].midi, source: "anchor" });
-
-  const fallbackWordSec = 0.3;
-  for (let i = last + 1; i < result.length; i++) {
-    const offset = (i - last) * fallbackWordSec;
-    result[i].start = result[last].end + offset;
-    result[i].end = result[last].end + offset + fallbackWordSec;
-    result[i].midi = result[last].midi;
-    log("interpolate", `    Word ${i} "${lyricWords[i]}": ${result[i].start.toFixed(3)}s-${result[i].end.toFixed(3)}s, midi=${result[i].midi}`);
-    debugInterp.push({ word: lyricWords[i], start: result[i].start, end: result[i].end, midi: result[i].midi, source: `interpolated_after_anchor_${last}` });
-  }
-
-  return { result, debug: debugInterp };
-}
-
-// ── MIDI extraction ───────────────────────────────────────────────────────
+// ── MIDI extraction ────────────────────────────────────────────────────────
 
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -669,12 +279,9 @@ function median(values: number[]): number | null {
     : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
 }
 
-function midiForRange(word: WordTimestamp, start: number, end: number): { midi: number; frameCount: number; threshold: number | null } {
+function midiForRange(word: WordTimestamp, start: number, end: number): { midi: number; frameCount: number } {
   const frames = (word as WordWithPitch).pitchFrames;
-  if (!frames?.length) {
-    log("midi", `    No pitch frames available for word "${word.word}", fallback midi=${word.midi}`);
-    return { midi: word.midi, frameCount: 0, threshold: null };
-  }
+  if (!frames?.length) return { midi: word.midi, frameCount: 0 };
 
   for (const threshold of [0.5, 0.3, 0.1]) {
     const values = frames
@@ -682,14 +289,10 @@ function midiForRange(word: WordTimestamp, start: number, end: number): { midi: 
       .map((p) => p.midi)
       .filter((m) => Number.isFinite(m) && m > 0);
     const value = median(values);
-    if (value !== null) {
-      log("midi", `    Pitch frames: threshold=${threshold}, ${values.length} frames in [${start.toFixed(3)}, ${end.toFixed(3)}], median midi=${value}`);
-      return { midi: value, frameCount: values.length, threshold };
-    }
+    if (value !== null) return { midi: value, frameCount: values.length };
   }
 
-  log("midi", `    No confident pitch frames in [${start.toFixed(3)}, ${end.toFixed(3)}], fallback midi=${word.midi}`);
-  return { midi: word.midi, frameCount: 0, threshold: null };
+  return { midi: word.midi, frameCount: 0 };
 }
 
 // ── Main alignment ────────────────────────────────────────────────────────
@@ -703,198 +306,389 @@ export function alignLyrics(
 ): AlignedSyllable[] {
   const startTime = Date.now();
   openLog(_songId || "unknown");
-  const lines = lyrics.split("\n").map((l) => l.trim()).filter(Boolean);
-  const whisperNorm = whisperWords.map((w) => normalize(w.word));
+
+  const rawLines = lyrics.split("\n").map((l) => l.trim()).filter(Boolean);
+  const whisperNorm = whisperWords.map((w) => w.word.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, ""));
 
   log("init", `═══════════════════════════════════════════════════════════`);
-  log("init", `Log file: ${logPath}`);
   log("init", `Alignment started for song "${_songId || "unknown"}"`);
   log("init", `Language: ${lang}`);
-  log("init", `Lyric lines: ${lines.length}`);
+  log("init", `Lyric lines: ${rawLines.length}`);
   log("init", `Whisper words: ${whisperWords.length}`);
-  log("init", `Whisper time range: ${whisperWords[0]?.start?.toFixed(2) ?? "N/A"}s — ${whisperWords.at(-1)?.end?.toFixed(2) ?? "N/A"}s`);
-  log("init", `Pauses: ${pauses.length} regions`);
-  if (pauses.length > 0) {
-    log("init", `Pause regions: ${pauses.map((p) => `${p.start.toFixed(2)}s-${p.end.toFixed(2)}s`).join(", ")}`);
-  }
   log("init", `═══════════════════════════════════════════════════════════`);
 
-  // Whisper word summary
-  log("whisper", `All ${whisperWords.length} Whisper words:`);
-  whisperWords.forEach((w, i) => {
-    log("whisper", `  [${i}] "${w.word}" (${normalize(w.word)}) ${w.start.toFixed(2)}s-${w.end.toFixed(2)}s midi=${w.midi} pitchFrames=${((w as WordWithPitch).pitchFrames?.length ?? 0)}`);
-  });
+  // ── Build lyric character sequence (preserving line/word structure) ──
 
-  debug.songId = _songId || "unknown";
-  debug.language = lang;
-  debug.lyricLineCount = lines.length;
-  debug.whisperWordCount = whisperWords.length;
-  debug.whisperTimeRange = [whisperWords[0]?.start ?? 0, whisperWords.at(-1)?.end ?? 0];
-  debug.pauses = pauses;
-
-  const allMatched: Array<WordTimestamp | null> = [];
-  const allLyricWords: string[] = [];
-  const allDebugWords: DebugWordMatch[] = [];
-  let searchStart = 0;
-  let lastMatchTime = -1;
-
-  // ── Phase 1: Match each line ──────────────────────────────────────────
-
-  log("phase", `── Phase 1: Line matching ────────────────────────────────`);
-
-  for (let li = 0; li < lines.length; li++) {
-    const lineWords = lines[li].split(/\s+/).filter(Boolean);
-    allLyricWords.push(...lineWords);
-
-    log("line", `▶ Line ${li}: "${lines[li]}" (${lineWords.length} words)`);
-
-    const res = matchLine(li, lineWords, whisperWords, whisperNorm, searchStart, lastMatchTime);
-    allMatched.push(...res.matched);
-    allDebugWords.push(...res.debugWords);
-
-    const lineDebug: DebugLine = {
-      lineIdx: li,
-      lyricLine: lines[li],
-      words: res.debugWords,
-      searchStart,
-      lastMatchTimeBefore: lastMatchTime,
-      lastMatchTimeAfter: res.lastMatchTime,
-      clusters: res.clusters,
-      clusterResolution: res.clusterResolution,
-      validation: res.validation,
-      interpolated: [],
-      syllables: [],
-    };
-
-    searchStart = res.searchStart;
-    lastMatchTime = res.lastMatchTime;
-
-    const lineMatchCount = res.matched.filter((m) => m !== null).length;
-    log("line", `◀ Line ${li}: ${lineMatchCount}/${lineWords.length} matched, clusterRes="${res.clusterResolution}", validation="${res.validation}"`);
-
-    debug.lines.push(lineDebug);
+  interface LyricChar {
+    orig: string;
+    norm: string;
+    wordIdx: number;
+    lineIdx: number;
   }
 
-  const matchedCount = allMatched.filter((m) => m !== null).length;
-  log("phase", `Phase 1 complete: ${matchedCount}/${allMatched.length} total words matched`);
+  const lyricWords: Array<{ word: string; lineIdx: number }> = [];
+  for (let li = 0; li < rawLines.length; li++) {
+    for (const w of rawLines[li].split(/\s+/).filter(Boolean)) {
+      lyricWords.push({ word: w, lineIdx: li });
+    }
+  }
 
-  // ── Phase 2: Interpolate missing words ────────────────────────────────
+  const lyricChars: LyricChar[] = [];
+  for (let wi = 0; wi < lyricWords.length; wi++) {
+    for (const ch of lyricWords[wi].word) {
+      lyricChars.push({ orig: ch, norm: normalizeChar(ch), wordIdx: wi, lineIdx: lyricWords[wi].lineIdx });
+    }
+    if (wi < lyricWords.length - 1) {
+      lyricChars.push({ orig: " ", norm: " ", wordIdx: wi, lineIdx: lyricWords[wi].lineIdx });
+    }
+  }
 
-  log("phase", `── Phase 2: Gap interpolation ────────────────────────────`);
-  const { result: interpolated, debug: interpDebug } = interpolateMissing(allMatched, allLyricWords);
+  // ── Build whisper character sequence (tracking word boundaries) ──
 
-  const stillNegative = interpolated.filter((w) => w.start < 0).length;
-  log("phase", `Phase 2 complete: ${stillNegative} words still have negative timestamps (no anchors at all)`);
+  interface WhisperChar {
+    orig: string;
+    norm: string;
+    wordIdx: number;
+  }
 
-  // Update debug with interpolation data
-  for (const line of debug.lines) {
-    const lineWordCount = line.words.length;
-    let wordOffset = debug.lines.indexOf(line) > 0
-      ? debug.lines.slice(0, debug.lines.indexOf(line)).reduce((sum, l) => sum + l.words.length, 0)
-      : 0;
-    for (let wi = 0; wi < lineWordCount; wi++) {
-      const globalIdx = wordOffset + wi;
-      if (interpDebug[globalIdx]) {
-        line.interpolated.push(interpDebug[globalIdx]);
+  const whisperChars: WhisperChar[] = [];
+  for (let wi = 0; wi < whisperWords.length; wi++) {
+    const cleaned = whisperWords[wi].word.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    for (const ch of cleaned) {
+      whisperChars.push({ orig: ch, norm: normalizeChar(ch), wordIdx: wi });
+    }
+    if (wi < whisperWords.length - 1) {
+      whisperChars.push({ orig: " ", norm: " ", wordIdx: wi });
+    }
+  }
+
+  log("chars", `Lyric chars: ${lyricChars.length} (${lyricWords.length} words)`);
+  log("chars", `Whisper chars: ${whisperChars.length} (${whisperWords.length} words)`);
+  log("chars", `Lyric text: "${lyricChars.map(c => c.orig).join("")}"`);
+  log("chars", `Whisper text: "${whisperChars.map(c => c.orig).join("")}"`);
+
+  // ── Smith-Waterman alignment ──
+
+  log("sw", `Running Smith-Waterman: ${lyricChars.length} × ${whisperChars.length}`);
+  const swStart = Date.now();
+  const { maxScore, maxI, maxJ, backtrack } = smithWaterman(
+    lyricChars.map(c => c.norm),
+    whisperChars.map(c => c.norm)
+  );
+  log("sw", `SW complete in ${Date.now() - swStart}ms: maxScore=${maxScore.toFixed(2)} at (${maxI}, ${maxJ}), backtrack=${backtrack.length} steps`);
+
+  // ── Log full backtrack to debug ──
+
+  const debugBacktrack: DebugBacktrackStep[] = [];
+  for (const step of backtrack) {
+    const lc = step.i > 0 && step.i <= lyricChars.length ? lyricChars[step.i - 1] : null;
+    const wc = step.j > 0 && step.j <= whisperChars.length ? whisperChars[step.j - 1] : null;
+    debugBacktrack.push({
+      i: step.i,
+      j: step.j,
+      matrix: step.matrix,
+      score: step.score,
+      lyricChar: lc?.orig ?? "-",
+      whisperChar: wc?.orig ?? "-",
+      whisperWordIdx: wc?.wordIdx ?? -1,
+      whisperWord: wc ? whisperWords[wc.wordIdx]?.word ?? "?" : "-",
+    });
+  }
+
+  log("bt", `Backtrack (${debugBacktrack.length} steps):`);
+  for (const step of debugBacktrack) {
+    log("bt", `  [${step.matrix}] (${step.i},${step.j}) score=${step.score.toFixed(2)} '${step.lyricChar}'↔'${step.whisperChar}' W[${step.whisperWordIdx}] "${step.whisperWord}"`);
+  }
+
+  // ── Extract word-level matches from backtrack ──
+
+  const lyricWordMatched = new Array(lyricWords.length).fill(false);
+  const lyricWordWhisperIdxs: number[][] = lyricWords.map(() => []);
+  const lyricWordCharAlignments: Array<Array<{ lyricChar: string; whisperChar: string; whisperWordIdx: number; score: number }>> = lyricWords.map(() => []);
+
+  for (const step of backtrack) {
+    if (step.matrix === "M" && step.i > 0 && step.j > 0) {
+      const lc = lyricChars[step.i - 1];
+      const wc = whisperChars[step.j - 1];
+      if (lc && wc && lc.norm !== " " && wc.norm !== " ") {
+        lyricWordMatched[lc.wordIdx] = true;
+        if (!lyricWordWhisperIdxs[lc.wordIdx].includes(wc.wordIdx)) {
+          lyricWordWhisperIdxs[lc.wordIdx].push(wc.wordIdx);
+        }
+        lyricWordCharAlignments[lc.wordIdx].push({
+          lyricChar: lc.orig,
+          whisperChar: wc.orig,
+          whisperWordIdx: wc.wordIdx,
+          score: step.score,
+        });
       }
     }
   }
 
-  // ── Phase 3: Syllabification + MIDI extraction ────────────────────────
+  // ── Compute timestamps for matched lyric words ──
 
-  log("phase", `── Phase 3: Syllabification + MIDI extraction ────────────`);
-  const output: AlignedSyllable[] = [];
-  let wordIdx = 0;
-  let totalSyllables = 0;
-  let totalLineBreaks = 0;
+  interface WordResult {
+    word: string;
+    lineIdx: number;
+    start: number;
+    end: number;
+    midi: number;
+    source: "sw_aligned" | "interpolated_before" | "interpolated_between" | "interpolated_after";
+    whisperIdxs: number[];
+    charAlignments: Array<{ lyricChar: string; whisperChar: string; whisperWordIdx: number; score: number }>;
+    pitchFrames?: PitchFrame[];
+  }
 
-  for (let li = 0; li < lines.length; li++) {
-    const lineWords = lines[li].split(/\s+/).filter(Boolean);
-    const lineDebug = debug.lines[li];
+  const wordResults: WordResult[] = lyricWords.map((lw, wi) => ({
+    word: lw.word,
+    lineIdx: lw.lineIdx,
+    start: 0,
+    end: 0,
+    midi: 60,
+    source: "sw_aligned" as const,
+    whisperIdxs: lyricWordWhisperIdxs[wi],
+    charAlignments: lyricWordCharAlignments[wi],
+  }));
 
-    for (const word of lineWords) {
-      const ts = interpolated[wordIdx];
-      const syllables = splitWord(word, lang);
-      const sylDuration = Math.max(0, ts.end - ts.start) / syllables.length;
+  for (let wi = 0; wi < wordResults.length; wi++) {
+    if (!lyricWordMatched[wi]) continue;
+    const idxs = wordResults[wi].whisperIdxs.slice().sort((a, b) => a - b);
+    const starts = idxs.map((idx) => whisperWords[idx].start);
+    const ends = idxs.map((idx) => whisperWords[idx].end);
+    wordResults[wi].start = Math.min(...starts);
+    wordResults[wi].end = Math.max(...ends);
 
-      log("syl", `  Word "${word}" → ${syllables.length} syllable(s): [${syllables.join(") | (")}], duration=${(ts.end - ts.start).toFixed(3)}s, sylDuration=${sylDuration.toFixed(3)}s`);
-
-      syllables.forEach((syl, si) => {
-        const start = ts.start + si * sylDuration;
-        const end = ts.start + (si + 1) * sylDuration;
-
-        let midiResult: { midi: number; frameCount: number; threshold: number | null };
-        if (ts.start >= 0 && (ts as WordWithPitch).pitchFrames?.length) {
-          midiResult = midiForRange(ts, start, end);
-        } else {
-          midiResult = { midi: ts.midi, frameCount: 0, threshold: null };
-          log("midi", `    Word "${word}" syl "${syl}": no pitch data, using word midi=${ts.midi}`);
-        }
-
-        output.push({
-          syllable: syl,
-          start,
-          end,
-          midi: midiResult.midi,
-        });
-
-        if (lineDebug) {
-          lineDebug.syllables.push({
-            syllable: syl,
-            start,
-            end,
-            midi: midiResult.midi,
-            pitchFrameCount: midiResult.frameCount,
-          });
-        }
-
-        totalSyllables++;
-      });
-
-      wordIdx++;
+    const allFrames: PitchFrame[] = [];
+    for (const idx of idxs) {
+      const frames = (whisperWords[idx] as WordWithPitch).pitchFrames;
+      if (frames) allFrames.push(...frames);
     }
-
-    if (li < lines.length - 1) {
-      const nextLineStart = interpolated[wordIdx]?.start ?? output[output.length - 1]?.end ?? 0;
-      log("linebreak", `  Line break after line ${li}: placed at ${nextLineStart.toFixed(3)}s (next line first word start)`);
-      output.push({ syllable: "", start: nextLineStart, end: nextLineStart, midi: 0, isLineBreak: true });
-      totalLineBreaks++;
+    if (allFrames.length > 0) {
+      wordResults[wi].pitchFrames = allFrames;
+      const mr = midiForRange({ word: "", start: wordResults[wi].start, end: wordResults[wi].end, midi: 60, pitchFrames: allFrames } as WordTimestamp, wordResults[wi].start, wordResults[wi].end);
+      wordResults[wi].midi = mr.midi;
+    } else {
+      wordResults[wi].midi = idxs.length > 0 ? whisperWords[idxs[0]].midi : 60;
     }
   }
 
-  log("phase", `Phase 3 complete: ${totalSyllables} syllables, ${totalLineBreaks} line breaks`);
+  // ── Interpolate unmatched words ──
 
-  // ── Summary ───────────────────────────────────────────────────────────
+  const matchedIndices: number[] = [];
+  for (let wi = 0; wi < wordResults.length; wi++) {
+    if (lyricWordMatched[wi]) matchedIndices.push(wi);
+  }
 
-  const unmatchedWords = allMatched.filter((m) => m === null).length;
-  const beforeCount = interpDebug.filter((d) => d.source.startsWith("interpolated_before")).length;
-  const betweenCount = interpDebug.filter((d) => d.source.startsWith("interpolated_between")).length;
-  const afterCount = interpDebug.filter((d) => d.source.startsWith("interpolated_after")).length;
+  if (matchedIndices.length === 0) {
+    log("interp", `No matched words — all words will have default timestamps`);
+    for (const wr of wordResults) {
+      wr.source = "interpolated_before";
+    }
+  } else {
+    const first = matchedIndices[0];
+    const last = matchedIndices[matchedIndices.length - 1];
 
+    // Before first matched word
+    for (let wi = 0; wi < first; wi++) {
+      wordResults[wi].source = "interpolated_before";
+    }
+    if (first > 0) {
+      const anchorStart = wordResults[first].start;
+      const slot = Math.max(0.1, anchorStart / first);
+      for (let wi = 0; wi < first; wi++) {
+        wordResults[wi].start = Math.max(0, anchorStart - (first - wi) * slot);
+        wordResults[wi].end = Math.max(0, anchorStart - (first - wi - 1) * slot);
+        wordResults[wi].midi = wordResults[first].midi;
+      }
+    }
+
+    // Between matched words
+    for (let ai = 0; ai < matchedIndices.length - 1; ai++) {
+      const a = matchedIndices[ai];
+      const b = matchedIndices[ai + 1];
+      if (b - a <= 1) continue;
+
+      const tStart = wordResults[a].end;
+      const tEnd = wordResults[b].start;
+      const duration = Math.max(0, tEnd - tStart);
+      const midiA = wordResults[a].midi;
+      const midiB = wordResults[b].midi;
+      const gaps = b - a;
+
+      for (let k = 1; k < gaps; k++) {
+        const wi = a + k;
+        wordResults[wi].source = "interpolated_between";
+        const frac = k / gaps;
+        wordResults[wi].start = tStart + frac * duration;
+        wordResults[wi].end = tStart + ((k + 1) / gaps) * duration;
+        wordResults[wi].midi = Math.round(midiA + frac * (midiB - midiA));
+      }
+    }
+
+    // After last matched word
+    for (let wi = last + 1; wi < wordResults.length; wi++) {
+      wordResults[wi].source = "interpolated_after";
+    }
+    if (last < wordResults.length - 1) {
+      const avgDur = matchedIndices.reduce((sum, idx) => sum + (wordResults[idx].end - wordResults[idx].start), 0) / matchedIndices.length;
+      const fallback = Math.max(0.2, avgDur);
+      for (let wi = last + 1; wi < wordResults.length; wi++) {
+        const offset = (wi - last) * fallback;
+        wordResults[wi].start = wordResults[last].end + offset;
+        wordResults[wi].end = wordResults[last].end + offset + fallback;
+        wordResults[wi].midi = wordResults[last].midi;
+      }
+    }
+  }
+
+  log("words", `Word alignment summary:`);
+  for (let wi = 0; wi < wordResults.length; wi++) {
+    const wr = wordResults[wi];
+    const matchedCount = lyricWordMatched[wi] ? wr.whisperIdxs.length : 0;
+    log("words", `  [${wi}] "${wr.word}" ${wr.source} ${matchedCount > 0 ? `→ W[${wr.whisperIdxs.slice().sort().map((idx) => `${idx}("${whisperWords[idx]?.word ?? "?"}")`).join(", ")}]` : "unmatched"} ${wr.start.toFixed(3)}s-${wr.end.toFixed(3)}s midi=${wr.midi}`);
+  }
+
+  // ── Syllabification + output ──
+
+  const output: AlignedSyllable[] = [];
+  let totalSyllables = 0;
+  let totalLineBreaks = 0;
+  let currentLineIdx = -1;
+
+  const debugLines: DebugLine[] = [];
+  let currentDebugLine: DebugLine | null = null;
+
+  for (let wi = 0; wi < wordResults.length; wi++) {
+    const wr = wordResults[wi];
+
+    if (wr.lineIdx !== currentLineIdx) {
+      if (currentDebugLine) debugLines.push(currentDebugLine);
+      currentLineIdx = wr.lineIdx;
+      currentDebugLine = {
+        lineIdx: wr.lineIdx,
+        lyricLine: rawLines[wr.lineIdx] ?? "",
+        words: [],
+        syllables: [],
+      };
+    }
+
+    currentDebugLine!.words.push({
+      lyricWord: wr.word,
+      lyricNorm: wr.word.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, ""),
+      lyricCharRange: [
+        lyricChars.findIndex((c, idx) => {
+          const wordStart = lyricChars.slice(0, idx).filter(c2 => c2.wordIdx === wi).length === 0;
+          return c.wordIdx === wi && wordStart;
+        }) >= 0 ? lyricChars.findIndex((c) => c.wordIdx === wi) : 0,
+        lyricChars.filter((c) => c.wordIdx <= wi).length - 1,
+      ],
+      matchedWhisperWordIdxs: wr.whisperIdxs.slice().sort(),
+      matchedWhisperWords: wr.whisperIdxs.slice().sort().map((idx) => whisperWords[idx]?.word ?? ""),
+      start: wr.start,
+      end: wr.end,
+      midi: wr.midi,
+      source: wr.source,
+      charAlignments: wr.charAlignments,
+    });
+
+    const syllables = splitWord(wr.word, lang);
+    const sylDuration = Math.max(0.01, (wr.end - wr.start) / syllables.length);
+
+    for (let si = 0; si < syllables.length; si++) {
+      const sylStart = wr.start + si * sylDuration;
+      const sylEnd = wr.start + (si + 1) * sylDuration;
+
+      let midi = wr.midi;
+      if (wr.pitchFrames && wr.pitchFrames.length > 0) {
+        const mr = midiForRange(
+          { word: wr.word, start: sylStart, end: sylEnd, midi: wr.midi, pitchFrames: wr.pitchFrames } as WordTimestamp,
+          sylStart,
+          sylEnd
+        );
+        midi = mr.midi;
+        if (currentDebugLine) {
+          currentDebugLine.syllables.push({
+            syllable: syllables[si],
+            start: sylStart,
+            end: sylEnd,
+            midi,
+            pitchFrameCount: mr.frameCount,
+          });
+        }
+      } else if (currentDebugLine) {
+        currentDebugLine.syllables.push({
+          syllable: syllables[si],
+          start: sylStart,
+          end: sylEnd,
+          midi,
+          pitchFrameCount: 0,
+        });
+      }
+
+      output.push({ syllable: syllables[si], start: sylStart, end: sylEnd, midi });
+      totalSyllables++;
+    }
+  }
+
+  if (currentDebugLine) debugLines.push(currentDebugLine);
+
+  // Insert line breaks
+  const finalOutput: AlignedSyllable[] = [];
+  let lineBreakPos = 0;
+  for (let li = 0; li < rawLines.length; li++) {
+    const lineWords = rawLines[li].split(/\s+/).filter(Boolean);
+    const lineSylCount = lineWords.reduce((sum, w) => {
+      const syms = splitWord(w, lang);
+      return sum + syms.length;
+    }, 0);
+
+    finalOutput.push(...output.slice(lineBreakPos, lineBreakPos + lineSylCount));
+    lineBreakPos += lineSylCount;
+
+    if (li < rawLines.length - 1) {
+      const nextSyl = output[lineBreakPos];
+      if (nextSyl) {
+        finalOutput.push({ syllable: "", start: nextSyl.start, end: nextSyl.start, midi: 0, isLineBreak: true });
+        totalLineBreaks++;
+      }
+    }
+  }
+
+  // ── Build debug output ──
+
+  const alignedCount = wordResults.filter((wr) => wr.source === "sw_aligned").length;
+  const interpCount = wordResults.filter((wr) => wr.source !== "sw_aligned").length;
+
+  debug.songId = _songId || "unknown";
+  debug.language = lang;
+  debug.lyricCharCount = lyricChars.length;
+  debug.whisperCharCount = whisperChars.length;
+  debug.whisperWordCount = whisperWords.length;
+  debug.whisperTimeRange = [whisperWords[0]?.start ?? 0, whisperWords.at(-1)?.end ?? 0];
+  debug.swMaxScore = maxScore;
+  debug.swMaxPos = [maxI, maxJ];
+  debug.swBacktrackLength = backtrack.length;
+  debug.backtrack = debugBacktrack;
+  debug.pauses = pauses;
+  debug.lines = debugLines;
   debug.summary = {
-    totalLyricWords: allLyricWords.length,
-    matchedWords: matchedCount,
-    unmatchedWords,
-    interpolatedBefore: beforeCount,
-    interpolatedBetween: betweenCount,
-    interpolatedAfter: afterCount,
+    totalLyricWords: lyricWords.length,
+    alignedWords: alignedCount,
+    interpolatedWords: interpCount,
     totalSyllables,
     lineBreaks: totalLineBreaks,
   };
 
   log("summary", `═══════════════════════════════════════════════════════════`);
   log("summary", `Alignment complete in ${Date.now() - startTime}ms`);
-  log("summary", `  Lyric words:    ${allLyricWords.length}`);
-  log("summary", `  Matched:        ${matchedCount} (${((matchedCount / allLyricWords.length) * 100).toFixed(1)}%)`);
-  log("summary", `  Unmatched:      ${unmatchedWords}`);
-  log("summary", `    Before first: ${beforeCount}`);
-  log("summary", `    Between:      ${betweenCount}`);
-  log("summary", `    After last:   ${afterCount}`);
+  log("summary", `  Lyric words:    ${lyricWords.length}`);
+  log("summary", `  Aligned:        ${alignedCount} (${((alignedCount / lyricWords.length) * 100).toFixed(1)}%)`);
+  log("summary", `  Interpolated:   ${interpCount}`);
   log("summary", `  Syllables:      ${totalSyllables}`);
   log("summary", `  Line breaks:    ${totalLineBreaks}`);
+  log("summary", `  SW maxScore:    ${maxScore.toFixed(2)} at (${maxI}, ${maxJ})`);
+  log("summary", `  SW backtrack:   ${backtrack.length} steps`);
   log("summary", `═══════════════════════════════════════════════════════════`);
-
-  // ── Write debug JSON ──────────────────────────────────────────────────
 
   const tmpDir = path.resolve("./tmp");
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -906,5 +700,5 @@ export function alignLyrics(
 
   fs.writeFileSync(path.join(tmpDir, `${safeId}_align_debug.json`), JSON.stringify(debug, null, 2));
 
-  return output;
+  return finalOutput;
 }
