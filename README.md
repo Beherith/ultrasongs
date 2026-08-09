@@ -285,6 +285,12 @@ Default working directories:
 Project and artifact IDs are opaque. Artifact paths should be resolved through the
 repository APIs, which verify ownership and optionally verify hashes.
 
+New artifacts use human-readable storage paths of the form
+`projects/<project-id>/artifacts/<run-id>/<artifact-kind>/<original-filename>`, for
+example `.../transcription/transcription.json` or
+`.../pipeline-report/My Song.html`. Opaque IDs remain in manifests and download URLs for
+ownership checks; they are not used as artifact filenames.
+
 ## Standalone compatibility tools
 
 The legacy command names remain as thin wrappers around the canonical Python domain

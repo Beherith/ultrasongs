@@ -101,6 +101,8 @@ compatibility wrappers. Keep business logic in the package, not in these scripts
 - Keep temporary model/media work under configured `temp_dir` and clean it after success
   and failure.
 - Human-facing repair exports must come from registered artifacts, not temporary files.
+- Keep physical artifact paths human-readable as `<run>/<kind>/<meaningful filename>`.
+  Opaque IDs belong in manifests and routes, not in `art_<id>/content.ext` disk paths.
 - Avoid overwriting existing outputs. Repair bundles use a unique run ID.
 - Do not commit MP3s, model weights, project stores, exports, reports, caches, or generated
   fixtures unless a small fixture is deliberately approved for tests.

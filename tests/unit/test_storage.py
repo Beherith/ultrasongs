@@ -112,6 +112,11 @@ def test_reference_artifact_is_exact_hashed_and_immutable(tmp_path: Path) -> Non
         project.project_id, manifest.run_id, record.artifact_id, verify=True
     )
     assert owned_path.is_relative_to(projects.project_directory(project.project_id))
+    assert owned_path.name == "reference.txt"
+    assert owned_path.parent.name == "reference-ultrastar"
+    assert record.relative_path == (
+        f"artifacts/{manifest.run_id}/reference-ultrastar/reference.txt"
+    )
 
     with pytest.raises(ImmutableArtifactError):
         artifacts.register_reference(
@@ -192,6 +197,42 @@ def test_integrity_verification_detects_modified_payload(tmp_path: Path) -> None
 
     with pytest.raises(ArtifactIntegrityError):
         artifacts.read_bytes(project.project_id, manifest.run_id, record.artifact_id)
+
+
+def test_artifact_paths_are_human_readable_and_collision_safe(tmp_path: Path) -> None:
+    projects, artifacts = repositories(tmp_path)
+    project = projects.create()
+    manifest = artifacts.create_manifest(project.project_id)
+
+    first = artifacts.register_bytes(
+        project.project_id,
+        manifest.run_id,
+        b"first",
+        kind="pipeline_report",
+        original_name="My Song.html",
+        media_type="text/html",
+    )
+    second = artifacts.register_bytes(
+        project.project_id,
+        manifest.run_id,
+        b"second",
+        kind="pipeline_report",
+        original_name="My Song.html",
+        media_type="text/html",
+    )
+
+    first_path = artifacts.get_artifact_path(
+        project.project_id, manifest.run_id, first.artifact_id
+    )
+    second_path = artifacts.get_artifact_path(
+        project.project_id, manifest.run_id, second.artifact_id
+    )
+    assert first_path.relative_to(projects.project_directory(project.project_id)).as_posix() == (
+        f"artifacts/{manifest.run_id}/pipeline-report/My Song.html"
+    )
+    assert second_path.name == "My Song-2.html"
+    assert first_path.read_bytes() == b"first"
+    assert second_path.read_bytes() == b"second"
 
 
 def test_missing_project_or_run_is_not_implicitly_created(tmp_path: Path) -> None:

@@ -36,6 +36,15 @@ from .support import (
 )
 
 _SAFE_SUFFIX_RE = re.compile(r"^\.[A-Za-z0-9]{1,10}$")
+_UNSAFE_FILENAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_UNSAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_MEDIA_SUFFIXES = {
+    "application/json": ".json",
+    "application/zip": ".zip",
+    "audio/mpeg": ".mp3",
+    "text/html": ".html",
+    "text/plain": ".txt",
+}
 
 
 class ArtifactRepository:
@@ -306,13 +315,18 @@ class ArtifactRepository:
             manifest = self.get_manifest(project_id, run_id)
             artifact_id = new_opaque_id("art")
             project_dir = self.projects.project_directory(project_id)
-            artifact_dir = contained_path(project_dir, "artifacts", run_id, artifact_id)
-            artifact_dir.mkdir(parents=True, exist_ok=False)
-            safe_name = Path(original_name).name if original_name else None
-            suffix = Path(safe_name).suffix if safe_name else ""
-            if not _SAFE_SUFFIX_RE.fullmatch(suffix):
-                suffix = ""
-            destination = contained_path(artifact_dir, f"content{suffix.lower()}")
+            kind_component = _human_kind(kind)
+            artifact_dir = contained_path(
+                project_dir, "artifacts", run_id, kind_component
+            )
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = (
+                _human_filename(original_name, media_type=media_type)
+                if original_name
+                else None
+            )
+            storage_name = safe_name or f"{kind_component}{_media_suffix(media_type)}"
+            destination = _available_destination(artifact_dir, storage_name)
             digest = hashlib.sha256()
             size_bytes = 0
             temporary_name: str | None = None
@@ -414,3 +428,48 @@ class ArtifactRepository:
             migrated["schema_version"] = 1
             payload = migrated
         return payload
+
+
+def _human_kind(kind: str) -> str:
+    """Turn an internal artifact kind into a readable, contained directory name."""
+
+    component = _UNSAFE_COMPONENT_RE.sub("-", kind.strip().replace("_", "-")).strip(
+        " .-"
+    )
+    return component.lower() or "artifact"
+
+
+def _human_filename(original_name: str, *, media_type: str | None) -> str:
+    """Keep a useful original filename while removing traversal and OS metacharacters."""
+
+    basename = original_name.replace("\\", "/").rsplit("/", 1)[-1]
+    basename = _UNSAFE_FILENAME_RE.sub("_", basename).strip(" .")
+    suffix = Path(basename).suffix
+    if not _SAFE_SUFFIX_RE.fullmatch(suffix):
+        suffix = _media_suffix(media_type)
+        stem = basename
+    else:
+        stem = basename[: -len(suffix)]
+        suffix = suffix.lower()
+    stem = stem.strip(" .") or "artifact"
+    return f"{stem}{suffix}"
+
+
+def _media_suffix(media_type: str | None) -> str:
+    return _MEDIA_SUFFIXES.get(media_type or "", ".bin")
+
+
+def _available_destination(directory: Path, filename: str) -> Path:
+    """Return a readable non-overwriting path; the repository lock makes this atomic."""
+
+    destination = contained_path(directory, filename)
+    if not destination.exists():
+        return destination
+    suffix = destination.suffix
+    stem = destination.name[: -len(suffix)] if suffix else destination.name
+    counter = 2
+    while True:
+        candidate = contained_path(directory, f"{stem}-{counter}{suffix}")
+        if not candidate.exists():
+            return candidate
+        counter += 1
