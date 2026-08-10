@@ -703,6 +703,8 @@ def generate_preview(
         pitch_data = load_pitch_json(pitch_json_path)
         pitch_words = pitch_data.get("words", [])
         # Enrich notes in-place so verses (which share references) also get the frames
+        # Track assigned whisper words so each is claimed by at most one note
+        assigned_pw_ids = set()
         for note in data["notes"]:
             start_s = note["start"] / 1000.0
             end_s = (note["start"] + note["duration"]) / 1000.0
@@ -719,12 +721,14 @@ def generate_preview(
                     ft = pf["time"]
                     if start_s <= ft <= end_s:
                         frames.append(pf)
-                if overlap > best_overlap:
+                # Only consider unassigned whisper words for label assignment
+                if id(pw) not in assigned_pw_ids and overlap > best_overlap:
                     best_overlap = overlap
                     best_pw = pw
             if frames:
                 note["pitchFrames"] = frames
             if best_pw is not None:
+                assigned_pw_ids.add(id(best_pw))
                 note["_whisper_word"] = best_pw.get("word", "")
                 note["_whisper_start"] = best_pw.get("start", 0)
                 note["_whisper_end"] = best_pw.get("end", 0)
@@ -733,27 +737,16 @@ def generate_preview(
         for verse in data["verses"]:
             v_start_s = verse[0]["start"] / 1000.0
             v_end_s = (verse[-1]["start"] + verse[-1]["duration"]) / 1000.0
-            # Gather all frames from whisper words within the verse span
-            all_verse_frames = []
-            matched_pw_ids = set()
-            for note in verse:
-                start_s = note["start"] / 1000.0
-                end_s = (note["start"] + note["duration"]) / 1000.0
-                for pw in pitch_words:
-                    pw_start = pw.get("start", 0)
-                    pw_end = pw.get("end", 0)
-                    if pw_end <= start_s or pw_start >= end_s:
-                        continue
-                    matched_pw_ids.add(id(pw))
-            # Find orphan whisper words (within verse span but no note overlap)
+            # Find orphan whisper words (within verse span but not assigned to any note)
             for pw in pitch_words:
                 pw_start = pw.get("start", 0)
                 pw_end = pw.get("end", 0)
                 if pw_end <= v_start_s or pw_start >= v_end_s:
                     continue
-                if id(pw) in matched_pw_ids:
+                if id(pw) in assigned_pw_ids:
                     continue
                 # Orphan word — create a synthetic note so it renders
+                assigned_pw_ids.add(id(pw))
                 orphan_note = {
                     "start": pw_start * 1000,
                     "duration": max((pw_end - pw_start) * 1000, 10),
@@ -783,6 +776,36 @@ def generate_preview(
                 if "pitchFrames" not in closest:
                     closest["pitchFrames"] = []
                 closest["pitchFrames"].extend(orphans)
+
+        # Catch whisper words outside all verse spans (e.g. intro/outro artifacts)
+        if data["verses"]:
+            for pw in pitch_words:
+                if id(pw) in assigned_pw_ids:
+                    continue
+                pw_start = pw.get("start", 0)
+                pw_end = pw.get("end", 0)
+                # Attach to the nearest verse
+                nearest_verse = min(
+                    data["verses"],
+                    key=lambda v: min(
+                        abs(v[0]["start"] / 1000.0 - pw_start),
+                        abs((v[-1]["start"] + v[-1]["duration"]) / 1000.0 - pw_end),
+                    ),
+                )
+                orphan_note = {
+                    "start": pw_start * 1000,
+                    "duration": max((pw_end - pw_start) * 1000, 10),
+                    "pitch": pw.get("midi", 60),
+                    "lyric": pw.get("word", ""),
+                    "chorus": False,
+                    "pitchFrames": list(pw.get("pitchFrames", [])),
+                    "_whisper_word": pw.get("word", ""),
+                    "_whisper_start": pw_start,
+                    "_whisper_end": pw_end,
+                    "_orphan": True,
+                }
+                nearest_verse.append(orphan_note)
+                data["notes"].append(orphan_note)
 
         pitch_word_count = len(pitch_words)
         pitch_frame_count = sum(len(w.get("pitchFrames", [])) for w in pitch_words)
