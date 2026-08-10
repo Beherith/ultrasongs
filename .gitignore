@@ -54,3 +54,11 @@ AGENTS.md
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+
+# CLI-specific
+cli/__pycache__/
+cli/.pytest_cache/
+
+# Ralph Loop state
+.opencode/ralph-loop.local.md

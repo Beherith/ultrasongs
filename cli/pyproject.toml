@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ultrasongs-cli"
+version = "0.1.0"
+description = "CLI tool to generate Ultrastar Deluxe song files from audio/video + lyrics"
+requires-python = ">=3.10"
+dependencies = [
+    "faster-whisper>=1.0.0",
+    "demucs>=4.0.0",
+    "torchcrepe>=0.0.20",
+    "torchaudio>=2.0.0",
+    "soundfile>=0.12.0",
+    "numpy>=1.24.0",
+    "lameenc>=1.7.0",
+    "librosa>=0.10.0",
+    "pyphen>=0.15.0",
+]
+
+[project.scripts]
+ultrasongs = "cli.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["cli*"]

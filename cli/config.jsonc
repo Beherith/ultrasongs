@@ -1,0 +1,41 @@
+{
+  // Whisper model size: "tiny", "base", "small", "medium", "large"
+  "whisper_model": "medium",
+
+  // Demucs model: "htdemucs", "hdemucs", "mdx", etc.
+  "demucs_model": "htdemucs",
+
+  // Audio sample rate for processing
+  "sample_rate": 44100,
+
+  // Pitch detection range (Hz) — C2 to C6
+  "pitch_min_hz": 65.41,
+  "pitch_max_hz": 1046.5,
+
+  // torchcrepe hop length in milliseconds
+  "crepe_hop_ms": 10,
+
+  // Pause detection: minimum silence duration in milliseconds
+  "pause_min_silence_ms": 400,
+
+  // Pause detection: RMS energy threshold as percentage of 95th percentile
+  "pause_threshold_pct": 5,
+
+  // Gap lead-in: milliseconds before first note for Ultrastar #GAP
+  "gap_lead_in_ms": 500,
+
+  // Line break offset: beats before next note to insert line break
+  "linebreak_beat_offset": 4,
+
+  // FFmpeg audio bitrate for extracted MP3
+  "ffmpeg_audio_bitrate": "128k",
+
+  // Output directory for generated files
+  "output_dir": "./output",
+
+  // Temporary directory for intermediate files
+  "temp_dir": "./tmp",
+
+  // Enable debug JSON output during alignment
+  "debug_alignment": false
+}
