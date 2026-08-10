@@ -24,6 +24,7 @@ class Config:
     """Frozen pipeline configuration."""
 
     whisper_model: str = "medium"
+    whisper_language: str = "en"
     demucs_model: str = "htdemucs"
     sample_rate: int = 44100
     pitch_min_hz: float = 65.41
@@ -68,6 +69,7 @@ def load_config(config_path: str | None = None) -> Config:
     # Map JSONC keys to dataclass fields
     field_map = {
         "whisper_model": str,
+        "whisper_language": str,
         "demucs_model": str,
         "sample_rate": int,
         "pitch_min_hz": float,

@@ -336,6 +336,7 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
         str(vocals_wav),
         word_timestamps=True,
         initial_prompt=lyrics_prompt,
+        language=config.whisper_language if config.whisper_language else None,
     )
 
     raw_words = []

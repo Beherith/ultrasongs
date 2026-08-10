@@ -8,6 +8,15 @@
   // clean audio or limited hardware.
   "whisper_model": "medium",
 
+  // Language hint for Whisper transcription.
+  // When set (e.g., "en", "de", "es"), Whisper skips auto-detection and uses
+  // the specified language model directly. This improves transcription speed and
+  // accuracy for known-language songs. Set to "" (empty string) to let Whisper
+  // auto-detect the language, which is useful for multilingual songs or when
+  // the language is unknown. Note: forcing the wrong language will produce
+  // garbled transcription.
+  "whisper_language": "en",
+
   // Demucs source separation model.
   // "htdemucs" (Hybrid Transformer) is the default — it produces the highest
   // quality vocal/instrumental splits. Alternatives like "hdemucs" (older hybrid

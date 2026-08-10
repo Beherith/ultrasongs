@@ -12,6 +12,7 @@ class TestConfigDefaults:
     def test_default_values(self):
         cfg = Config()
         assert cfg.whisper_model == "medium"
+        assert cfg.whisper_language == "en"
         assert cfg.demucs_model == "htdemucs"
         assert cfg.sample_rate == 44100
         assert cfg.pitch_min_hz == 65.41

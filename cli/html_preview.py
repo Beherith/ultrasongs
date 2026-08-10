@@ -162,11 +162,15 @@ def build_verse_svg(
     height: int,
     *,
     show_pitch_frames: bool = False,
+    bpm: float | None = None,
+    gap_ms: float | None = None,
 ) -> str:
     """Build an SVG for a verse: X=time (ms), Y=pitch (inverted).
 
     When ``show_pitch_frames`` is True, confidence-colored pitch detection dots
     are overlaid on top of the note bars.
+
+    When ``bpm`` and ``gap_ms`` are provided, 4/4 beat grid lines are drawn.
     """
     if not verse:
         return ""
@@ -251,6 +255,31 @@ def build_verse_svg(
             f'font-size="8" font-family="monospace">{t / 1000:.1f}s</text>'
         )
 
+    # Beat grid lines (4/4 time)
+    if bpm and gap_ms is not None:
+        beat_ms = 60000.0 / bpm
+        # Find the first beat index that falls within or near the visible range
+        first_beat = max(0, int((t_min - gap_ms) / beat_ms) - 1)
+        last_beat = int((t_max - gap_ms) / beat_ms) + 1
+        for beat_idx in range(first_beat, last_beat + 1):
+            beat_time = gap_ms + beat_idx * beat_ms
+            if beat_time < t_min or beat_time > t_max:
+                continue
+            bx = tx(beat_time)
+            is_downbeat = beat_idx % 4 == 0
+            if is_downbeat:
+                parts.append(
+                    f'<line x1="{bx:.1f}" y1="{pad_top}" x2="{bx:.1f}" '
+                    f'y2="{height - pad_bottom}" stroke="rgba(255,255,255,0.35)" '
+                    f'stroke-width="1.5"/>'
+                )
+            else:
+                parts.append(
+                    f'<line x1="{bx:.1f}" y1="{pad_top}" x2="{bx:.1f}" '
+                    f'y2="{height - pad_bottom}" stroke="rgba(255,255,255,0.12)" '
+                    f'stroke-width="0.8"/>'
+                )
+
     # Word-block background shading (from pitch frames)
     if show_pitch_frames:
         # Compute per-note time spans in seconds for background
@@ -287,6 +316,28 @@ def build_verse_svg(
             f'fill="{text_fill}" font-size="{fs:.1f}" font-family="sans-serif" '
             f'dominant-baseline="central">{lyric}</text>'
         )
+
+        # Whisper word label (green, below the note bar)
+        if show_pitch_frames and n.get("_whisper_word"):
+            ww = html_module.escape(n["_whisper_word"])
+            ww_fs = max(6, min(9, bw / (len(ww) * 0.55)))
+            ww_y = ry + bar_h / 2 + ww_fs + 2
+            ww_start_x = tx_from_sec(n["_whisper_start"])
+            ww_end_x = tx_from_sec(n["_whisper_end"])
+            ww_cx = (ww_start_x + ww_end_x) / 2
+            # Horizontal underline for whisper word timing
+            ww_line_y = ww_y + ww_fs * 0.6
+            ww_line_w = max(ww_end_x - ww_start_x, 1)
+            parts.append(
+                f'<line x1="{ww_start_x:.1f}" y1="{ww_line_y:.1f}" '
+                f'x2="{ww_end_x:.1f}" y2="{ww_line_y:.1f}" '
+                f'stroke="#4caf50" stroke-width="1.2" opacity="0.5"/>'
+            )
+            parts.append(
+                f'<text x="{ww_cx:.1f}" y="{ww_y:.1f}" text-anchor="middle" '
+                f'fill="#4caf50" font-size="{ww_fs:.1f}" font-family="sans-serif" '
+                f'font-style="italic" dominant-baseline="central" opacity="0.85">{ww}</text>'
+            )
 
     # Pitch detection dots overlay
     if show_pitch_frames:
@@ -378,7 +429,7 @@ def _build_ultrastar_html(data: dict, title: str) -> str:
     meta = data["metadata"]
     notes = data["notes"]
     verses = data["verses"]
-    has_frames = bool(notes[0].get("pitchFrames")) if notes else False
+    has_frames = bool(data.get("pitch_frame_count", 0))
     pitch_word_count = data.get("pitch_word_count", 0)
     pitch_frame_count = data.get("pitch_frame_count", 0)
 
@@ -413,7 +464,14 @@ def _build_ultrastar_html(data: dict, title: str) -> str:
                 p_max = max(p_max, pf["midi"])
 
         svg_height = max(120, (p_max - p_min + 2) * 18 + 50)
-        svg = build_verse_svg(verse, 960, svg_height, show_pitch_frames=has_frames)
+        svg_bpm = float(meta.get("BPM", 120))
+        svg_gap = float(meta.get("GAP", 0))
+        svg = build_verse_svg(
+            verse, 960, svg_height,
+            show_pitch_frames=has_frames,
+            bpm=svg_bpm,
+            gap_ms=svg_gap,
+        )
         lyrics = build_verse_lyrics(verse, has_pitch_frames=has_frames)
 
         verse_info_parts = [
@@ -443,6 +501,7 @@ def _build_ultrastar_html(data: dict, title: str) -> str:
   <span><span class="dot" style="background:rgb(0,255,0)"></span> High confidence</span>
   <span><span class="dot" style="background:rgb(255,200,0)"></span> Medium</span>
   <span><span class="dot" style="background:rgb(255,0,0)"></span> Low confidence</span>
+  <span><span class="dot" style="background:#4caf50; font-style:italic; font-size:10px;">W</span> Whisper word</span>
 </div>
 """
 
@@ -626,12 +685,32 @@ def generate_preview(
     if pitch_json_path is not None:
         pitch_data = load_pitch_json(pitch_json_path)
         pitch_words = pitch_data.get("words", [])
-        data["notes"] = match_pitch_frames_to_notes(data["notes"], pitch_words)
-        # Rebuild verses from enriched notes
-        data["verses"] = [
-            [n for n in v] for v in data["verses"]
-        ]
-        # Re-match per-verse (verses share note references, so enriching notes is enough)
+        # Enrich notes in-place so verses (which share references) also get the frames
+        for note in data["notes"]:
+            start_s = note["start"] / 1000.0
+            end_s = (note["start"] + note["duration"]) / 1000.0
+            frames = []
+            best_pw = None
+            best_overlap = 0.0
+            for pw in pitch_words:
+                pw_start = pw.get("start", 0)
+                pw_end = pw.get("end", 0)
+                if pw_end <= start_s or pw_start >= end_s:
+                    continue
+                overlap = min(end_s, pw_end) - max(start_s, pw_start)
+                for pf in pw.get("pitchFrames", []):
+                    ft = pf["time"]
+                    if start_s <= ft <= end_s:
+                        frames.append(pf)
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_pw = pw
+            if frames:
+                note["pitchFrames"] = frames
+            if best_pw is not None:
+                note["_whisper_word"] = best_pw.get("word", "")
+                note["_whisper_start"] = best_pw.get("start", 0)
+                note["_whisper_end"] = best_pw.get("end", 0)
         pitch_word_count = len(pitch_words)
         pitch_frame_count = sum(len(w.get("pitchFrames", [])) for w in pitch_words)
         data["pitch_word_count"] = pitch_word_count
