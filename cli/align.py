@@ -626,7 +626,7 @@ def align_lyrics(
         logger.info(f"Whisper pitch data written to {whisper_json_path}")
 
         # Pitch visualization HTML
-        from cli.pitch_to_html import build_html
+        from cli.html_preview import build_html
         html_title = f"{lyric_words[0]['word'] if lyric_words else 'Pitch'} — Whisper"
         html_content = build_html(whisper_pitch_data, html_title)
         html_path = config.temp_path / "whisper_pitch.html"

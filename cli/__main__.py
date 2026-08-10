@@ -68,6 +68,7 @@ def _build_parser() -> argparse.ArgumentParser:
     prev = subparsers.add_parser("preview", help="Generate HTML preview from Ultrastar .txt")
     prev.add_argument("--txt", required=True, help="Ultrastar .txt file")
     prev.add_argument("--output", default=None, help="Output HTML file (default: <title>.html)")
+    prev.add_argument("--pitch", default=None, help="Pitch detection JSON to overlay")
 
     return parser
 
@@ -174,7 +175,11 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
         from cli.html_preview import generate_preview
 
         txt_path = output_dir / f"{args.title}.txt"
-        generate_preview(txt_path)
+        pitch_json = config.temp_path / "whisper_pitch.json"
+        if pitch_json.exists():
+            generate_preview(txt_path, pitch_json_path=pitch_json)
+        else:
+            generate_preview(txt_path)
         logger.info("HTML preview generated")
 
     return 0
@@ -225,7 +230,8 @@ def _cmd_preview(args: argparse.Namespace, config: "Config") -> int:  # type: ig
 
     txt_path = Path(args.txt)
     output_html = Path(args.output) if args.output else None
-    generate_preview(txt_path, output_html)
+    pitch_json = args.pitch if args.pitch else None
+    generate_preview(txt_path, output_html, pitch_json)
     return 0
 
 

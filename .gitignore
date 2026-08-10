@@ -59,7 +59,9 @@ __pycache__/
 # CLI-specific
 cli/__pycache__/
 cli/.pytest_cache/
-output/
+
+# Add ./output/ directory to gitignore for intermediate output files
+/output/
 
 
 # Ralph Loop state
