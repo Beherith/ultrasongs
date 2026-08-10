@@ -23,6 +23,7 @@ def _strip_jsonc(text: str) -> str:
 class Config:
     """Frozen pipeline configuration."""
 
+    device: str = "auto"
     whisper_model: str = "medium"
     whisper_language: str = "en"
     demucs_model: str = "htdemucs"
@@ -68,6 +69,7 @@ def load_config(config_path: str | None = None) -> Config:
 
     # Map JSONC keys to dataclass fields
     field_map = {
+        "device": str,
         "whisper_model": str,
         "whisper_language": str,
         "demucs_model": str,

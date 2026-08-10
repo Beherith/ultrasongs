@@ -193,6 +193,10 @@ def build_verse_svg(
         frame_pitches = [f["midi"] for f in all_frames]
         p_min = min(p_min, *frame_pitches)
         p_max = max(p_max, *frame_pitches)
+        # Expand time range to include pitch frames (convert seconds to ms)
+        frame_times = [f["time"] * 1000 for f in all_frames]
+        t_min = min(t_min, *frame_times)
+        t_max = max(t_max, *frame_times)
 
     pad_left = 50
     pad_right = 16
@@ -297,31 +301,39 @@ def build_verse_svg(
         w = tx(n["start"] + n["duration"]) - x
         y = ty(n["pitch"])
         bar_h = max(plot_h / (p_range + 1) * 0.7, 8)
-        fill = "#e94560" if n.get("chorus") else "#0f3460"
-        stroke = "#ff6b81" if n.get("chorus") else "#4fc3f7"
-        text_fill = "#fff" if n.get("chorus") else "#cde"
         rx = x + w / 2
         ry = y
         bw = max(w, 2)
-        parts.append(
-            f'<rect x="{x:.1f}" y="{(y - bar_h / 2):.1f}" width="{bw:.1f}" '
-            f'height="{bar_h:.1f}" rx="2" fill="{fill}" stroke="{stroke}" stroke-width="0.8" '
-            f'title="{html_module.escape(n["lyric"])} ({pitch_to_note(n["pitch"])}) '
-            f'{ms_to_sec(n["start"])} +{n["duration"]:.0f}ms"/>'
-        )
-        lyric = html_module.escape(n["lyric"])
-        fs = max(7, min(12, bw / (len(lyric) * 0.55)))
-        parts.append(
-            f'<text x="{rx:.1f}" y="{ry + fs * 0.35:.1f}" text-anchor="middle" '
-            f'fill="{text_fill}" font-size="{fs:.1f}" font-family="sans-serif" '
-            f'dominant-baseline="central">{lyric}</text>'
-        )
+
+        if n.get("_orphan"):
+            # Orphan whisper word — skip note bar, only draw whisper label
+            pass
+        else:
+            fill = "#e94560" if n.get("chorus") else "#0f3460"
+            stroke = "#ff6b81" if n.get("chorus") else "#4fc3f7"
+            text_fill = "#fff" if n.get("chorus") else "#cde"
+            parts.append(
+                f'<rect x="{x:.1f}" y="{(y - bar_h / 2):.1f}" width="{bw:.1f}" '
+                f'height="{bar_h:.1f}" rx="2" fill="{fill}" stroke="{stroke}" stroke-width="0.8" '
+                f'title="{html_module.escape(n["lyric"])} ({pitch_to_note(n["pitch"])}) '
+                f'{ms_to_sec(n["start"])} +{n["duration"]:.0f}ms"/>'
+            )
+            lyric = html_module.escape(n["lyric"])
+            fs = max(7, min(12, bw / (len(lyric) * 0.55)))
+            parts.append(
+                f'<text x="{rx:.1f}" y="{ry + fs * 0.35:.1f}" text-anchor="middle" '
+                f'fill="{text_fill}" font-size="{fs:.1f}" font-family="sans-serif" '
+                f'dominant-baseline="central">{lyric}</text>'
+            )
 
         # Whisper word label (green, below the note bar)
         if show_pitch_frames and n.get("_whisper_word"):
             ww = html_module.escape(n["_whisper_word"])
             ww_fs = max(6, min(9, bw / (len(ww) * 0.55)))
-            ww_y = ry + bar_h / 2 + ww_fs + 2
+            if n.get("_orphan"):
+                ww_y = ry
+            else:
+                ww_y = ry + bar_h / 2 + ww_fs + 2
             ww_start_x = tx_from_sec(n["_whisper_start"])
             ww_end_x = tx_from_sec(n["_whisper_end"])
             ww_cx = (ww_start_x + ww_end_x) / 2
@@ -384,6 +396,8 @@ def build_verse_lyrics(verse: list[dict], *, has_pitch_frames: bool = False) -> 
     """Build a lyrics line with timing annotations."""
     parts = []
     for n in verse:
+        if n.get("_orphan"):
+            continue
         t = ms_to_sec(n["start"])
         lyric = html_module.escape(n["lyric"])
         note = pitch_to_note(n["pitch"])
@@ -437,11 +451,12 @@ def _build_ultrastar_html(data: dict, title: str) -> str:
     for k, v in meta.items():
         meta_rows += f"<tr><th>{html_module.escape(k)}</th><td>{html_module.escape(v)}</td></tr>\n"
 
-    total_dur = ms_to_sec(notes[-1]["start"] + notes[-1]["duration"]) if notes else "—"
+    real_notes = [n for n in notes if not n.get("_orphan")]
+    total_dur = ms_to_sec(real_notes[-1]["start"] + real_notes[-1]["duration"]) if real_notes else "—"
 
     summary_parts = [
         f"Total duration: {total_dur}",
-        f"{len(notes)} notes",
+        f"{len(real_notes)} notes",
         f"{len(verses)} verses",
     ]
     if pitch_frame_count:
@@ -451,8 +466,10 @@ def _build_ultrastar_html(data: dict, title: str) -> str:
 
     verse_blocks = ""
     for i, verse in enumerate(verses):
-        verse_start = ms_to_sec(verse[0]["start"])
-        verse_end = ms_to_sec(verse[-1]["start"] + verse[-1]["duration"])
+        real_verse = [n for n in verse if not n.get("_orphan")]
+        verse_start = ms_to_sec(real_verse[0]["start"]) if real_verse else "0.00s"
+        verse_end = (ms_to_sec(real_verse[-1]["start"] + real_verse[-1]["duration"])
+                      if real_verse else "0.00s")
         pitches = set(n["pitch"] for n in verse)
         p_min = min(pitches)
         p_max = max(pitches)
@@ -475,7 +492,7 @@ def _build_ultrastar_html(data: dict, title: str) -> str:
         lyrics = build_verse_lyrics(verse, has_pitch_frames=has_frames)
 
         verse_info_parts = [
-            f"{len(verse)} notes",
+            f"{len(real_verse)} notes",
             f"Pitch range: {pitch_to_note(p_min)}–{pitch_to_note(p_max)}",
         ]
         verse_frames = sum(len(n.get("pitchFrames", [])) for n in verse)
@@ -711,6 +728,62 @@ def generate_preview(
                 note["_whisper_word"] = best_pw.get("word", "")
                 note["_whisper_start"] = best_pw.get("start", 0)
                 note["_whisper_end"] = best_pw.get("end", 0)
+
+        # Collect orphan frames and words between notes, attach to nearest note per verse
+        for verse in data["verses"]:
+            v_start_s = verse[0]["start"] / 1000.0
+            v_end_s = (verse[-1]["start"] + verse[-1]["duration"]) / 1000.0
+            # Gather all frames from whisper words within the verse span
+            all_verse_frames = []
+            matched_pw_ids = set()
+            for note in verse:
+                start_s = note["start"] / 1000.0
+                end_s = (note["start"] + note["duration"]) / 1000.0
+                for pw in pitch_words:
+                    pw_start = pw.get("start", 0)
+                    pw_end = pw.get("end", 0)
+                    if pw_end <= start_s or pw_start >= end_s:
+                        continue
+                    matched_pw_ids.add(id(pw))
+            # Find orphan whisper words (within verse span but no note overlap)
+            for pw in pitch_words:
+                pw_start = pw.get("start", 0)
+                pw_end = pw.get("end", 0)
+                if pw_end <= v_start_s or pw_start >= v_end_s:
+                    continue
+                if id(pw) in matched_pw_ids:
+                    continue
+                # Orphan word — create a synthetic note so it renders
+                orphan_note = {
+                    "start": pw_start * 1000,
+                    "duration": max((pw_end - pw_start) * 1000, 10),
+                    "pitch": pw.get("midi", 60),
+                    "lyric": pw.get("word", ""),
+                    "chorus": False,
+                    "pitchFrames": list(pw.get("pitchFrames", [])),
+                    "_whisper_word": pw.get("word", ""),
+                    "_whisper_start": pw_start,
+                    "_whisper_end": pw_end,
+                    "_orphan": True,
+                }
+                verse.append(orphan_note)
+                data["notes"].append(orphan_note)
+            # Find frames not already on any note
+            noted_frames = set()
+            for note in verse:
+                for pf in note.get("pitchFrames", []):
+                    noted_frames.add(id(pf))
+            orphans = [
+                f for pw in pitch_words
+                for f in pw.get("pitchFrames", [])
+                if id(f) not in noted_frames and v_start_s <= f["time"] <= v_end_s
+            ]
+            if orphans and verse:
+                closest = min(verse, key=lambda n: abs(n["start"] / 1000.0 - orphans[0]["time"]))
+                if "pitchFrames" not in closest:
+                    closest["pitchFrames"] = []
+                closest["pitchFrames"].extend(orphans)
+
         pitch_word_count = len(pitch_words)
         pitch_frame_count = sum(len(w.get("pitchFrames", [])) for w in pitch_words)
         data["pitch_word_count"] = pitch_word_count

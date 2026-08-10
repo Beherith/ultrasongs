@@ -24,8 +24,14 @@ DEMUCS_SR = 44100
 DEMUCS_VOCALS_IDX = 3  # sources: ['drums', 'bass', 'other', 'vocals']
 
 
-def _get_device() -> str:
+def _get_device(device_override: str = "auto") -> str:
     import torch
+    if device_override == "cuda":
+        if not torch.cuda.is_available():
+            logger.warning("CUDA requested but not available — falling back to CPU")
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if device_override != "auto":
+        return device_override
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -274,6 +280,9 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     """Run the full transcription pipeline."""
     import torch
     import soundfile as sf
+
+    global DEVICE
+    DEVICE = _get_device(config.device)
 
     logger.info(f"Starting transcription: {mp3_path}")
     logger.info(f"Device: {DEVICE}, Whisper model: {config.whisper_model}")

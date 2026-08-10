@@ -1,4 +1,10 @@
 {
+  // Device for GPU-accelerated models (Demucs, torchcrepe, Whisper).
+  // "auto" (default) — uses CUDA if available, otherwise CPU.
+  // "cuda" — force GPU. If CUDA is not available, falls back to CPU with a warning.
+  // "cpu" — force CPU (useful for debugging or when GPU causes issues).
+  "device": "auto",
+
   // Whisper transcription model size.
   // Options: "tiny", "base", "small", "medium", "large"
   // "medium" is the default — it offers the best balance of transcription accuracy

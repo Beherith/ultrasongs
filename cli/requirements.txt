@@ -1,7 +1,9 @@
+# Install CUDA-enabled PyTorch first:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+# Then install the rest:
 faster-whisper>=1.0.0
 demucs>=4.0.0
 torchcrepe>=0.0.20
-torchaudio>=2.0.0
 soundfile>=0.12.0
 numpy>=1.24.0
 lameenc>=1.7.0
