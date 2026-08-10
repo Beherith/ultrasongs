@@ -108,8 +108,8 @@ Edit `cli/config.jsonc` (supports `//` and `/* */` comments):
 | `ffmpeg_audio_bitrate` | `"128k"` | Output MP3 bitrate |
 | `output_dir` | `"./output"` | Output directory |
 | `temp_dir` | `"./tmp"` | Intermediate files directory |
-| `debug_alignment` | `false` | Write alignment debug JSON to temp dir |
-| `bpm_use_accompaniment` | `false` | Use Demucs instrumental track for BPM detection |
+| `debug_alignment` | `true` | Write alignment debug JSON to temp dir |
+| `bpm_use_accompaniment` | `true` | Use Demucs instrumental track for BPM detection |
 
 ## Supported input formats
 
