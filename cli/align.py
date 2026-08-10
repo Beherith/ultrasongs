@@ -13,7 +13,7 @@ from typing import Any
 from cli.config import Config
 from cli.logging_setup import get_logger
 from cli.syllabify import split_word
-from cli.types import AlignedSyllable, Pause, WordTimestamp
+from cli.pipeline_types import AlignedSyllable, Pause, WordTimestamp
 
 logger = get_logger("cli.align")
 
@@ -177,6 +177,76 @@ def smith_waterman(lyric_chars: list[str], whisper_chars: list[str]) -> dict[str
     }
 
 
+# ── Backtrace visualization ─────────────────────────────────────────────────
+
+_LINE_WIDTH = 120  # characters per alignment line (excluding prefix)
+
+
+def _format_backtrace(
+    sw_result: dict[str, Any],
+    lyric_chars: list[dict[str, Any]],
+    whisper_chars: list[dict[str, Any]],
+) -> str:
+    """Render the SW backtrack as a 120-char-wide visual alignment.
+
+    Format per block:
+        <pos>
+        q: <lyric chars, - for gaps>
+        -- <alignment symbols: |=match, .=phonetic, space=mismatch>
+        s: <whisper chars, - for gaps>
+        <pos>
+    """
+    columns: list[tuple[str, str, str]] = []
+
+    for step in sw_result["backtrack"]:
+        if step["matrix"] == "M" and step["i"] > 0 and step["j"] > 0:
+            lc = lyric_chars[step["i"] - 1]
+            wc = whisper_chars[step["j"] - 1]
+            ls = lc["orig"]
+            ws = wc["orig"]
+            if ls == ws:
+                sym = "|"
+            else:
+                sym = "." if phonetic_score(lc["norm"], wc["norm"]) >= 0 else " "
+            columns.append((ls, ws, sym))
+        elif step["matrix"] == "X" and step["i"] > 0:
+            lc = lyric_chars[step["i"] - 1]
+            columns.append((lc["orig"], "-", " "))
+        elif step["matrix"] == "Y" and step["j"] > 0:
+            wc = whisper_chars[step["j"] - 1]
+            columns.append(("-", wc["orig"], " "))
+
+    if not columns:
+        return "(empty backtrack)"
+
+    # Chunk into 120-char-wide blocks
+    blocks: list[tuple[str, str, str, int]] = []
+    q_buf, s_buf, sym_buf = "", "", ""
+    start_pos = 0
+
+    for ql, sl, sym in columns:
+        q_buf += ql
+        s_buf += sl
+        sym_buf += sym
+        if len(q_buf) >= _LINE_WIDTH:
+            blocks.append((q_buf, s_buf, sym_buf, start_pos))
+            start_pos += len(q_buf)
+            q_buf, s_buf, sym_buf = "", "", ""
+
+    if q_buf:
+        blocks.append((q_buf, s_buf, sym_buf, start_pos))
+
+    lines = []
+    for q_line, s_line, sym_line, pos in blocks:
+        lines.append(str(pos))
+        lines.append(f"q: {q_line}")
+        lines.append(f"-- {sym_line}")
+        lines.append(f"s: {s_line}")
+    lines.append(str(start_pos + len(q_buf) if blocks else 0))
+
+    return "\n".join(lines)
+
+
 # ── MIDI extraction ──────────────────────────────────────────────────────────
 
 def _median(values: list[int]) -> int | None:
@@ -309,6 +379,8 @@ def align_lyrics(
         f"at ({sw_result['maxI']}, {sw_result['maxJ']}), "
         f"backtrack={len(sw_result['backtrack'])} steps"
     )
+
+    sw_backtrace_text = _format_backtrace(sw_result, lyric_chars, whisper_chars)
 
     # ── Extract word-level matches from backtrack ─────────────────────────
 
@@ -527,5 +599,38 @@ def align_lyrics(
         debug_path = config.temp_path / "align_debug.json"
         debug_path.write_text(json.dumps(debug_data, indent=2), encoding="utf-8")
         logger.info(f"Debug data written to {debug_path}")
+
+        backtrace_path = config.temp_path / "align_backtrace.txt"
+        backtrace_path.write_text(sw_backtrace_text, encoding="utf-8")
+        logger.info(f"Backtrace written to {backtrace_path}")
+
+        # Whisper words + pitch frames JSON
+        whisper_pitch_data = {
+            "words": [
+                {
+                    "word": ww.word,
+                    "start": ww.start,
+                    "end": ww.end,
+                    "midi": ww.midi,
+                    "pitchFrames": [
+                        {"time": pf.time, "midi": pf.midi, "confidence": pf.confidence}
+                        for pf in ww.pitch_frames
+                    ],
+                }
+                for ww in whisper_words
+            ],
+            "done": True,
+        }
+        whisper_json_path = config.temp_path / "whisper_pitch.json"
+        whisper_json_path.write_text(json.dumps(whisper_pitch_data, indent=2), encoding="utf-8")
+        logger.info(f"Whisper pitch data written to {whisper_json_path}")
+
+        # Pitch visualization HTML
+        from cli.pitch_to_html import build_html
+        html_title = f"{lyric_words[0]['word'] if lyric_words else 'Pitch'} — Whisper"
+        html_content = build_html(whisper_pitch_data, html_title)
+        html_path = config.temp_path / "whisper_pitch.html"
+        html_path.write_text(html_content, encoding="utf-8")
+        logger.info(f"Pitch visualization written to {html_path}")
 
     return final_output

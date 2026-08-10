@@ -2,7 +2,7 @@
 
 from cli.config import Config
 from cli.logging_setup import get_logger
-from cli.types import AlignedSyllable, UltrastarMeta, UltrastarNote
+from cli.pipeline_types import AlignedSyllable, UltrastarMeta, UltrastarNote
 from cli.ultrastar import build_ultrastar_txt, ms_to_beats
 
 logger = get_logger("cli.generate")

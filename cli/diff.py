@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from cli.logging_setup import get_logger
-from cli.types import UltrastarMeta, UltrastarNote
+from cli.pipeline_types import UltrastarMeta, UltrastarNote
 from cli.ultrastar import parse_ultrastar_txt
 
 logger = get_logger("cli.diff")

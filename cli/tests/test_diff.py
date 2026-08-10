@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from cli.diff import diff_ultrastar
-from cli.types import UltrastarMeta, UltrastarNote
+from cli.pipeline_types import UltrastarMeta, UltrastarNote
 from cli.ultrastar import build_ultrastar_txt
 
 

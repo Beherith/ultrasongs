@@ -13,7 +13,7 @@ from typing import Any
 
 from cli.config import Config
 from cli.logging_setup import get_logger
-from cli.types import Pause, PitchFrame, TranscribeResult, WordTimestamp
+from cli.pipeline_types import Pause, PitchFrame, TranscribeResult, WordTimestamp
 
 logger = get_logger("cli.transcribe")
 
@@ -68,6 +68,7 @@ def separate_all(audio, sr: int, demucs_model: str = "htdemucs"):
     from demucs.pretrained import get_model
 
     logger.info(f"Loading Demucs model: {demucs_model}")
+    print(f"[demucs] Running on {DEVICE}")
     model = get_model(demucs_model)
     model.eval()
     if DEVICE == "cuda":
@@ -114,6 +115,7 @@ def analyze_pitch(vocals, sr: int, fmin: float = 65.41, fmax: float = 1046.5, ho
         ).squeeze(0)
 
     logger.info(f"Running torchcrepe: {len(audio_t)} samples, hop={hop_ms}ms")
+    print(f"[crepe] Running on {DEVICE}")
     pitch, periodicity = torchcrepe.predict(
         audio_t.unsqueeze(0),
         sample_rate=CREPE_SR,
@@ -327,6 +329,7 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     logger.info("Step 5/6: Transcribing with Whisper…")
     from faster_whisper import WhisperModel
     compute_type = "int8" if "large" in config.whisper_model and DEVICE == "cuda" else "auto"
+    print(f"[whisper] Running on {DEVICE} (compute_type={compute_type})")
     whisper = WhisperModel(config.whisper_model, device=DEVICE, compute_type=compute_type)
 
     segs, info = whisper.transcribe(

@@ -59,6 +59,9 @@ __pycache__/
 # CLI-specific
 cli/__pycache__/
 cli/.pytest_cache/
+output/
+
 
 # Ralph Loop state
 .opencode/ralph-loop.local.md
+

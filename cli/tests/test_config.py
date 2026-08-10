@@ -25,6 +25,7 @@ class TestConfigDefaults:
         assert cfg.output_dir == "./output"
         assert cfg.temp_dir == "./tmp"
         assert cfg.debug_alignment is False
+        assert cfg.bpm_use_accompaniment is False
 
     def test_frozen(self):
         cfg = Config()

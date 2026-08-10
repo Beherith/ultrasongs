@@ -8,7 +8,7 @@ from cli.align import (
     smith_waterman,
 )
 from cli.config import Config
-from cli.types import AlignedSyllable, Pause, WordTimestamp
+from cli.pipeline_types import AlignedSyllable, Pause, WordTimestamp
 
 
 class TestNormalizeChar:

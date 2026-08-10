@@ -37,6 +37,7 @@ class Config:
     output_dir: str = "./output"
     temp_dir: str = "./tmp"
     debug_alignment: bool = False
+    bpm_use_accompaniment: bool = False
 
     # Derived paths
     _config_path: Path = field(default=None, repr=False)  # type: ignore[assignment]
@@ -80,6 +81,7 @@ def load_config(config_path: str | None = None) -> Config:
         "output_dir": str,
         "temp_dir": str,
         "debug_alignment": bool,
+        "bpm_use_accompaniment": bool,
     }
 
     kwargs: dict[str, Any] = {"_config_path": default_path}

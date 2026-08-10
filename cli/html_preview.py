@@ -1,41 +1,47 @@
-#!/usr/bin/env python3
-"""Parse an UltraStar Deluxe .txt song file and render it as a scrollable HTML page with verse visualizations."""
+"""Parse an UltraStar Deluxe .txt song file and render it as an HTML page with verse visualizations."""
 
-import sys
 import html as html_module
 from pathlib import Path
 
+from cli.logging_setup import get_logger
+
+logger = get_logger("cli.html_preview")
+
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
 
 def pitch_to_note(pitch: int) -> str:
     octave = pitch // 12 - 1
     name = NOTE_NAMES[pitch % 12]
     return f"{name}{octave}"
 
-def beats_to_ms(beats, bpm):
-    """Convert beat count to milliseconds. Each beat unit is a 16th note (1/4 of a quarter-note beat at BPM)."""
+
+def beats_to_ms(beats: float, bpm: float) -> float:
+    """Convert beat count to milliseconds. Each beat unit is a 16th note."""
     return beats * (60000.0 / bpm / 4)
 
-def ms_to_sec(ms):
+
+def ms_to_sec(ms: float) -> str:
     """Format milliseconds as seconds (e.g. 32.65s)."""
     return f"{ms / 1000:.2f}s"
 
-def parse_ultrastar(filepath: str) -> dict:
-    metadata = {}
 
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n\r")
-            if not line:
-                continue
-            if line.startswith("#"):
-                key, _, value = line[1:].partition(":")
-                metadata[key.strip()] = value.strip()
+def parse_ultrastar(filepath: Path) -> dict:
+    """Parse an Ultrastar .txt file into metadata, notes, and verses."""
+    metadata = {}
+    text = filepath.read_text(encoding="utf-8")
+
+    for line in text.splitlines():
+        if not line:
+            continue
+        if line.startswith("#"):
+            key, _, value = line[1:].partition(":")
+            metadata[key.strip()] = value.strip()
 
     bpm = float(metadata.get("BPM", 120))
     gap = float(metadata.get("GAP", 0))
 
-    def convert_note(parts, is_chorus):
+    def convert_note(parts: list[str], is_chorus: bool) -> dict:
         return {
             "start": gap + beats_to_ms(float(parts[0]), bpm),
             "duration": beats_to_ms(float(parts[1]), bpm),
@@ -44,28 +50,29 @@ def parse_ultrastar(filepath: str) -> dict:
             "chorus": is_chorus,
         }
 
-    verses = []
-    current_verse = []
-    with open(filepath, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n\r")
-            if not line:
-                continue
-            if line.startswith(":") or line.startswith("*"):
-                parts = line[1:].split(None, 3)
-                if len(parts) >= 4:
-                    current_verse.append(convert_note(parts, line.startswith("*")))
-            elif line.startswith("-"):
-                if current_verse:
-                    verses.append(current_verse)
-                    current_verse = []
+    verses: list[list[dict]] = []
+    current_verse: list[dict] = []
+
+    for line in text.splitlines():
+        if not line:
+            continue
+        if line.startswith(":") or line.startswith("*"):
+            parts = line[1:].split(None, 3)
+            if len(parts) >= 4:
+                current_verse.append(convert_note(parts, line.startswith("*")))
+        elif line.startswith("-"):
+            if current_verse:
+                verses.append(current_verse)
+                current_verse = []
+
     if current_verse:
         verses.append(current_verse)
 
     all_notes = [n for v in verses for n in v]
     return {"metadata": metadata, "notes": all_notes, "verses": verses}
 
-def build_verse_svg(verse, width, height):
+
+def build_verse_svg(verse: list[dict], width: int, height: int) -> str:
     """Build an SVG for a verse: X=time, Y=pitch (inverted so high pitch = top)."""
     if not verse:
         return ""
@@ -89,23 +96,29 @@ def build_verse_svg(verse, width, height):
     t_range = max(t_max - t_min, 1)
     p_range = max(p_max - p_min, 1)
 
-    def tx(ms):
+    def tx(ms: float) -> float:
         return pad_left + (ms - t_min) / t_range * plot_w
 
-    def ty(pitch):
+    def ty(pitch: int) -> float:
         return pad_top + (p_max - pitch) / p_range * plot_h
 
-    # Build SVG elements
     parts = []
-    parts.append(f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" style="width:100%;height:auto;display:block;">')
+    parts.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" '
+        f'style="width:100%;height:auto;display:block;">'
+    )
 
-    # Background grid lines for pitch
     for p in range(p_min, p_max + 1):
         y = ty(p)
-        parts.append(f'<line x1="{pad_left}" y1="{y:.1f}" x2="{width - pad_right}" y2="{y:.1f}" stroke="#2a2a4a" stroke-width="0.5"/>')
-        parts.append(f'<text x="{pad_left - 4}" y="{y + 3:.1f}" text-anchor="end" fill="#666" font-size="8" font-family="monospace">{p}</text>')
+        parts.append(
+            f'<line x1="{pad_left}" y1="{y:.1f}" x2="{width - pad_right}" y2="{y:.1f}" '
+            f'stroke="#2a2a4a" stroke-width="0.5"/>'
+        )
+        parts.append(
+            f'<text x="{pad_left - 4}" y="{y + 3:.1f}" text-anchor="end" fill="#666" '
+            f'font-size="8" font-family="monospace">{p}</text>'
+        )
 
-    # Time axis labels
     t_span = t_range
     if t_span > 20000:
         step = 5000
@@ -120,10 +133,15 @@ def build_verse_svg(verse, width, height):
         if t < t_min or t > t_max:
             continue
         x = tx(t)
-        parts.append(f'<line x1="{x:.1f}" y1="{pad_top}" x2="{x:.1f}" y2="{height - pad_bottom}" stroke="#1e1e3a" stroke-width="0.5"/>')
-        parts.append(f'<text x="{x:.1f}" y="{height - 4}" text-anchor="middle" fill="#666" font-size="8" font-family="monospace">{t / 1000:.1f}s</text>')
+        parts.append(
+            f'<line x1="{x:.1f}" y1="{pad_top}" x2="{x:.1f}" y2="{height - pad_bottom}" '
+            f'stroke="#1e1e3a" stroke-width="0.5"/>'
+        )
+        parts.append(
+            f'<text x="{x:.1f}" y="{height - 4}" text-anchor="middle" fill="#666" '
+            f'font-size="8" font-family="monospace">{t / 1000:.1f}s</text>'
+        )
 
-    # Draw notes
     for n in verse:
         x = tx(n["start"])
         w = tx(n["start"] + n["duration"]) - x
@@ -138,7 +156,8 @@ def build_verse_svg(verse, width, height):
         parts.append(
             f'<rect x="{x:.1f}" y="{(y - bar_h / 2):.1f}" width="{bw:.1f}" '
             f'height="{bar_h:.1f}" rx="2" fill="{fill}" stroke="{stroke}" stroke-width="0.8" '
-            f'title="{html_module.escape(n["lyric"])} ({pitch_to_note(n["pitch"])}) {ms_to_sec(n["start"])} +{n["duration"]:.0f}ms"/>'
+            f'title="{html_module.escape(n["lyric"])} ({pitch_to_note(n["pitch"])}) '
+            f'{ms_to_sec(n["start"])} +{n["duration"]:.0f}ms"/>'
         )
         lyric = html_module.escape(n["lyric"])
         fs = max(7, min(12, bw / (len(lyric) * 0.55)))
@@ -148,25 +167,42 @@ def build_verse_svg(verse, width, height):
             f'dominant-baseline="central">{lyric}</text>'
         )
 
-    # Axes
-    parts.append(f'<line x1="{pad_left}" y1="{pad_top}" x2="{pad_left}" y2="{height - pad_bottom}" stroke="#555" stroke-width="1"/>')
-    parts.append(f'<line x1="{pad_left}" y1="{height - pad_bottom}" x2="{width - pad_right}" y2="{height - pad_bottom}" stroke="#555" stroke-width="1"/>')
-    parts.append(f'<text x="{width / 2}" y="{height - 1}" text-anchor="middle" fill="#888" font-size="8" font-family="monospace">time →</text>')
-    parts.append(f'<text x="8" y="{height / 2}" text-anchor="middle" fill="#888" font-size="8" font-family="monospace" transform="rotate(-90,8,{height / 2})">pitch →</text>')
+    parts.append(
+        f'<line x1="{pad_left}" y1="{pad_top}" x2="{pad_left}" y2="{height - pad_bottom}" '
+        f'stroke="#555" stroke-width="1"/>'
+    )
+    parts.append(
+        f'<line x1="{pad_left}" y1="{height - pad_bottom}" x2="{width - pad_right}" '
+        f'y2="{height - pad_bottom}" stroke="#555" stroke-width="1"/>'
+    )
+    parts.append(
+        f'<text x="{width / 2}" y="{height - 1}" text-anchor="middle" fill="#888" '
+        f'font-size="8" font-family="monospace">time →</text>'
+    )
+    parts.append(
+        f'<text x="8" y="{height / 2}" text-anchor="middle" fill="#888" font-size="8" '
+        f'font-family="monospace" transform="rotate(-90,8,{height / 2})">pitch →</text>'
+    )
 
     parts.append("</svg>")
     return "\n".join(parts)
 
-def build_verse_lyrics(verse):
+
+def build_verse_lyrics(verse: list[dict]) -> str:
     """Build a lyrics line with timing annotations."""
     parts = []
     for n in verse:
         t = ms_to_sec(n["start"])
         lyric = html_module.escape(n["lyric"])
-        parts.append(f'<span class="lyric-word" title="{t} | {pitch_to_note(n["pitch"])} | {n["duration"]:.0f}ms"><span class="lyric-time">[{t}]</span> {lyric}</span>')
+        parts.append(
+            f'<span class="lyric-word" title="{t} | {pitch_to_note(n["pitch"])} | '
+            f'{n["duration"]:.0f}ms"><span class="lyric-time">[{t}]</span> {lyric}</span>'
+        )
     return "\n".join(parts)
 
+
 def build_html(data: dict, title: str) -> str:
+    """Build the full HTML document from parsed Ultrastar data."""
     meta = data["metadata"]
     notes = data["notes"]
     verses = data["verses"]
@@ -239,26 +275,30 @@ def build_html(data: dict, title: str) -> str:
 </body>
 </html>"""
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python ultrastar_to_html.py <song.txt> [output.html]")
-        sys.exit(1)
 
-    infile = sys.argv[1]
-    if not Path(infile).exists():
-        print(f"Error: {infile} not found.")
-        sys.exit(1)
+def generate_preview(txt_path: Path, output_html: Path | None = None) -> Path:
+    """Generate an HTML preview from an Ultrastar .txt file.
 
-    data = parse_ultrastar(infile)
-    title = data["metadata"].get("TITLE", Path(infile).stem)
+    Args:
+        txt_path: Path to the Ultrastar .txt file.
+        output_html: Optional output path. Defaults to <txt_stem>.html next to the .txt file.
 
-    outfile = sys.argv[2] if len(sys.argv) > 2 else Path(infile).stem + ".html"
+    Returns:
+        Path to the generated HTML file.
+    """
+    if not txt_path.exists():
+        raise FileNotFoundError(f"Ultrastar file not found: {txt_path}")
+
+    data = parse_ultrastar(txt_path)
+    title = data["metadata"].get("TITLE", txt_path.stem)
+
+    if output_html is None:
+        output_html = txt_path.with_suffix(".html")
+
     html_content = build_html(data, title)
+    output_html.write_text(html_content, encoding="utf-8")
 
-    with open(outfile, "w", encoding="utf-8") as f:
-        f.write(html_content)
-
-    print(f"Written: {outfile}  ({len(data['notes'])} notes, {len(data['verses'])} verses)")
-
-if __name__ == "__main__":
-    main()
+    logger.info(
+        f"HTML preview: {output_html}  ({len(data['notes'])} notes, {len(data['verses'])} verses)"
+    )
+    return output_html

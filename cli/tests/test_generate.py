@@ -3,7 +3,7 @@
 import pytest
 from cli.config import Config
 from cli.generate import generate_ultrastar
-from cli.types import AlignedSyllable
+from cli.pipeline_types import AlignedSyllable
 
 
 class TestGenerateUltrastar:

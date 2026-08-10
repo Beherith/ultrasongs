@@ -64,6 +64,11 @@ def _build_parser() -> argparse.ArgumentParser:
     diff.add_argument("--original", required=True, help="Original .txt file")
     diff.add_argument("--generated", required=True, help="Generated .txt file")
 
+    # ── preview ──────────────────────────────────────────────────────────────
+    prev = subparsers.add_parser("preview", help="Generate HTML preview from Ultrastar .txt")
+    prev.add_argument("--txt", required=True, help="Ultrastar .txt file")
+    prev.add_argument("--output", default=None, help="Output HTML file (default: <title>.html)")
+
     return parser
 
 
@@ -88,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_import(args, config)
     elif args.command == "diff":
         return _cmd_diff(args, config)
+    elif args.command == "preview":
+        return _cmd_preview(args, config)
     else:
         parser.print_help()
         return 1
@@ -128,7 +135,8 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
     # Stage: align
     if args.stage in ("align", "generate", "all"):
         logger.info("Step 3/5: Detecting BPM…")
-        bpm = detect_bpm(audio_out, config)
+        bpm_input = Path(result.accompaniment_path) if config.bpm_use_accompaniment else audio_out
+        bpm = detect_bpm(bpm_input, config)
         logger.info(f"Step 3/5: BPM detected: {bpm}")
 
         logger.info("Step 4/5: Aligning lyrics…")
@@ -163,6 +171,12 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
         )
         logger.info(f"Output packaged to {output_dir}")
 
+        from cli.html_preview import generate_preview
+
+        txt_path = output_dir / f"{args.title}.txt"
+        generate_preview(txt_path)
+        logger.info("HTML preview generated")
+
     return 0
 
 
@@ -170,7 +184,7 @@ def _cmd_import(args: argparse.Namespace, config: "Config") -> int:  # type: ign
     """Import an existing Ultrastar .txt + MP3."""
     from cli.logging_setup import get_logger
     from cli.package import package_output
-    from cli.types import UltrastarMeta, UltrastarNote
+    from cli.pipeline_types import UltrastarMeta, UltrastarNote
     from cli.ultrastar import build_ultrastar_txt, parse_ultrastar_txt
 
     logger = get_logger("cli.import")
@@ -203,6 +217,16 @@ def _cmd_diff(args: argparse.Namespace, config: "Config") -> int:  # type: ignor
     report = diff_ultrastar(Path(args.original), Path(args.generated))
     report.print()
     return 0 if report.passed else 1
+
+
+def _cmd_preview(args: argparse.Namespace, config: "Config") -> int:  # type: ignore[name-defined]
+    """Generate an HTML preview from an Ultrastar .txt file."""
+    from cli.html_preview import generate_preview
+
+    txt_path = Path(args.txt)
+    output_html = Path(args.output) if args.output else None
+    generate_preview(txt_path, output_html)
+    return 0
 
 
 if __name__ == "__main__":

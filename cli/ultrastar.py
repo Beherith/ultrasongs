@@ -1,6 +1,6 @@
 """Ultrastar format: parser and builder for .txt song files."""
 
-from cli.types import UltrastarMeta, UltrastarNote
+from cli.pipeline_types import UltrastarMeta, UltrastarNote
 
 
 def ms_to_beats(ms: float, bpm: float, gap: int) -> int:

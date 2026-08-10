@@ -1,41 +1,96 @@
 {
-  // Whisper model size: "tiny", "base", "small", "medium", "large"
+  // Whisper transcription model size.
+  // Options: "tiny", "base", "small", "medium", "large"
+  // "medium" is the default — it offers the best balance of transcription accuracy
+  // and processing speed. Use "large" for harder-to-understand audio (heavy accents,
+  // fast singing, overlapping vocals) at the cost of significantly slower runtime
+  // and higher VRAM usage (~10GB). Use "small" or "base" for faster processing on
+  // clean audio or limited hardware.
   "whisper_model": "medium",
 
-  // Demucs model: "htdemucs", "hdemucs", "mdx", etc.
+  // Demucs source separation model.
+  // "htdemucs" (Hybrid Transformer) is the default — it produces the highest
+  // quality vocal/instrumental splits. Alternatives like "hdemucs" (older hybrid
+  // model) or "mdx" variants are lighter but less accurate. A better separation
+  // directly improves pitch detection and Whisper transcription quality.
   "demucs_model": "htdemucs",
 
-  // Audio sample rate for processing
+  // Audio sample rate for internal processing.
+  // 44100 Hz (CD quality) is the standard for audio work and matches what Demucs
+  // outputs. Lower rates lose fidelity; higher rates add no benefit for singing
+  // and only increase memory usage and processing time.
   "sample_rate": 44100,
 
-  // Pitch detection range (Hz) — C2 to C6
+  // Pitch detection range in Hz. Covers roughly C2 to C6.
+  // Most singing voices fall within this range. Lowering pitch_min_hz below ~50Hz
+  // or raising pitch_max_hz above ~1200Hz will rarely help and may increase false
+  // detections from instrumental content that leaked through separation.
   "pitch_min_hz": 65.41,
   "pitch_max_hz": 1046.5,
 
-  // torchcrepe hop length in milliseconds
+  // torchcrepe analysis hop length in milliseconds.
+  // 10ms means ~100 pitch analysis frames per second. Smaller values (e.g., 5ms)
+  // give finer resolution but roughly double the runtime. Larger values (e.g., 20ms)
+  // are faster but may miss short pitch transitions and syllable boundaries.
   "crepe_hop_ms": 10,
 
-  // Pause detection: minimum silence duration in milliseconds
+  // Pause detection: minimum silence duration in milliseconds.
+  // 400ms is long enough to skip inter-word gaps (typically 50-200ms) while still
+  // catching meaningful pauses between phrases. Increase this if the pipeline is
+  // splitting lines too aggressively; decrease it if it's merging lines that should
+  // be separate.
   "pause_min_silence_ms": 400,
 
-  // Pause detection: RMS energy threshold as percentage of 95th percentile
+  // Pause detection: RMS energy threshold as a percentage of the 95th percentile.
+  // Frames with energy below (threshold_pct / 100) * p95_rms are considered silent.
+  // 5% works well for most songs. Songs with very quiet verses may need a higher
+  // value (10-15%) to avoid treating soft singing as silence. Very loud, dense
+  // tracks may benefit from a lower value (2-3%).
   "pause_threshold_pct": 5,
 
-  // Gap lead-in: milliseconds before first note for Ultrastar #GAP
+  // Gap lead-in: milliseconds before the first sung note for Ultrastar's #GAP.
+  // #GAP tells Ultrastar when the vocal part starts. 500ms gives the player half a
+  // second of lead-in, which is the standard used by most Ultrastar song files.
+  // Increase if the song has a long intro and you want more buffer; decrease for
+  // songs that start singing immediately.
   "gap_lead_in_ms": 500,
 
-  // Line break offset: beats before next note to insert line break
+  // Line break offset: number of beats before the next note to insert a line break.
+  // 4 beats corresponds to one full measure in 4/4 time (the most common meter).
+  // Ultrastar uses line breaks to separate lyric lines on screen. If line breaks
+  // appear too early or too late, adjust this value. For songs in 3/4 time, try 3.
   "linebreak_beat_offset": 4,
 
-  // FFmpeg audio bitrate for extracted MP3
+  // FFmpeg audio bitrate for the extracted MP3.
+  // 128kbps is sufficient for pitch detection, BPM analysis, and transcription
+  // without wasting disk space on intermediate files. Using a higher bitrate
+  // (e.g., "192k" or "256k") won't improve results meaningfully but will increase
+  // temp file sizes and I/O time.
   "ffmpeg_audio_bitrate": "128k",
 
-  // Output directory for generated files
+  // Output directory for generated Ultrastar song files and ZIP packages.
   "output_dir": "./output",
 
-  // Temporary directory for intermediate files
+  // Temporary directory for intermediate files (extracted audio, Demucs stems,
+  // pitch data, etc.). This directory is populated during processing and can be
+  // safely deleted afterward. Make sure it has enough free space — a single song
+  // can produce 50-200MB of temp data depending on length.
   "temp_dir": "./tmp",
 
-  // Enable debug JSON output during alignment
-  "debug_alignment": false
+  // Enable debug JSON output during lyric alignment.
+  // When true, the alignment step writes a detailed JSON file to the temp directory
+  // showing the Levenshtein matrix, syllable-to-word mapping, and timing decisions.
+  // Useful for diagnosing alignment issues. Keep false during normal use to avoid
+  // cluttering the temp directory.
+  "debug_alignment": true,
+
+  // Use the Demucs accompaniment (instrumental) track for BPM detection instead of
+  // the full mixed audio. BPM detection on the full mix works well for most songs
+  // since drums and bass carry the beat. However, some songs have vocals that are
+  // so dominant (e.g., heavy reverb, lead vocal panning, vocal percussion) that
+  // they interfere with tempo detection. In those cases, set this to true to run
+  // BPM detection on the instrumental stem instead. Note: this requires the
+  // transcription step (which runs Demucs) to complete before BPM detection, so it
+  // has no extra overhead beyond the Demucs pass already needed for transcription.
+  "bpm_use_accompaniment": true
 }

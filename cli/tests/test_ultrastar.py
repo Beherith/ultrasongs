@@ -1,7 +1,7 @@
 """Tests for Ultrastar format parser and builder."""
 
 import pytest
-from cli.types import UltrastarMeta, UltrastarNote
+from cli.pipeline_types import UltrastarMeta, UltrastarNote
 from cli.ultrastar import build_ultrastar_txt, ms_to_beats, parse_ultrastar_txt
 
 
