@@ -595,6 +595,7 @@ def align_lyrics(
                 "totalSyllables": total_syllables,
                 "lineBreaks": line_breaks,
             },
+            #"final_output": final_output,
         }
         debug_path = config.temp_path / "align_debug.json"
         debug_path.write_text(json.dumps(debug_data, indent=2), encoding="utf-8")

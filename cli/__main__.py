@@ -1,6 +1,7 @@
 """CLI entry point with argparse subcommands."""
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -109,10 +110,10 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
     from cli.align import align_lyrics
     from cli.generate import generate_ultrastar
     from cli.package import package_output
+    from cli.pipeline_types import TranscribeResult
     from cli.logging_setup import get_logger
 
     logger = get_logger("cli.process")
-    logger.info("Step 1/5: Extracting audio…")
 
     mp3_path = Path(args.mp3)
     lyrics_path = Path(args.lyrics)
@@ -121,17 +122,39 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
     # Ensure temp directory exists
     config.temp_path.mkdir(parents=True, exist_ok=True)
 
+    audio_out = config.temp_path / f"{mp3_path.stem}.mp3"
+    resume_path = Path(args.resume) if args.resume else config.temp_path / f"{mp3_path.stem}_transcribe.json"
+
+    result: TranscribeResult | None = None
+
+    # ── Resume from saved TranscribeResult ──
+    if args.resume:
+        logger.info(f"Resuming from {resume_path}")
+        if not resume_path.exists():
+            logger.error(f"Resume file not found: {resume_path}")
+            return 1
+        result = TranscribeResult.from_dict(json.loads(resume_path.read_text(encoding="utf-8")))
+        logger.info(f"Loaded {len(result.words)} words from resume file")
+
     # Stage: extract
-    if args.stage in ("extract", "transcribe", "align", "generate", "all"):
-        audio_out = config.temp_path / f"{mp3_path.stem}.mp3"
+    if not result and args.stage in ("extract", "transcribe", "align", "generate", "all"):
+        logger.info("Step 1/5: Extracting audio…")
         extract_audio(mp3_path, audio_out, config)
         logger.info("Step 1/5: Audio extracted")
 
     # Stage: transcribe
-    if args.stage in ("transcribe", "align", "generate", "all"):
+    if not result and args.stage in ("transcribe", "align", "generate", "all"):
         logger.info("Step 2/5: Transcribing…")
         result = transcribe(audio_out, lyrics_text, config)
         logger.info("Step 2/5: Transcription complete")
+
+        # Always persist TranscribeResult for later resume
+        transcribe_json = config.temp_path / f"{mp3_path.stem}_transcribe.json"
+        transcribe_json.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+        logger.info(f"TranscribeResult saved to {transcribe_json}")
+
+    if not result:
+        return 0
 
     # Stage: align
     if args.stage in ("align", "generate", "all"):
