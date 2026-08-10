@@ -1,11 +1,23 @@
 """Note generation: convert aligned syllables to Ultrastar .txt format."""
 
+import math
+
 from cli.config import Config
 from cli.logging_setup import get_logger
 from cli.pipeline_types import AlignedSyllable, UltrastarMeta, UltrastarNote
 from cli.ultrastar import build_ultrastar_txt, ms_to_beats
 
 logger = get_logger("cli.generate")
+
+
+def _ms_to_beats_floor(ms: float, bpm: float, gap: int) -> int:
+    """Convert milliseconds to Ultrastar beats, rounded down."""
+    return math.floor(((ms - gap) / 1000) * (bpm / 60) * 4)
+
+
+def _ms_to_beats_ceil(ms: float, bpm: float, gap: int) -> int:
+    """Convert milliseconds to Ultrastar beats, rounded up."""
+    return math.ceil(((ms - gap) / 1000) * (bpm / 60) * 4)
 
 
 def generate_ultrastar(
@@ -50,21 +62,17 @@ def generate_ultrastar(
 
     for syl in aligned_syllables:
         if syl.is_line_break:
-            next_note_beat = ms_to_beats(syl.start * 1000, bpm, gap)
+            next_note_beat = _ms_to_beats_floor(syl.start * 1000, bpm, gap)
 
-            # Cap the last note of this paragraph
+            # Cap the last note of this paragraph so it ends before the line break
+            line_break_beat = max(0, next_note_beat - config.linebreak_beat_offset)
             last = ultra_notes[-1] if ultra_notes else None
             if last and last.note_type != "-":
-                max_dur = max(1, next_note_beat - 2 - last.start_beat)
+                max_dur = line_break_beat - last.start_beat - 2
                 if last.duration > max_dur:
-                    last.duration = max_dur
-                    prev_end = last.start_beat + max_dur
+                    last.duration = max(1, max_dur)
+                    prev_end = last.start_beat + last.duration
 
-            # Line break offset beats before next note
-            line_break_beat = max(
-                prev_end + 1 if prev_end >= 0 else 0,
-                next_note_beat - config.linebreak_beat_offset,
-            )
             ultra_notes.append(UltrastarNote(
                 note_type="-",
                 start_beat=line_break_beat,
@@ -75,8 +83,9 @@ def generate_ultrastar(
             prev_end = line_break_beat
             continue
 
-        start_beat = ms_to_beats(syl.start * 1000, bpm, gap)
-        duration = max(1, ms_to_beats(syl.end * 1000, bpm, gap) - start_beat)
+        start_beat = _ms_to_beats_floor(syl.start * 1000, bpm, gap)
+        end_beat = _ms_to_beats_ceil(syl.end * 1000, bpm, gap)
+        duration = max(1, end_beat - start_beat)
         adj_start = max(start_beat, prev_end + 1) if prev_end >= 0 else start_beat
 
         ultra_notes.append(UltrastarNote(
