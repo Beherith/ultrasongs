@@ -6,7 +6,7 @@ Ported from app/lib/align.ts (704 lines).
 import json
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -595,7 +595,7 @@ def align_lyrics(
                 "totalSyllables": total_syllables,
                 "lineBreaks": line_breaks,
             },
-            #"final_output": final_output,
+            "final_output": [asdict(s) for s in final_output],
         }
         debug_path = config.temp_path / "align_debug.json"
         debug_path.write_text(json.dumps(debug_data, indent=2), encoding="utf-8")

@@ -34,7 +34,7 @@ def generate_ultrastar(
 
     Handles:
         - Converting seconds to beats via ms_to_beats()
-        - Overlap prevention: adj_start = max(start_beat, prev_end + 1)
+        - Duration extension: each note fills the gap to the next syllable's onset
         - Line break handling: cap last note, insert break offset beats before next
 
     Args:
@@ -60,7 +60,15 @@ def generate_ultrastar(
     first_syl = next((s for s in aligned_syllables if not s.is_line_break and s.start > 0), None)
     gap = max(0, round(first_syl.start * 1000 - gap_ms)) if first_syl else 0
 
-    for syl in aligned_syllables:
+    # Pre-compute raw start beats for all syllables (for look-ahead duration extension)
+    raw_starts: list[int | None] = []
+    for s in aligned_syllables:
+        if s.is_line_break:
+            raw_starts.append(None)
+        else:
+            raw_starts.append(_ms_to_beats_floor(s.start * 1000, bpm, gap))
+
+    for i, syl in enumerate(aligned_syllables):
         if syl.is_line_break:
             next_note_beat = _ms_to_beats_floor(syl.start * 1000, bpm, gap)
 
@@ -85,17 +93,29 @@ def generate_ultrastar(
 
         start_beat = _ms_to_beats_floor(syl.start * 1000, bpm, gap)
         end_beat = _ms_to_beats_ceil(syl.end * 1000, bpm, gap)
-        duration = max(1, end_beat - start_beat)
-        adj_start = max(start_beat, prev_end + 1) if prev_end >= 0 else start_beat
+
+        # Extend duration to fill the gap until the next syllable's onset.
+        # This prevents the cascading overlap-push drift that occurred when
+        # short durations forced each note forward by 1+ beats per syllable.
+        next_start_beat: int | None = None
+        for j in range(i + 1, len(aligned_syllables)):
+            if raw_starts[j] is not None:
+                next_start_beat = raw_starts[j]
+                break
+
+        if next_start_beat is not None:
+            duration = max(1, next_start_beat - start_beat)
+        else:
+            duration = max(1, end_beat - start_beat)
 
         ultra_notes.append(UltrastarNote(
             note_type=":",
-            start_beat=adj_start,
+            start_beat=start_beat,
             duration=duration,
             pitch=syl.midi,
             syllable=syl.syllable,
         ))
-        prev_end = adj_start + duration
+        prev_end = start_beat + duration
 
     meta = UltrastarMeta(
         title=title,
