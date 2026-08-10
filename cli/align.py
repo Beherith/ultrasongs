@@ -280,6 +280,42 @@ def midi_for_range(word: WordTimestamp, start: float, end: float) -> tuple[int, 
     return word.midi, 0
 
 
+def _pitch_end(frames: list[Any], midi: int, syl_start: float, syl_end: float, max_extend_s: float = 0.3) -> float:
+    """Find where sustained pitch actually ends by scanning frames beyond whisper end.
+
+    Extends syl_end forward while high-confidence pitch frames (matching the
+    syllable's MIDI note) continue. Stops at the first gap of 3+ consecutive
+    non-pitch frames, or at max_extend_s beyond syl_end.
+
+    Returns syl_end if no sustained pitch is found.
+    """
+    if not frames:
+        return syl_end
+
+    hard_limit = syl_end + max_extend_s
+    scan_start = max(syl_start, syl_end - 0.05)
+    consecutive_gap = 0
+    extended_end = syl_end
+
+    for f in frames:
+        if f.time < scan_start:
+            continue
+        if f.time > hard_limit:
+            break
+        if f.midi > 0 and f.confidence > 0.3 and abs(f.midi - midi) <= 2:
+            consecutive_gap = 0
+            extended_end = f.time
+        else:
+            consecutive_gap += 1
+            if consecutive_gap >= 3:
+                break
+
+    if extended_end > syl_end + 0.02:
+        return extended_end + 0.02
+
+    return syl_end
+
+
 # ── Main alignment ───────────────────────────────────────────────────────────
 
 def align_lyrics(
@@ -530,15 +566,18 @@ def align_lyrics(
             syl_end = wr["start"] + (si + 1) * syl_duration
 
             midi = wr["midi"]
-            if wr["pitchFrames"]:
+            pitch_frames = wr["pitchFrames"]
+            if pitch_frames:
                 mr, _ = midi_for_range(
-                    WordTimestamp(word=wr["word"], start=syl_start, end=syl_end, midi=wr["midi"], pitch_frames=wr["pitchFrames"]),
+                    WordTimestamp(word=wr["word"], start=syl_start, end=syl_end, midi=wr["midi"], pitch_frames=pitch_frames),
                     syl_start,
                     syl_end,
                 )
                 midi = mr
 
-            output.append(AlignedSyllable(syllable=syl, start=syl_start, end=syl_end, midi=midi))
+            p_end = _pitch_end(pitch_frames, midi, syl_start, syl_end) if pitch_frames else syl_end
+
+            output.append(AlignedSyllable(syllable=syl, start=syl_start, end=syl_end, midi=midi, pitch_end=p_end))
 
     # ── Insert line breaks ────────────────────────────────────────────────
 

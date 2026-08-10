@@ -66,6 +66,7 @@ class AlignedSyllable:
     end: float
     midi: int
     is_line_break: bool = False
+    pitch_end: float = 0.0
 
 
 @dataclass

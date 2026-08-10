@@ -34,7 +34,8 @@ def generate_ultrastar(
 
     Handles:
         - Converting seconds to beats via ms_to_beats()
-        - Duration extension: each note fills the gap to the next syllable's onset
+        - Pitch-informed duration: uses pitch_end to extend notes where pitch is held
+        - Caps duration at next syllable onset to prevent overlap
         - Line break handling: cap last note, insert break offset beats before next
 
     Args:
@@ -60,7 +61,7 @@ def generate_ultrastar(
     first_syl = next((s for s in aligned_syllables if not s.is_line_break and s.start > 0), None)
     gap = max(0, round(first_syl.start * 1000 - gap_ms)) if first_syl else 0
 
-    # Pre-compute raw start beats for all syllables (for look-ahead duration extension)
+    # Pre-compute raw start beats for all syllables (for overlap cap)
     raw_starts: list[int | None] = []
     for s in aligned_syllables:
         if s.is_line_break:
@@ -94,9 +95,13 @@ def generate_ultrastar(
         start_beat = _ms_to_beats_floor(syl.start * 1000, bpm, gap)
         end_beat = _ms_to_beats_ceil(syl.end * 1000, bpm, gap)
 
-        # Extend duration to fill the gap until the next syllable's onset.
-        # This prevents the cascading overlap-push drift that occurred when
-        # short durations forced each note forward by 1+ beats per syllable.
+        # Use pitch-informed end if available (extends note where pitch is held longer
+        # than the whisper word boundary). Falls back to whisper end if pitch_end unset.
+        if syl.pitch_end > 0:
+            pitch_end_beat = _ms_to_beats_ceil(syl.pitch_end * 1000, bpm, gap)
+            end_beat = max(end_beat, pitch_end_beat)
+
+        # Find next syllable's onset beat to cap/extend duration.
         next_start_beat: int | None = None
         for j in range(i + 1, len(aligned_syllables)):
             if raw_starts[j] is not None:
@@ -104,7 +109,13 @@ def generate_ultrastar(
                 break
 
         if next_start_beat is not None:
-            duration = max(1, next_start_beat - start_beat)
+            # Whisper word ends mark phoneme boundaries, not sung note release.
+            # Extend the note to fill half the gap to the next syllable's onset,
+            # giving a musically realistic note length without over-extending.
+            natural_dur = end_beat - start_beat
+            gap_to_next = next_start_beat - start_beat
+            extended_dur = max(natural_dur, round(natural_dur + (gap_to_next - natural_dur) * 0.5))
+            duration = max(1, min(extended_dur, gap_to_next))
         else:
             duration = max(1, end_beat - start_beat)
 
