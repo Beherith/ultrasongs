@@ -106,6 +106,48 @@ def separate_all(audio, sr: int, demucs_model: str = "htdemucs"):
 
 # ── Pitch analysis ──────────────────────────────────────────────────────────
 
+def _compute_band_energy(audio, sr: int, hop_length: int, fmin: float = 60.0, fmax: float = 1000.0, n_frames: int | None = None):
+    """Compute per-frame RMS energy in the given frequency band via FFT.
+
+    Uses a Hann-windowed frame of 1024 samples for good frequency resolution
+    (~15.6 Hz at 16 kHz sample rate).  Frames are aligned to crepe's hop grid.
+
+    If ``n_frames`` is given, the result is truncated or zero-padded to match
+    the caller's expected frame count (e.g. crepe's padded frame count).
+    """
+    import numpy as np
+    frame_length = 1024
+    n = (len(audio) - frame_length) // hop_length + 1
+    if n <= 0:
+        result = np.zeros(n_frames or 0, dtype=np.float32)
+        return result
+
+    window = np.hanning(frame_length)
+    idx = np.arange(n)[:, None] * hop_length + np.arange(frame_length)
+    frames = audio[idx] * window
+
+    fft_results = np.fft.rfft(frames, axis=1)
+    fft_mags = np.abs(fft_results)
+
+    freq_res = sr / frame_length
+    bin_min = max(0, int(fmin / freq_res))
+    bin_max = int(fmax / freq_res) + 1
+    bin_max = min(bin_max, fft_mags.shape[1])
+
+    band_power = np.sum(fft_mags[:, bin_min:bin_max] ** 2, axis=1)
+    n_bins = max(bin_max - bin_min, 1)
+    energies = np.sqrt(band_power / n_bins).astype(np.float32)
+
+    # Truncate or zero-pad to match crepe's frame count
+    if n_frames is not None:
+        if len(energies) < n_frames:
+            energies = np.pad(energies, (0, n_frames - len(energies)))
+        elif len(energies) > n_frames:
+            energies = energies[:n_frames]
+
+    return energies
+
+
 def analyze_pitch(vocals, sr: int, fmin: float = 65.41, fmax: float = 1046.5, hop_ms: int = 10):
     """Run torchcrepe on the entire vocals track."""
     import numpy as np
@@ -140,7 +182,11 @@ def analyze_pitch(vocals, sr: int, fmin: float = 65.41, fmax: float = 1046.5, ho
     times = np.arange(n, dtype=np.float32) * (hop_length / CREPE_SR)
     pct = 100 * (periodicity[0].cpu().numpy() > 0.5).sum() / max(n, 1)
     logger.info(f"Pitch analysis: {n} frames, {pct:.0f}% confident")
-    return times, pitch[0].cpu().numpy(), periodicity[0].cpu().numpy()
+
+    # Compute per-frame band-limited energy (60-1000 Hz) as amplitude proxy
+    energies = _compute_band_energy(audio_t.numpy(), CREPE_SR, hop_length, n_frames=n)
+
+    return times, pitch[0].cpu().numpy(), periodicity[0].cpu().numpy(), energies
 
 
 def get_midi_for_word(times, freqs, confs, start_sec: float, end_sec: float) -> int:
@@ -155,7 +201,7 @@ def get_midi_for_word(times, freqs, confs, start_sec: float, end_sec: float) -> 
     return 60
 
 
-def get_pitch_frames_for_word(times, freqs, confs, start_sec: float, end_sec: float) -> list[PitchFrame]:
+def get_pitch_frames_for_word(times, freqs, confs, energies, start_sec: float, end_sec: float) -> list[PitchFrame]:
     """Get all pitch frames for a word's time range."""
     mask = (times >= start_sec) & (times <= end_sec) & (confs > 0.1) & (freqs > 0)
     return [
@@ -163,12 +209,13 @@ def get_pitch_frames_for_word(times, freqs, confs, start_sec: float, end_sec: fl
             time=float(t),
             midi=hz_to_midi(float(f)),
             confidence=float(c),
+            amplitude=float(e),
         )
-        for t, f, c in zip(times[mask], freqs[mask], confs[mask])
+        for t, f, c, e in zip(times[mask], freqs[mask], confs[mask], energies[mask])
     ]
 
 
-def add_pitch_to_words(raw_words: list[dict[str, Any]], times, freqs, confs) -> list[WordTimestamp]:
+def add_pitch_to_words(raw_words: list[dict[str, Any]], times, freqs, confs, energies) -> list[WordTimestamp]:
     """Attach pitch data to raw Whisper word results."""
     words = []
     for w in raw_words:
@@ -179,7 +226,7 @@ def add_pitch_to_words(raw_words: list[dict[str, Any]], times, freqs, confs) -> 
             start=start,
             end=end,
             midi=get_midi_for_word(times, freqs, confs, start, end),
-            pitch_frames=get_pitch_frames_for_word(times, freqs, confs, start, end),
+            pitch_frames=get_pitch_frames_for_word(times, freqs, confs, energies, start, end),
         ))
     return words
 
@@ -315,7 +362,7 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
 
     # Step 4: Pitch analysis
     logger.info("Step 4/6: Analyzing pitch with torchcrepe…")
-    times, freqs, confs = analyze_pitch(
+    times, freqs, confs, energies = analyze_pitch(
         vocals, out_sr,
         fmin=config.pitch_min_hz,
         fmax=config.pitch_max_hz,
@@ -360,7 +407,7 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     if not raw_words:
         raise RuntimeError("Whisper returned empty transcription")
 
-    words = add_pitch_to_words(raw_words, times, freqs, confs)
+    words = add_pitch_to_words(raw_words, times, freqs, confs, energies)
 
     # Cleanup temporary WAV
     if vocals_wav.exists():

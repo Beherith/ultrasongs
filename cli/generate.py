@@ -94,30 +94,7 @@ def generate_ultrastar(
 
         start_beat = _ms_to_beats_floor(syl.start * 1000, bpm, gap)
         end_beat = _ms_to_beats_ceil(syl.end * 1000, bpm, gap)
-
-        # Use pitch-informed end if available (extends note where pitch is held longer
-        # than the whisper word boundary). Falls back to whisper end if pitch_end unset.
-        if syl.pitch_end > 0:
-            pitch_end_beat = _ms_to_beats_ceil(syl.pitch_end * 1000, bpm, gap)
-            end_beat = max(end_beat, pitch_end_beat)
-
-        # Find next syllable's onset beat to cap/extend duration.
-        next_start_beat: int | None = None
-        for j in range(i + 1, len(aligned_syllables)):
-            if raw_starts[j] is not None:
-                next_start_beat = raw_starts[j]
-                break
-
-        if next_start_beat is not None:
-            # Whisper word ends mark phoneme boundaries, not sung note release.
-            # Extend the note to fill half the gap to the next syllable's onset,
-            # giving a musically realistic note length without over-extending.
-            natural_dur = end_beat - start_beat
-            gap_to_next = next_start_beat - start_beat
-            extended_dur = max(natural_dur, round(natural_dur + (gap_to_next - natural_dur) * 0.5))
-            duration = max(1, min(extended_dur, gap_to_next))
-        else:
-            duration = max(1, end_beat - start_beat)
+        duration = max(1, end_beat - start_beat)
 
         ultra_notes.append(UltrastarNote(
             note_type=":",

@@ -46,6 +46,29 @@ def confidence_color(conf: float) -> str:
     return f"rgb({r},{g},0)"
 
 
+def amplitude_color(amp: float, amp_min: float, amp_max: float) -> str:
+    """Map amplitude to a color: green (quiet) -> yellow (medium) -> red (loud).
+
+    Normalizes amplitude to [0, 1] using the given range, then interpolates.
+    """
+    #amp = amp * amp # square it to compress the dynamic range.
+    #print(f"amp={amp:.4f}, amp_min={amp_min:.4f}, amp_max={amp_max:.4f}")
+    if amp_max <= amp_min:
+        t = 0.5
+    else:
+        t = max(0.0, min(1.0, (amp - amp_min) / (amp_max - amp_min)))
+    # Green (40, 200, 60) -> Yellow (255, 220, 0) -> Red (230, 40, 40)
+    if t < 0.5:
+        r = int(40 + t * 2 * 215)
+        g = int(200 + t * 2 * 20)
+        b = int(60 - t * 2 * 60)
+    else:
+        r = int(255 - (t - 0.5) * 2 * 25)
+        g = int(220 - (t - 0.5) * 2 * 180)
+        b = int(0 + (t - 0.5) * 2 * 40)
+    return f"rgb({r},{g},{b})"
+
+
 def numpy_range(start: float, stop: float, step: float):
     """Simple range generator for floats."""
     while start <= stop:
@@ -337,9 +360,29 @@ def build_verse_svg(
             ww_start_x = tx_from_sec(n["_whisper_start"])
             ww_end_x = tx_from_sec(n["_whisper_end"])
             ww_cx = (ww_start_x + ww_end_x) / 2
-            # Horizontal underline for whisper word timing
+            # Underline with arrowhead triangles at each end
             ww_line_y = ww_y + ww_fs * 0.6
-            ww_line_w = max(ww_end_x - ww_start_x, 1)
+            arrow_w = 5
+            arrow_h = 3.5
+            # Left arrow (points left)
+            la_x1 = ww_start_x
+            la_x2 = ww_start_x + arrow_w
+            parts.append(
+                f'<polygon points="{la_x1:.1f},{ww_line_y:.1f} '
+                f'{la_x2:.1f},{ww_line_y - arrow_h:.1f} '
+                f'{la_x2:.1f},{ww_line_y + arrow_h:.1f}" '
+                f'fill="#4caf50" opacity="0.5"/>'
+            )
+            # Right arrow (points right)
+            ra_x1 = ww_end_x - arrow_w
+            ra_x2 = ww_end_x
+            parts.append(
+                f'<polygon points="{ra_x2:.1f},{ww_line_y:.1f} '
+                f'{ra_x1:.1f},{ww_line_y - arrow_h:.1f} '
+                f'{ra_x1:.1f},{ww_line_y + arrow_h:.1f}" '
+                f'fill="#4caf50" opacity="0.5"/>'
+            )
+            # Connecting line between arrows
             parts.append(
                 f'<line x1="{ww_start_x:.1f}" y1="{ww_line_y:.1f}" '
                 f'x2="{ww_end_x:.1f}" y2="{ww_line_y:.1f}" '
@@ -353,18 +396,24 @@ def build_verse_svg(
 
     # Pitch detection dots overlay
     if show_pitch_frames:
+        # Collect amplitudes for normalization
+        all_amps = [pf.get("amplitude", 0) for n in verse for pf in n.get("pitchFrames", [])]
+        amp_min = min(all_amps) if all_amps else 0.0
+        amp_max = max(all_amps) if all_amps else 1.0
+        print(all_amps)
+        print(verse)
         for n in verse:
             for pf in n.get("pitchFrames", []):
                 x = tx_from_sec(pf["time"])
                 y = ty(pf["midi"])
                 r = 2.5
-                opacity = max(0.3, pf["confidence"])
-                color = confidence_color(pf["confidence"])
+                opacity = max(0.15, pf["confidence"])
+                color = amplitude_color(pf.get("amplitude", 0), amp_min, amp_max)
                 parts.append(
                     f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r}" fill="{color}" '
                     f'opacity="{opacity:.2f}" '
                     f'title="{html_module.escape(n["lyric"])} {pitch_to_note(pf["midi"])} '
-                    f'@ {pf["time"]:.2f}s (conf: {pf["confidence"]:.2f})"/>'
+                    f'@ {pf["time"]:.2f}s (conf: {pf["confidence"]:.2f}, amp: {pf.get("amplitude", 0):.4f})"/>'
                 )
 
     # Axes
@@ -515,9 +564,10 @@ def _build_ultrastar_html(data: dict, title: str) -> str:
     if has_frames:
         legend_html = """
 <div class="legend">
-  <span><span class="dot" style="background:rgb(0,255,0)"></span> High confidence</span>
-  <span><span class="dot" style="background:rgb(255,200,0)"></span> Medium</span>
-  <span><span class="dot" style="background:rgb(255,0,0)"></span> Low confidence</span>
+  <span><span class="dot" style="background:rgb(40,200,60)"></span> Quiet</span>
+  <span><span class="dot" style="background:rgb(255,220,0)"></span> Medium amplitude</span>
+  <span><span class="dot" style="background:rgb(230,40,40)"></span> Loud</span>
+  <span>Opacity = confidence</span>
   <span><span class="dot" style="background:#4caf50; font-style:italic; font-size:10px;">W</span> Whisper word</span>
 </div>
 """
@@ -665,9 +715,10 @@ def _build_pitch_only_html(data: dict, title: str) -> str:
 <p class="summary">Duration: {total_dur} | {len(words)} words | {total_frames} pitch frames | Done: {done}</p>
 
 <div class="legend">
-  <span><span class="dot" style="background:rgb(0,255,0)"></span> High confidence</span>
-  <span><span class="dot" style="background:rgb(255,200,0)"></span> Medium</span>
-  <span><span class="dot" style="background:rgb(255,0,0)"></span> Low confidence</span>
+  <span><span class="dot" style="background:rgb(40,200,60)"></span> Quiet</span>
+  <span><span class="dot" style="background:rgb(255,220,0)"></span> Medium amplitude</span>
+  <span><span class="dot" style="background:rgb(230,40,40)"></span> Loud</span>
+  <span>Opacity = confidence</span>
 </div>
 
 {verse_blocks}

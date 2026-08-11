@@ -9,6 +9,7 @@ class PitchFrame:
     time: float
     midi: int
     confidence: float
+    amplitude: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

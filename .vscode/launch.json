@@ -1,0 +1,24 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "name": "Python Debugger: Module",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "cli",
+            "args": [
+                "process",
+                "--mp3", "${workspaceFolder}/test_song_full_audio.mp3",
+                "--lyrics", "${workspaceFolder}/test_song_lyrics_only.txt",
+                "--title", "tit13",
+                "--artist", "art13",
+                "--resume", "${workspaceFolder}/tmp/test_song_full_audio_transcribe.json"
+            ],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

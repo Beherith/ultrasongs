@@ -653,7 +653,7 @@ def align_lyrics(
                     "end": ww.end,
                     "midi": ww.midi,
                     "pitchFrames": [
-                        {"time": pf.time, "midi": pf.midi, "confidence": pf.confidence}
+                        {"time": pf.time, "midi": pf.midi, "confidence": pf.confidence, "amplitude": pf.amplitude  }
                         for pf in ww.pitch_frames
                     ],
                 }
