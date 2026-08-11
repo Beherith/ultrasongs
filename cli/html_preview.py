@@ -51,8 +51,6 @@ def amplitude_color(amp: float, amp_min: float, amp_max: float) -> str:
 
     Normalizes amplitude to [0, 1] using the given range, then interpolates.
     """
-    #amp = amp * amp # square it to compress the dynamic range.
-    #print(f"amp={amp:.4f}, amp_min={amp_min:.4f}, amp_max={amp_max:.4f}")
     if amp_max <= amp_min:
         t = 0.5
     else:
@@ -400,8 +398,6 @@ def build_verse_svg(
         all_amps = [pf.get("amplitude", 0) for n in verse for pf in n.get("pitchFrames", [])]
         amp_min = min(all_amps) if all_amps else 0.0
         amp_max = max(all_amps) if all_amps else 1.0
-        print(all_amps)
-        print(verse)
         for n in verse:
             for pf in n.get("pitchFrames", []):
                 x = tx_from_sec(pf["time"])

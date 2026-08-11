@@ -140,6 +140,12 @@ def _compute_band_energy(audio, sr: int, hop_length: int, fmin: float = 60.0, fm
 
     # Truncate or zero-pad to match crepe's frame count
     if n_frames is not None:
+        if len(energies) != n_frames:
+            logger.debug(
+                f"Band energy frame count mismatch: computed={len(energies)}, "
+                f"crepe={n_frames}, diff={len(energies) - n_frames} — "
+                f"{'zero-padding' if len(energies) < n_frames else 'truncating'}"
+            )
         if len(energies) < n_frames:
             energies = np.pad(energies, (0, n_frames - len(energies)))
         elif len(energies) > n_frames:
@@ -185,6 +191,11 @@ def analyze_pitch(vocals, sr: int, fmin: float = 65.41, fmax: float = 1046.5, ho
 
     # Compute per-frame band-limited energy (60-1000 Hz) as amplitude proxy
     energies = _compute_band_energy(audio_t.numpy(), CREPE_SR, hop_length, n_frames=n)
+
+    # Normalize to [0, 1] for uniformity across files
+    e_max = energies.max()
+    if e_max > 0:
+        energies = energies / e_max
 
     return times, pitch[0].cpu().numpy(), periodicity[0].cpu().numpy(), energies
 
