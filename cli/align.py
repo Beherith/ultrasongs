@@ -539,19 +539,8 @@ def align_lyrics(
                 word_results[wi]["end"] = word_results[last]["end"] + offset + fallback
                 word_results[wi]["midi"] = word_results[last]["midi"]
 
-    # Log word alignment summary
-    logger.info("Word alignment summary:")
-    for wi, wr in enumerate(word_results):
-        matched_count = len(wr["whisperIdxs"]) if lyric_word_matched[wi] else 0
-        idx_str = ", ".join(
-            f'W[{idx}("{whisper_words[idx].word}")'
-            for idx in sorted(wr["whisperIdxs"])
-        ) if matched_count else "unmatched"
-        logger.info(
-            f"  [{wi}] \"{wr['word']}\" {wr['source']} "
-            f"→ {idx_str} "
-            f"{wr['start']:.3f}s-{wr['end']:.3f}s midi={wr['midi']}"
-        )
+    # Show the same visual character alignment written to align_backtrace.txt.
+    logger.info("Smith-Waterman alignment:\n%s", sw_backtrace_text)
 
     # ── Syllabification + output ──────────────────────────────────────────
 

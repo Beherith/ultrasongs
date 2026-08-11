@@ -111,3 +111,18 @@ class TestAlignLyrics:
         singing = [s for s in result if not s.is_line_break]
         for i in range(1, len(singing)):
             assert singing[i].start >= singing[i - 1].start
+
+    def test_logs_visual_backtrace_instead_of_word_summary(self, caplog):
+        lyrics = "hello world"
+        words = self._make_words([
+            ("hello", 0.5, 1.0),
+            ("world", 1.2, 1.7),
+        ])
+
+        with caplog.at_level("INFO", logger="cli.align"):
+            align_lyrics(lyrics, words, "en", config=Config())
+
+        assert "Smith-Waterman alignment:\n" in caplog.text
+        assert "q: hello world" in caplog.text
+        assert "s: hello world" in caplog.text
+        assert "Word alignment summary:" not in caplog.text
