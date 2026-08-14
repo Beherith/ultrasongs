@@ -22,6 +22,7 @@ class TestConfigDefaults:
         assert cfg.pause_threshold_pct == 5.0
         assert cfg.gap_lead_in_ms == 500
         assert cfg.linebreak_beat_offset == 4
+        assert cfg.beat_resolution_multiplier == 2
         assert cfg.ffmpeg_audio_bitrate == "128k"
         assert cfg.output_dir == "./output"
         assert cfg.temp_dir == "./tmp"

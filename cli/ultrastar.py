@@ -1,6 +1,11 @@
 """Ultrastar format: parser and builder for .txt song files."""
 
+import re
+
 from cli.pipeline_types import UltrastarMeta, UltrastarNote
+
+
+_NOTE_RE = re.compile(r"^([:*])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$")
 
 
 def ms_to_beats(ms: float, bpm: float, gap: int) -> int:
@@ -73,16 +78,14 @@ def parse_ultrastar_txt(content: str) -> tuple[UltrastarMeta, list[UltrastarNote
                 val = trimmed[colon + 1:].strip()
                 meta[key] = val
 
-        elif trimmed.startswith(": ") or trimmed.startswith("* "):
-            parts = trimmed.split()
-            if len(parts) >= 4:
-                notes.append(UltrastarNote(
-                    note_type=parts[0],
-                    start_beat=int(parts[1]),
-                    duration=int(parts[2]),
-                    pitch=int(parts[3]),
-                    syllable=" ".join(parts[4:]),
-                ))
+        elif match := _NOTE_RE.match(trimmed):
+            notes.append(UltrastarNote(
+                note_type=match.group(1),
+                start_beat=int(match.group(2)),
+                duration=int(match.group(3)),
+                pitch=int(match.group(4)),
+                syllable=match.group(5) or "",
+            ))
 
         elif trimmed.startswith("- "):
             notes.append(UltrastarNote(

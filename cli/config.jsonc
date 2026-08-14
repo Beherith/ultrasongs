@@ -76,6 +76,13 @@
   // appear too early or too late, adjust this value. For songs in 3/4 time, try 3.
   "linebreak_beat_offset": 4,
 
+  // Beat resolution multiplier: scales the exported BPM to a finer Ultrastar
+  // beat grid. The exported file's BPM is bpm * multiplier, which keeps the
+  // song timing unchanged while reducing per-beat duration (e.g., from ~125 ms
+  // to ~62 ms per beat at 120 BPM with a value of 2). Higher values (e.g., 4)
+  // give finer note placement but larger beat counts and file sizes.
+  "beat_resolution_multiplier": 2,
+
   // FFmpeg audio bitrate for the extracted MP3.
   // 128kbps is sufficient for pitch detection, BPM analysis, and transcription
   // without wasting disk space on intermediate files. Using a higher bitrate

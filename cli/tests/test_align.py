@@ -8,7 +8,7 @@ from cli.align import (
     smith_waterman,
 )
 from cli.config import Config
-from cli.pipeline_types import AlignedSyllable, Pause, WordTimestamp
+from cli.pipeline_types import AlignedSyllable, Pause, PitchFrame, WordTimestamp
 
 
 class TestNormalizeChar:
@@ -72,6 +72,7 @@ class TestAlignLyrics:
         # Should have syllables for both words
         singing = [s for s in result if not s.is_line_break]
         assert len(singing) >= 2
+        assert "".join(s.syllable for s in singing) == lyrics
 
     def test_line_breaks(self):
         lyrics = "first line\nsecond line"
@@ -94,6 +95,18 @@ class TestAlignLyrics:
         result = align_lyrics(lyrics, words, "en", config=Config())
         # "today" should be interpolated
         assert len(result) > 0
+
+    def test_interpolation_does_not_stretch_words_across_long_gap(self):
+        words = self._make_words([
+            ("alpha", 0.0, 0.3),
+            ("delta", 10.0, 10.3),
+        ])
+
+        result = align_lyrics("alpha beta gamma delta", words, "en", config=Config())
+        singing = [s for s in result if not s.is_line_break]
+
+        assert singing[-2].end <= 1.9 + 1e-9
+        assert singing[-1].start == 10.0
 
     def test_empty_lyrics(self):
         words = self._make_words([("hello", 0.5, 1.0)])
@@ -126,3 +139,68 @@ class TestAlignLyrics:
         assert "q: hello world" in caplog.text
         assert "s: hello world" in caplog.text
         assert "Word alignment summary:" not in caplog.text
+
+    def test_amplitude_trims_quiet_word_edges(self):
+        words = self._make_words([("sing", 0.0, 1.0)])
+        frames = [
+            PitchFrame(
+                time=i / 100,
+                midi=60,
+                confidence=0.9 if 20 <= i <= 50 else 0.1,
+                amplitude=0.8 if 20 <= i <= 50 else 0.01,
+            )
+            for i in range(101)
+        ]
+
+        result = align_lyrics("sing", words, "en", config=Config(), pitch_frames=frames)
+        singing = [s for s in result if not s.is_line_break]
+
+        assert len(singing) == 1
+        assert singing[0].start == pytest.approx(0.2)
+        assert singing[0].end == pytest.approx(0.51)
+
+    def test_sustained_pitch_change_creates_continuation_note(self):
+        words = self._make_words([("sing", 0.0, 1.0)])
+        frames = [
+            PitchFrame(
+                time=i / 100,
+                midi=60 if i <= 40 else 64,
+                confidence=0.9 if 10 <= i <= 80 else 0.1,
+                amplitude=0.8 if 10 <= i <= 80 else 0.01,
+            )
+            for i in range(101)
+        ]
+
+        result = align_lyrics("sing", words, "en", config=Config(), pitch_frames=frames)
+        singing = [s for s in result if not s.is_line_break]
+
+        assert [s.midi for s in singing] == [60, 64]
+        assert [s.syllable for s in singing] == ["sing", ""]
+
+    def test_words_sharing_whisper_token_divide_its_time(self):
+        words = self._make_words([("raiseyour", 1.0, 2.0)])
+
+        result = align_lyrics("raise your", words, "en", config=Config())
+        singing = [s for s in result if not s.is_line_break]
+
+        assert singing[0].start == 1.0
+        assert singing[0].end == singing[1].start
+        assert singing[1].end == 2.0
+
+    def test_pause_separates_overlapping_word_timestamps(self):
+        words = self._make_words([
+            ("one", 0.0, 0.8),
+            ("two", 0.7, 1.5),
+        ])
+
+        result = align_lyrics(
+            "one two",
+            words,
+            "en",
+            pauses=[Pause(0.6, 0.9)],
+            config=Config(),
+        )
+        singing = [s for s in result if not s.is_line_break]
+
+        assert singing[0].end == 0.6
+        assert singing[1].start == 0.9

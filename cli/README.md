@@ -105,6 +105,7 @@ Edit `cli/config.jsonc` (supports `//` and `/* */` comments):
 | `pause_threshold_pct` | `5` | RMS energy threshold (% of 95th percentile) |
 | `gap_lead_in_ms` | `500` | Milliseconds before first note for `#GAP` |
 | `linebreak_beat_offset` | `4` | Beats before next note for line breaks |
+| `beat_resolution_multiplier` | `2` | Scales exported BPM for a finer Ultrastar beat grid |
 | `ffmpeg_audio_bitrate` | `"128k"` | Output MP3 bitrate |
 | `output_dir` | `"./output"` | Output directory |
 | `temp_dir` | `"./tmp"` | Intermediate files directory |

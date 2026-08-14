@@ -164,7 +164,14 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
         logger.info(f"Step 3/5: BPM detected: {bpm}")
 
         logger.info("Step 4/5: Aligning lyrics…")
-        aligned = align_lyrics(lyrics_text, result.words, result.language, result.pauses, config)
+        aligned = align_lyrics(
+            lyrics_text,
+            result.words,
+            result.language,
+            result.pauses,
+            config,
+            pitch_frames=result.pitch_frames,
+        )
         logger.info("Step 4/5: Alignment complete")
 
     # Stage: generate

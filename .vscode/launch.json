@@ -14,8 +14,8 @@
                 "process",
                 "--mp3", "${workspaceFolder}/test_song_full_audio.mp3",
                 "--lyrics", "${workspaceFolder}/test_song_lyrics_only.txt",
-                "--title", "tit14",
-                "--artist", "art14",
+                "--title", "tit15",
+                "--artist", "art15",
                 "--resume", "${workspaceFolder}/tmp/test_song_full_audio_transcribe.json"
             ],
             "cwd": "${workspaceFolder}"

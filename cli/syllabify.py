@@ -79,8 +79,14 @@ def split_word(word: str, lang: str) -> list[str]:
         return [clean]
 
     try:
-        parts = h.divided(clean)
+        parts = h.inserted(clean).split("-")
         parts = [p for p in parts if p]
+
+        # if the last word is a single non-vowel character, merge it with the previous syllable
+        if len(parts) > 1 and len(parts[-1]) == 1 and not parts[-1].lower() in "aeiouy":
+            parts[-2] += parts[-1]
+            parts.pop()
+
         return parts if parts else [clean]
     except Exception:
         return [clean]
@@ -96,8 +102,11 @@ def syllabify_line(line: str, lang: str) -> list[list[str]]:
     Returns:
         List of syllable lists, one per word.
     """
-    return [
-        split_word(word, lang)
-        for word in line.strip().split()
-        if word
-    ]
+    result = []
+    for word in line.strip().split():
+        if word:
+            syllables = split_word(word, lang)
+            result.append(syllables)
+            print ('-'.join(syllables))
+        print (" ")
+    return result

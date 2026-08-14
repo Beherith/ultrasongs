@@ -226,6 +226,19 @@ def get_pitch_frames_for_word(times, freqs, confs, energies, start_sec: float, e
     ]
 
 
+def build_pitch_frames(times, freqs, confs, energies) -> list[PitchFrame]:
+    """Preserve the complete pitch/energy timeline, including quiet frames."""
+    return [
+        PitchFrame(
+            time=float(t),
+            midi=hz_to_midi(float(f)) if f > 0 else 0,
+            confidence=float(c),
+            amplitude=float(e),
+        )
+        for t, f, c, e in zip(times, freqs, confs, energies)
+    ]
+
+
 def add_pitch_to_words(raw_words: list[dict[str, Any]], times, freqs, confs, energies) -> list[WordTimestamp]:
     """Attach pitch data to raw Whisper word results."""
     words = []
@@ -351,28 +364,35 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     vocals_wav = base.with_name(base.name + "_vocals.wav")
 
     # Step 1: Load audio
-    logger.info("Step 1/6: Loading audio…")
+    logger.info("Step 1/7: Loading audio…")
     audio, sr = sf.read(str(mp3_path))
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
 
     # Step 2: Demucs separation
-    logger.info("Step 2/6: Separating vocals with Demucs…")
+    logger.info("Step 2/7: Separating vocals with Demucs…")
     vocals, accompaniment, out_sr = separate_all(audio, sr, config.demucs_model)
 
     if DEVICE == "cuda":
         torch.cuda.empty_cache()
 
     # Step 3: Save stems
-    logger.info("Step 3/6: Saving vocal stems…")
+    logger.info("Step 3/7: Saving vocal stems…")
     with open(vocals_mp3, "wb") as f:
         f.write(to_mp3_bytes(vocals, out_sr))
     with open(acc_mp3, "wb") as f:
         f.write(to_mp3_bytes(accompaniment, out_sr))
     sf.write(str(vocals_wav), vocals, out_sr)
 
-    # Step 4: Pitch analysis
-    logger.info("Step 4/6: Analyzing pitch with torchcrepe…")
+    # Step 4: BPM detection
+    logger.info("Step 4/7: Detecting BPM…")
+    from cli.bpm_detect import detect_bpm
+    bpm_input = acc_mp3 if config.bpm_use_accompaniment else mp3_path
+    bpm = detect_bpm(bpm_input, config)
+    logger.info(f"BPM detected: {bpm:.1f}")
+
+    # Step 5: Pitch analysis
+    logger.info("Step 5/7: Analyzing pitch with torchcrepe…")
     times, freqs, confs, energies = analyze_pitch(
         vocals, out_sr,
         fmin=config.pitch_min_hz,
@@ -384,7 +404,7 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     if DEVICE == "cuda":
         torch.cuda.empty_cache()
 
-    # Step 5: Pause detection
+    # Step 6: Pause detection
     pauses = detect_pauses(
         vocals, out_sr,
         min_silence_ms=config.pause_min_silence_ms,
@@ -392,8 +412,8 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     )
     logger.info(f"Detected {len(pauses)} pause regions")
 
-    # Step 6: Whisper transcription
-    logger.info("Step 5/6: Transcribing with Whisper…")
+    # Step 7: Whisper transcription
+    logger.info("Step 7/7: Transcribing with Whisper…")
     from faster_whisper import WhisperModel
     compute_type = "int8" if "large" in config.whisper_model and DEVICE == "cuda" else "auto"
     print(f"[whisper] Running on {DEVICE} (compute_type={compute_type})")
@@ -419,6 +439,7 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
         raise RuntimeError("Whisper returned empty transcription")
 
     words = add_pitch_to_words(raw_words, times, freqs, confs, energies)
+    pitch_frames = build_pitch_frames(times, freqs, confs, energies)
 
     # Cleanup temporary WAV
     if vocals_wav.exists():
@@ -432,4 +453,5 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
         vocals_path=str(vocals_mp3),
         accompaniment_path=str(acc_mp3),
         pauses=pauses,
+        pitch_frames=pitch_frames,
     )

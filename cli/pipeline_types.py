@@ -77,6 +77,8 @@ class TranscribeResult:
     vocals_path: str
     accompaniment_path: str
     pauses: list[Pause]
+    pitch_frames: list[PitchFrame] = field(default_factory=list)
+    bpm: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -85,16 +87,30 @@ class TranscribeResult:
             "vocals_path": self.vocals_path,
             "accompaniment_path": self.accompaniment_path,
             "pauses": [p.to_dict() for p in self.pauses],
+            "pitch_frames": [pf.to_dict() for pf in self.pitch_frames],
+            "bpm": self.bpm,
         }
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "TranscribeResult":
+        words = [WordTimestamp.from_dict(w) for w in d["words"]]
+        pitch_frames = [PitchFrame.from_dict(pf) for pf in d.get("pitch_frames", [])]
+        if not pitch_frames:
+            by_time = {
+                pf.time: pf
+                for word in words
+                for pf in word.pitch_frames
+            }
+            pitch_frames = [by_time[t] for t in sorted(by_time)]
+
         return cls(
-            words=[WordTimestamp.from_dict(w) for w in d["words"]],
+            words=words,
             language=d["language"],
             vocals_path=d["vocals_path"],
             accompaniment_path=d["accompaniment_path"],
             pauses=[Pause.from_dict(p) for p in d.get("pauses", [])],
+            pitch_frames=pitch_frames,
+            bpm=d.get("bpm"),
         )
 
 

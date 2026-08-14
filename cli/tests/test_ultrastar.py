@@ -141,3 +141,15 @@ class TestRoundTrip:
             assert parsed.duration == orig.duration
             assert parsed.pitch == orig.pitch
             assert parsed.syllable == orig.syllable
+
+    def test_preserves_leading_word_space_and_empty_continuation(self):
+        meta = UltrastarMeta(title="Test", artist="A", mp3="a.mp3", bpm=120, gap=0)
+        original = [
+            UltrastarNote(":", 0, 2, 60, "hello"),
+            UltrastarNote(":", 2, 2, 62, " world"),
+            UltrastarNote(":", 4, 2, 64, ""),
+        ]
+
+        _, parsed = parse_ultrastar_txt(build_ultrastar_txt(original, meta))
+
+        assert [note.syllable for note in parsed] == ["hello", " world", ""]

@@ -18,9 +18,10 @@ class TestSplitWord:
         assert "".join(syllables) == "hello"
 
     def test_longer_word(self):
-        syllables = split_word("beautiful", "en")
-        # pyphen may or may not split this; just ensure it doesn't crash
-        assert len(syllables) >= 1
+        assert split_word("beautiful", "en") == ["beau", "ti", "ful"]
+
+    def test_preserves_punctuation(self):
+        assert split_word("rejoice!", "en") == ["re", "joice!"]
 
     def test_german(self):
         syllables = split_word("schneemann", "de")

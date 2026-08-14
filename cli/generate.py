@@ -1,23 +1,15 @@
 """Note generation: convert aligned syllables to Ultrastar .txt format."""
 
-import math
-
 from cli.config import Config
 from cli.logging_setup import get_logger
 from cli.pipeline_types import AlignedSyllable, UltrastarMeta, UltrastarNote
-from cli.ultrastar import build_ultrastar_txt, ms_to_beats
+from cli.ultrastar import build_ultrastar_txt
 
 logger = get_logger("cli.generate")
 
-
-def _ms_to_beats_floor(ms: float, bpm: float, gap: int) -> int:
-    """Convert milliseconds to Ultrastar beats, rounded down."""
-    return math.floor(((ms - gap) / 1000) * (bpm / 60) * 4)
-
-
-def _ms_to_beats_ceil(ms: float, bpm: float, gap: int) -> int:
-    """Convert milliseconds to Ultrastar beats, rounded up."""
-    return math.ceil(((ms - gap) / 1000) * (bpm / 60) * 4)
+def _ms_to_beats(ms: float, bpm: float, gap: int) -> int:
+    """Convert milliseconds to the nearest Ultrastar beat."""
+    return round(((ms - gap) / 1000) * (bpm / 60) * 4)
 
 
 def generate_ultrastar(
@@ -33,10 +25,10 @@ def generate_ultrastar(
     """Convert aligned syllables to Ultrastar .txt string.
 
     Handles:
-        - Converting seconds to beats via ms_to_beats()
-        - Pitch-informed duration: uses pitch_end to extend notes where pitch is held
-        - Caps duration at next syllable onset to prevent overlap
-        - Line break handling: cap last note, insert break offset beats before next
+        - Converting seconds to a high-resolution Ultrastar beat grid
+        - Capping every duration at the next note onset
+        - Ensuring every singing note has at least one beat of duration
+        - Placing line breaks between adjacent singing notes
 
     Args:
         aligned_syllables: Syllables with timestamps and MIDI from align_lyrics().
@@ -55,32 +47,49 @@ def generate_ultrastar(
         config = Config()
 
     ultra_notes: list[UltrastarNote] = []
-    prev_end = -1
 
     # Calculate gap from first syllable
-    first_syl = next((s for s in aligned_syllables if not s.is_line_break and s.start > 0), None)
+    first_syl = next((s for s in aligned_syllables if not s.is_line_break), None)
     gap = max(0, round(first_syl.start * 1000 - gap_ms)) if first_syl else 0
+    output_bpm = bpm * config.beat_resolution_multiplier
 
-    # Pre-compute raw start beats for all syllables (for overlap cap)
-    raw_starts: list[int | None] = []
-    for s in aligned_syllables:
-        if s.is_line_break:
-            raw_starts.append(None)
-        else:
-            raw_starts.append(_ms_to_beats_floor(s.start * 1000, bpm, gap))
+    # Quantize every onset once. Notes need distinct grid positions because an
+    # Ultrastar note must have a duration of at least one beat.
+    starts: list[int | None] = []
+    previous_start: int | None = None
+    for syl in aligned_syllables:
+        if syl.is_line_break:
+            starts.append(None)
+            continue
+        start = _ms_to_beats(syl.start * 1000, output_bpm, gap)
+        if previous_start is not None:
+            start = max(start, previous_start + 1)
+        starts.append(start)
+        previous_start = start
+
+    # Nearest following singing-note onset for duration and line-break caps.
+    next_starts: list[int | None] = [None] * len(aligned_syllables)
+    next_start: int | None = None
+    for i in range(len(aligned_syllables) - 1, -1, -1):
+        next_starts[i] = next_start
+        if starts[i] is not None:
+            next_start = starts[i]
 
     for i, syl in enumerate(aligned_syllables):
         if syl.is_line_break:
-            next_note_beat = _ms_to_beats_floor(syl.start * 1000, bpm, gap)
+            next_note_beat = next_starts[i]
+            if next_note_beat is None:
+                continue
 
-            # Cap the last note of this paragraph so it ends before the line break
-            line_break_beat = max(0, next_note_beat - config.linebreak_beat_offset)
+            offset = config.linebreak_beat_offset * config.beat_resolution_multiplier
+            target = max(0, next_note_beat - offset)
             last = ultra_notes[-1] if ultra_notes else None
-            if last and last.note_type != "-":
-                max_dur = line_break_beat - last.start_beat - 2
-                if last.duration > max_dur:
-                    last.duration = max(1, max_dur)
-                    prev_end = last.start_beat + last.duration
+            previous_end = (
+                last.start_beat + last.duration
+                if last and last.note_type != "-"
+                else 0
+            )
+            line_break_beat = min(next_note_beat, max(target, previous_end))
 
             ultra_notes.append(UltrastarNote(
                 note_type="-",
@@ -89,12 +98,14 @@ def generate_ultrastar(
                 pitch=0,
                 syllable="",
             ))
-            prev_end = line_break_beat
             continue
 
-        start_beat = _ms_to_beats_floor(syl.start * 1000, bpm, gap)
-        end_beat = _ms_to_beats_ceil(syl.end * 1000, bpm, gap)
-        duration = max(1, end_beat - start_beat)
+        start_beat = starts[i]
+        assert start_beat is not None
+        end_beat = max(start_beat + 1, _ms_to_beats(syl.end * 1000, output_bpm, gap))
+        if next_starts[i] is not None:
+            end_beat = min(end_beat, next_starts[i])
+        duration = end_beat - start_beat
 
         ultra_notes.append(UltrastarNote(
             note_type=":",
@@ -103,13 +114,12 @@ def generate_ultrastar(
             pitch=syl.midi,
             syllable=syl.syllable,
         ))
-        prev_end = start_beat + duration
 
     meta = UltrastarMeta(
         title=title,
         artist=artist,
         mp3=mp3_filename,
-        bpm=bpm,
+        bpm=output_bpm,
         gap=gap,
         video=video_filename,
     )

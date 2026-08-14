@@ -35,6 +35,7 @@ class Config:
     pause_threshold_pct: float = 5.0
     gap_lead_in_ms: int = 500
     linebreak_beat_offset: int = 4
+    beat_resolution_multiplier: int = 2
     ffmpeg_audio_bitrate: str = "128k"
     output_dir: str = "./output"
     temp_dir: str = "./tmp"
@@ -81,6 +82,7 @@ def load_config(config_path: str | None = None) -> Config:
         "pause_threshold_pct": float,
         "gap_lead_in_ms": int,
         "linebreak_beat_offset": int,
+        "beat_resolution_multiplier": int,
         "ffmpeg_audio_bitrate": str,
         "output_dir": str,
         "temp_dir": str,

@@ -3,7 +3,9 @@
 Ported from app/lib/align.ts (704 lines).
 """
 
+import bisect
 import json
+import logging
 import re
 import unicodedata
 from dataclasses import asdict, dataclass, field
@@ -13,15 +15,15 @@ from typing import Any
 from cli.config import Config
 from cli.logging_setup import get_logger
 from cli.syllabify import split_word
-from cli.pipeline_types import AlignedSyllable, Pause, WordTimestamp
+from cli.pipeline_types import AlignedSyllable, Pause, PitchFrame, WordTimestamp
 
 logger = get_logger("cli.align")
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
 MATCH_SCORE = 4
-GAP_OPEN = 4
-GAP_EXTEND = 0.5
+GAP_OPEN = 9
+GAP_EXTEND = 2
 
 
 # ── Character normalization ──────────────────────────────────────────────────
@@ -247,6 +249,93 @@ def _format_backtrace(
     return "\n".join(lines)
 
 
+_UNALIGNED_END_MAX_CHARS = 200
+
+
+def _clip(text: str) -> str:
+    if len(text) > _UNALIGNED_END_MAX_CHARS:
+        return text[:_UNALIGNED_END_MAX_CHARS] + "..."
+    return text
+
+
+def _unaligned_ends(
+    sw_result: dict[str, Any],
+    lyric_chars: list[dict[str, Any]],
+    whisper_chars: list[dict[str, Any]],
+) -> str:
+    """Return the lyric and whisper text outside the SW alignment span."""
+    lyric_used: set[int] = set()
+    whisper_used: set[int] = set()
+    for step in sw_result["backtrack"]:
+        i, j, m = step["i"], step["j"], step["matrix"]
+        if m in ("M", "X") and i > 0:
+            lyric_used.add(i - 1)
+        if m in ("M", "Y") and j > 0:
+            whisper_used.add(j - 1)
+
+    def ends(chars: list[dict[str, Any]], used: set[int]) -> tuple[str, str]:
+        if not used:
+            prefix, suffix = chars, []
+        else:
+            first = min(used)
+            last = max(used)
+            prefix = chars[:first] if first > 0 else []
+            suffix = chars[last + 1:] if last + 1 < len(chars) else []
+        return (
+            _clip("".join(c["orig"] for c in prefix).strip()),
+            _clip("".join(c["orig"] for c in suffix).strip()),
+        )
+
+    l_pre, l_post = ends(lyric_chars, lyric_used)
+    w_pre, w_post = ends(whisper_chars, whisper_used)
+
+    if not any((l_pre, l_post, w_pre, w_post)):
+        return ""
+
+    lines = ["Unaligned ends:"]
+    if l_pre:
+        lines.append(f'  lyric before: "{l_pre}"')
+    if l_post:
+        lines.append(f'  lyric after:  "{l_post}"')
+    if w_pre:
+        lines.append(f'  whisper before: "{w_pre}"')
+    if w_post:
+        lines.append(f'  whisper after:  "{w_post}"')
+    return "\n".join(lines)
+
+
+def _word_similarity(lyric_norm: str, whisper_norm: str) -> float:
+    """Average best phonetic score per lyric char against the whisper word."""
+    if not lyric_norm or not whisper_norm:
+        return 0.0
+    pool = set(whisper_norm)
+    chars = [c for c in lyric_norm if c != " "]
+    if not chars:
+        return 0.0
+    return sum(max(phonetic_score(c, p) for p in pool) for c in chars) / len(chars)
+
+
+def _log_unmatched_word(wi: int, wr: dict[str, Any], whisper_words: list[WordTimestamp]) -> None:
+    """Log debug info explaining why a lyric word was not matched by SW."""
+
+    word = wr["word"]
+    norm = normalize_char(word)
+    scored = [
+        (_word_similarity(norm, normalize_char(ww.word)), idx, ww.word, ww.start, ww.end)
+        for idx, ww in enumerate(whisper_words)
+    ]
+    scored.sort(key=lambda t: t[0], reverse=True)
+    top = ", ".join(
+        f"'{w}' (idx {i}, {start:.2f}-{end:.2f}s, score {s:.2f})"
+        for s, i, w, start, end in scored[:3]
+    )
+    logger.info(
+        f"Lyric word {wi} '{word}' (line {wr['lineIdx']}) not matched by SW: "
+        f"normalized='{norm}', length={len(word)}; "
+        f"best whisper candidates: {top or '(no whisper words)'}"
+    )
+
+
 # ── MIDI extraction ──────────────────────────────────────────────────────────
 
 def _median(values: list[int]) -> int | None:
@@ -280,40 +369,99 @@ def midi_for_range(word: WordTimestamp, start: float, end: float) -> tuple[int, 
     return word.midi, 0
 
 
-def _pitch_end(frames: list[Any], midi: int, syl_start: float, syl_end: float, max_extend_s: float = 0.3) -> float:
-    """Find where sustained pitch actually ends by scanning frames beyond whisper end.
+def _percentile(values: list[float], fraction: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return ordered[round((len(ordered) - 1) * fraction)]
 
-    Extends syl_end forward while high-confidence pitch frames (matching the
-    syllable's MIDI note) continue. Stops at the first gap of 3+ consecutive
-    non-pitch frames, or at max_extend_s beyond syl_end.
 
-    Returns syl_end if no sustained pitch is found.
-    """
-    if not frames:
-        return syl_end
+def _activity_threshold(frames: list[PitchFrame]) -> float:
+    """Estimate a song-relative energy threshold from quiet and voiced frames."""
+    amplitudes = [f.amplitude for f in frames]
+    quiet = [f.amplitude for f in frames if f.confidence < 0.2]
+    voiced = [f.amplitude for f in frames if f.confidence >= 0.5]
+    noise = _percentile(quiet, 0.9) if quiet else _percentile(amplitudes, 0.1)
+    signal = _percentile(voiced, 0.5) if voiced else _percentile(amplitudes, 0.75)
+    return noise + max(0.0, signal - noise) * 0.2
 
-    hard_limit = syl_end + max_extend_s
-    scan_start = max(syl_start, syl_end - 0.05)
-    consecutive_gap = 0
-    extended_end = syl_end
 
-    for f in frames:
-        if f.time < scan_start:
-            continue
-        if f.time > hard_limit:
-            break
-        if f.midi > 0 and f.confidence > 0.3 and abs(f.midi - midi) <= 2:
-            consecutive_gap = 0
-            extended_end = f.time
+def _note_segments(
+    frames: list[PitchFrame],
+    start: float,
+    end: float,
+    fallback_midi: int,
+    amplitude_threshold: float,
+) -> list[tuple[float, float, int]]:
+    """Trim a syllable to vocal activity and split sustained pitch changes."""
+    window = [f for f in frames if start <= f.time <= end and f.midi > 0]
+    active = [
+        f for f in window
+        if f.confidence >= 0.3 and f.amplitude >= amplitude_threshold
+    ]
+    if not active:
+        active = [f for f in window if f.confidence >= 0.5]
+    if not active:
+        return [(start, end, fallback_midi)]
+
+    # Keep the strongest contiguous vocal island. Short confidence/energy
+    # dropouts up to 50 ms are treated as part of the same sung sound.
+    islands: list[list[PitchFrame]] = []
+    for frame in active:
+        if not islands or frame.time - islands[-1][-1].time > 0.05:
+            islands.append([frame])
         else:
-            consecutive_gap += 1
-            if consecutive_gap >= 3:
-                break
+            islands[-1].append(frame)
+    active = max(
+        islands,
+        key=lambda island: sum(f.amplitude * f.confidence for f in island),
+    )
 
-    if extended_end > syl_end + 0.02:
-        return extended_end + 0.02
+    # A five-frame median removes vibrato/jitter before finding pitch changes.
+    smoothed: list[tuple[PitchFrame, int]] = []
+    for i, frame in enumerate(active):
+        nearby = active[max(0, i - 2):i + 3]
+        midi = _median([f.midi for f in nearby]) or fallback_midi
+        smoothed.append((frame, midi))
 
-    return syl_end
+    runs: list[list[tuple[PitchFrame, int]]] = []
+    for item in smoothed:
+        if not runs:
+            runs.append([item])
+            continue
+        run_midi = _median([midi for _, midi in runs[-1]]) or fallback_midi
+        gap = item[0].time - runs[-1][-1][0].time
+        if gap <= 0.05 and abs(item[1] - run_midi) <= 1:
+            runs[-1].append(item)
+        else:
+            runs.append([item])
+
+    # Very short pitch changes are detection noise, not singable notes.
+    merged: list[list[tuple[PitchFrame, int]]] = []
+    for run in runs:
+        duration = run[-1][0].time - run[0][0].time
+        if duration < 0.06 and merged:
+            merged[-1].extend(run)
+        else:
+            merged.append(run)
+    if len(merged) > 1 and merged[0][-1][0].time - merged[0][0][0].time < 0.06:
+        merged[1] = merged[0] + merged[1]
+        merged.pop(0)
+
+    frame_step = 0.01
+    if len(active) > 1:
+        frame_step = max(0.001, active[1].time - active[0].time)
+
+    result: list[tuple[float, float, int]] = []
+    for run in merged:
+        weights = [max(0.001, frame.amplitude * frame.confidence) for frame, _ in run]
+        midi = round(sum(value * weight for (_, value), weight in zip(run, weights)) / sum(weights))
+        run_start = max(start, run[0][0].time)
+        run_end = min(end, run[-1][0].time + frame_step)
+        if run_end > run_start:
+            result.append((run_start, run_end, midi))
+
+    return result or [(start, end, fallback_midi)]
 
 
 # ── Main alignment ───────────────────────────────────────────────────────────
@@ -324,6 +472,7 @@ def align_lyrics(
     language: str,
     pauses: list[Pause] | None = None,
     config: Config | None = None,
+    pitch_frames: list[PitchFrame] | None = None,
 ) -> list[AlignedSyllable]:
     """Align lyric text to Whisper word timestamps using Smith-Waterman.
 
@@ -342,12 +491,15 @@ def align_lyrics(
         language: ISO 639-1 language code.
         pauses: Detected silence regions.
         config: Pipeline configuration.
+        pitch_frames: Complete CREPE pitch, confidence, and amplitude timeline.
 
     Returns:
         List of aligned syllables with timestamps and MIDI notes.
     """
     if pauses is None:
         pauses = []
+    if pitch_frames is None:
+        pitch_frames = []
     if config is None:
         config = Config()
 
@@ -417,6 +569,9 @@ def align_lyrics(
     )
 
     sw_backtrace_text = _format_backtrace(sw_result, lyric_chars, whisper_chars)
+    unaligned_ends = _unaligned_ends(sw_result, lyric_chars, whisper_chars)
+    if unaligned_ends:
+        sw_backtrace_text += "\n\n" + unaligned_ends
 
     # ── Extract word-level matches from backtrack ─────────────────────────
 
@@ -457,6 +612,7 @@ def align_lyrics(
 
     for wi in range(len(word_results)):
         if not lyric_word_matched[wi]:
+            _log_unmatched_word(wi, word_results[wi], whisper_words)
             continue
         idxs = sorted(word_results[wi]["whisperIdxs"])
         starts = [whisper_words[idx].start for idx in idxs]
@@ -479,14 +635,47 @@ def align_lyrics(
         else:
             word_results[wi]["midi"] = whisper_words[idxs[0]].midi if idxs else 60
 
+    # Whisper can merge several lyric words into one token. Divide that token's
+    # interval instead of assigning the full interval to every lyric word.
+    wi = 0
+    while wi < len(word_results):
+        idxs = tuple(sorted(word_results[wi]["whisperIdxs"]))
+        end_wi = wi + 1
+        while (
+            idxs
+            and end_wi < len(word_results)
+            and tuple(sorted(word_results[end_wi]["whisperIdxs"])) == idxs
+        ):
+            end_wi += 1
+        if end_wi - wi > 1:
+            group = word_results[wi:end_wi]
+            group_start = min(wr["start"] for wr in group)
+            group_end = max(wr["end"] for wr in group)
+            weights = [max(1, len(normalize_char(wr["word"]))) for wr in group]
+            total_weight = sum(weights)
+            cursor = group_start
+            for wr, weight in zip(group, weights):
+                next_cursor = cursor + (group_end - group_start) * weight / total_weight
+                wr["start"] = cursor
+                wr["end"] = next_cursor
+                cursor = next_cursor
+        wi = end_wi
+
     # ── Interpolate unmatched words ───────────────────────────────────────
 
     matched_indices = [wi for wi in range(len(word_results)) if lyric_word_matched[wi]]
 
     if not matched_indices:
-        logger.warning("No matched words — all words will have default timestamps")
-        for wr in word_results:
+        logger.warning("No matched words; distributing lyrics over the transcript")
+        timeline_start = whisper_words[0].start if whisper_words else 0.0
+        timeline_end = whisper_words[-1].end if whisper_words else timeline_start + 0.3 * len(word_results)
+        slot = max(0.01, (timeline_end - timeline_start) / max(1, len(word_results)))
+        for wi, wr in enumerate(word_results):
             wr["source"] = "interpolated_before"
+            wr["start"] = timeline_start + wi * slot
+            wr["end"] = timeline_start + (wi + 1) * slot
+            if whisper_words:
+                wr["midi"] = whisper_words[min(wi, len(whisper_words) - 1)].midi
     else:
         first = matched_indices[0]
         last = matched_indices[-1]
@@ -508,21 +697,27 @@ def align_lyrics(
             b = matched_indices[ai + 1]
             if b - a <= 1:
                 continue
+            missing = b - a - 1
 
             t_start = word_results[a]["end"]
             t_end = word_results[b]["start"]
-            duration = max(0, t_end - t_start)
+            a_whisper = word_results[a]["whisperIdxs"]
+            b_whisper = word_results[b]["whisperIdxs"]
+            if a_whisper and b_whisper:
+                unused = list(range(max(a_whisper) + 1, min(b_whisper)))
+                if unused:
+                    t_start = whisper_words[unused[0]].start
+                    t_end = whisper_words[unused[-1]].end
+            duration = min(max(0, t_end - t_start), missing * 0.8)
             midi_a = word_results[a]["midi"]
             midi_b = word_results[b]["midi"]
-            gaps = b - a
 
-            for k in range(1, gaps):
+            for k in range(1, missing + 1):
                 wi = a + k
                 word_results[wi]["source"] = "interpolated_between"
-                frac = k / gaps
-                word_results[wi]["start"] = t_start + frac * duration
-                word_results[wi]["end"] = t_start + ((k + 1) / gaps) * duration
-                word_results[wi]["midi"] = round(midi_a + frac * (midi_b - midi_a))
+                word_results[wi]["start"] = t_start + (k - 1) * duration / missing
+                word_results[wi]["end"] = t_start + k * duration / missing
+                word_results[wi]["midi"] = round(midi_a + k / (missing + 1) * (midi_b - midi_a))
 
         # After last matched word
         for wi in range(last + 1, len(word_results)):
@@ -534,68 +729,106 @@ def align_lyrics(
             ) / len(matched_indices)
             fallback = max(0.2, avg_dur)
             for wi in range(last + 1, len(word_results)):
-                offset = (wi - last) * fallback
+                offset = (wi - last - 1) * fallback
                 word_results[wi]["start"] = word_results[last]["end"] + offset
                 word_results[wi]["end"] = word_results[last]["end"] + offset + fallback
                 word_results[wi]["midi"] = word_results[last]["midi"]
+
+    # Silence between adjacent words is a hard timing boundary.
+    for current, following in zip(word_results, word_results[1:]):
+        between = next((
+            pause for pause in pauses
+            if current["start"] <= pause.start and pause.end <= following["end"]
+        ), None)
+        if between:
+            current["end"] = min(current["end"], between.start)
+            following["start"] = max(following["start"], between.end)
+
+        if current["end"] > following["start"]:
+            boundary = (current["end"] + following["start"]) / 2
+            current["end"] = max(current["start"], boundary)
+            following["start"] = min(following["end"], boundary)
 
     # Show the same visual character alignment written to align_backtrace.txt.
     logger.info("Smith-Waterman alignment:\n%s", sw_backtrace_text)
 
     # ── Syllabification + output ──────────────────────────────────────────
 
-    output: list[AlignedSyllable] = []
+    final_output: list[AlignedSyllable] = []
+    amplitude_threshold = _activity_threshold(pitch_frames) if pitch_frames else 0.0
+    previous_line: int | None = None
+    # pitch_frames is already sorted by time; precompute keys so per-word
+    # frame lookup is a slice of a bisect range instead of a linear filter.
+    pitch_times = [f.time for f in pitch_frames] if pitch_frames else []
 
     for wr in word_results:
         syllables = split_word(wr["word"], language)
+        print(f"Word '{wr['word']}' split into syllables: {syllables}")
         syl_duration = max(0.01, (wr["end"] - wr["start"]) / len(syllables))
+        if pitch_frames:
+            lo = bisect.bisect_left(pitch_times, wr["start"])
+            hi = bisect.bisect_right(pitch_times, wr["end"])
+            word_frames = pitch_frames[lo:hi]
+        else:
+            word_frames = wr["pitchFrames"]
+        word_output: list[AlignedSyllable] = []
 
         for si, syl in enumerate(syllables):
             syl_start = wr["start"] + si * syl_duration
             syl_end = wr["start"] + (si + 1) * syl_duration
-
+            lyric_syllable = syl
+            if si == 0 and previous_line == wr["lineIdx"]:
+                lyric_syllable = " " + lyric_syllable
             midi = wr["midi"]
-            pitch_frames = wr["pitchFrames"]
-            if pitch_frames:
-                mr, _ = midi_for_range(
-                    WordTimestamp(word=wr["word"], start=syl_start, end=syl_end, midi=wr["midi"], pitch_frames=pitch_frames),
+            if word_frames:
+                midi, _ = midi_for_range(
+                    WordTimestamp(
+                        word=wr["word"],
+                        start=syl_start,
+                        end=syl_end,
+                        midi=wr["midi"],
+                        pitch_frames=word_frames,
+                    ),
                     syl_start,
                     syl_end,
                 )
-                midi = mr
 
-            p_end = _pitch_end(pitch_frames, midi, syl_start, syl_end) if pitch_frames else syl_end
+            segments = _note_segments(
+                word_frames,
+                syl_start,
+                syl_end,
+                midi,
+                amplitude_threshold,
+            )
+            for segment_index, (note_start, note_end, note_midi) in enumerate(segments):
+                word_output.append(AlignedSyllable(
+                    syllable=lyric_syllable if segment_index == 0 else "",
+                    start=note_start,
+                    end=note_end,
+                    midi=note_midi,
+                    pitch_end=note_end,
+                ))
 
-            output.append(AlignedSyllable(syllable=syl, start=syl_start, end=syl_end, midi=midi, pitch_end=p_end))
+        if previous_line is not None and wr["lineIdx"] != previous_line and word_output:
+            first = word_output[0]
+            final_output.append(AlignedSyllable(
+                syllable="",
+                start=first.start,
+                end=first.start,
+                midi=0,
+                is_line_break=True,
+            ))
+        final_output.extend(word_output)
+        previous_line = wr["lineIdx"]
 
     # ── Insert line breaks ────────────────────────────────────────────────
-
-    final_output: list[AlignedSyllable] = []
-    line_break_pos = 0
-
-    for li in range(len(raw_lines)):
-        line_words = raw_lines[li].split()
-        line_syl_count = sum(
-            len(split_word(w, language)) for w in line_words
-        )
-
-        final_output.extend(output[line_break_pos:line_break_pos + line_syl_count])
-        line_break_pos += line_syl_count
-
-        if li < len(raw_lines) - 1 and line_break_pos < len(output):
-            next_syl = output[line_break_pos]
-            final_output.append(
-                AlignedSyllable(
-                    syllable="", start=next_syl.start, end=next_syl.start,
-                    midi=0, is_line_break=True,
-                )
-            )
 
     # ── Summary ───────────────────────────────────────────────────────────
 
     aligned_count = sum(1 for wr in word_results if wr["source"] == "sw_aligned")
     interp_count = sum(1 for wr in word_results if wr["source"] != "sw_aligned")
-    total_syllables = sum(1 for s in final_output if not s.is_line_break)
+    total_syllables = sum(1 for s in final_output if not s.is_line_break and s.syllable)
+    total_notes = sum(1 for s in final_output if not s.is_line_break)
     line_breaks = sum(1 for s in final_output if s.is_line_break)
 
     logger.info(f"Alignment complete")
@@ -603,6 +836,7 @@ def align_lyrics(
     logger.info(f"  Aligned:        {aligned_count} ({100 * aligned_count / max(len(lyric_words), 1):.1f}%)")
     logger.info(f"  Interpolated:   {interp_count}")
     logger.info(f"  Syllables:      {total_syllables}")
+    logger.info(f"  Notes:          {total_notes}")
     logger.info(f"  Line breaks:    {line_breaks}")
 
     # Optional debug output
@@ -621,6 +855,7 @@ def align_lyrics(
                 "alignedWords": aligned_count,
                 "interpolatedWords": interp_count,
                 "totalSyllables": total_syllables,
+                "totalNotes": total_notes,
                 "lineBreaks": line_breaks,
             },
             "final_output": [asdict(s) for s in final_output],

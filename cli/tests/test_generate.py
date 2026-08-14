@@ -4,6 +4,7 @@ import pytest
 from cli.config import Config
 from cli.generate import generate_ultrastar
 from cli.pipeline_types import AlignedSyllable
+from cli.ultrastar import parse_ultrastar_txt
 
 
 class TestGenerateUltrastar:
@@ -50,7 +51,13 @@ class TestGenerateUltrastar:
             mp3_filename="test.mp3",
             config=Config(),
         )
-        assert "- " in txt  # line break note
+        _, notes = parse_ultrastar_txt(txt)
+        line_break_index = next(i for i, note in enumerate(notes) if note.note_type == "-")
+        previous = notes[line_break_index - 1]
+        line_break = notes[line_break_index]
+        following = notes[line_break_index + 1]
+        assert previous.start_beat + previous.duration <= line_break.start_beat
+        assert line_break.start_beat <= following.start_beat
 
     def test_overlap_prevention(self):
         syls = self._make_syllables([
@@ -66,8 +73,35 @@ class TestGenerateUltrastar:
             mp3_filename="test.mp3",
             config=Config(),
         )
-        # Should not crash; notes should be non-overlapping
-        assert "E" in txt
+        _, notes = parse_ultrastar_txt(txt)
+        singing = [note for note in notes if note.note_type != "-"]
+        assert all(
+            current.start_beat + current.duration <= following.start_beat
+            for current, following in zip(singing, singing[1:])
+        )
+
+    def test_rounding_does_not_create_overlap(self):
+        syls = self._make_syllables([
+            ("a", 0.5, 0.8, 60),
+            ("b", 0.8, 1.1, 62),
+            ("c", 1.1, 1.4, 64),
+        ])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=123.05,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            config=Config(),
+        )
+
+        _, notes = parse_ultrastar_txt(txt)
+        assert all(
+            current.start_beat + current.duration <= following.start_beat
+            for current, following in zip(notes, notes[1:])
+            if current.note_type != "-" and following.note_type != "-"
+        )
 
     def test_video_filename(self):
         syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
