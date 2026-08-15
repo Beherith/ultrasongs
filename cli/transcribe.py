@@ -91,8 +91,9 @@ def release_demucs_model() -> None:
 def apply_demucs(model, audio, sr: int):
     """Run one Demucs pass over the audio.
 
-    Demucs is not fully deterministic, so repeated passes over the same input can
-    yield slightly different vocal/instrumental splits. Returns
+    Accepts mono (1-D) or multi-channel (2-D) numpy audio.  Stereo input is
+    passed to Demucs as-is (its stereo model benefits from the image); mono
+    input is duplicated into both channels.  Returns
     (vocals_mono, accompaniment_mono, out_sr).
     """
     import numpy as np
@@ -100,10 +101,18 @@ def apply_demucs(model, audio, sr: int):
     import torchaudio
     from demucs.apply import apply_model
 
-    mono = torch.from_numpy(audio.astype(np.float32))
+    stereo = audio.astype(np.float32)
+    if stereo.ndim == 1:
+        stereo = np.stack([stereo, stereo])
+    else:
+        stereo = stereo.T
+        if stereo.shape[0] == 1:
+            stereo = np.stack([stereo[0], stereo[0]])
+        else:
+            stereo = stereo[:2]
+    wav = torch.from_numpy(stereo).unsqueeze(0)
     if sr != DEMUCS_SR:
-        mono = torchaudio.functional.resample(mono.unsqueeze(0), sr, DEMUCS_SR).squeeze(0)
-    wav = mono.unsqueeze(0).expand(2, -1).unsqueeze(0)
+        wav = torchaudio.functional.resample(wav, sr, DEMUCS_SR)
     if DEVICE == "cuda":
         wav = wav.cuda()
     with torch.no_grad():
@@ -112,7 +121,7 @@ def apply_demucs(model, audio, sr: int):
     vocals = sources[0, DEMUCS_VOCALS_IDX].mean(0).cpu().numpy()
     acc_stems = [sources[0, i] for i in range(n_sources) if i != DEMUCS_VOCALS_IDX]
     accompaniment = torch.stack(acc_stems).sum(0).mean(0).cpu().numpy()
-    del sources, wav, mono
+    del sources, wav, stereo
     return vocals, accompaniment, DEMUCS_SR
 
 
@@ -414,11 +423,10 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     acc_mp3 = base.with_name(base.name + "_accompaniment.mp3")
     vocals_wav = base.with_name(base.name + "_vocals.wav")
 
-    # Step 1: Load audio
+    # Step 1: Load audio (stereo is kept for Demucs; it is downmixed to mono
+    # inside apply_demucs, after separation)
     logger.info("Step 1/6: Loading audio…")
     audio, sr = sf.read(str(mp3_path))
-    if audio.ndim > 1:
-        audio = audio.mean(axis=1)
 
     n_runs = max(1, int(config.transcribe_runs))
 
