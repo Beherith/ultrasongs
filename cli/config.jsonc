@@ -23,6 +23,17 @@
   // garbled transcription.
   "whisper_language": "en",
 
+  // Number of independent separation + transcription passes to run and
+  // consolidate. Demucs (and Whisper) is not fully deterministic, so a single
+  // run can recognize slightly different words from another. Each pass runs
+  // Demucs on the source audio, then transcribes that pass's vocals with
+  // Whisper; the passes are then aligned to each other with Smith-Waterman and
+  // a per-word majority vote produces a single consensus transcription that is
+  // more stable than any single run. Set to 1 for a single fast pass (no
+  // consolidation). Higher values (e.g., 5) are more robust but roughly
+  // multiply the Demucs + Whisper runtime.
+  "transcribe_runs": 3,
+
   // Demucs source separation model.
   // "htdemucs" (Hybrid Transformer) is the default — it produces the highest
   // quality vocal/instrumental splits. Alternatives like "hdemucs" (older hybrid
@@ -63,11 +74,12 @@
   // tracks may benefit from a lower value (2-3%).
   "pause_threshold_pct": 5,
 
-  // Gap lead-in: milliseconds before the first sung note for Ultrastar's #GAP.
-  // #GAP tells Ultrastar when the vocal part starts. 500ms gives the player half a
-  // second of lead-in, which is the standard used by most Ultrastar song files.
-  // Increase if the song has a long intro and you want more buffer; decrease for
-  // songs that start singing immediately.
+  // Gap lead-in: fallback for Ultrastar's #GAP when no first beat was detected.
+  // #GAP is the offset in ms from the start of the audio to the song's first
+  // beat, which anchors the Ultrastar beat grid. Normal operation uses the
+  // first beat detected by librosa (BpmResult.first_beat_ms). Only when that
+  // detection is unavailable does #GAP fall back to (first note time - this
+  // value), i.e. 500ms of lead-in before the first sung note.
   "gap_lead_in_ms": 500,
 
   // Line break offset: number of beats before the next note to insert a line break.

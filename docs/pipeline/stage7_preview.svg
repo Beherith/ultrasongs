@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="960" viewBox="0 0 1240 960" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ffffff"/>
+    </marker>
+  </defs>
+  <rect width="1240" height="960" fill="#f8fafc"/>
+
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 7 — Preview</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/html_preview.py · generate_preview(txt_path, output_html_path, pitch_json_path?)</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Render the .txt as a scrollable dark-themed HTML songbook with per-syllable note bars (optionally pitched) — also used mid-pipeline for whisper_pitch.html</text>
+
+  <!-- input -->
+  <rect x="60" y="118" width="500" height="110" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="80" y="146" font-size="14" font-weight="bold" fill="#166534">Input</text>
+  <text x="80" y="172" font-size="12.5" fill="#14532d" font-family="Consolas, monospace">output/Test Song.txt          (parse_ultrastar_txt)</text>
+  <text x="80" y="196" font-size="12.5" fill="#14532d" font-family="Consolas, monospace">tmp/song_pitch.json  (optional, Stage 2)</text>
+
+  <!-- step1 parse -->
+  <rect x="700" y="118" width="480" height="110" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="1140" y="146" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="end">1 · parse back into data</text>
+  <text x="720" y="172" font-size="12" fill="#334155">header → title/artist/mp3/bpm/beat_resolution/gap</text>
+  <text x="720" y="194" font-size="12" fill="#334155">note lines → type (: / *), start+duration beats, pitch, text</text>
+  <text x="720" y="216" font-size="12" fill="#334155">ms_of(beat) = beat × 60000/bpm/4 + GAP  → seconds</text>
+  <line x1="560" y1="173" x2="698" y2="173" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <line x1="940" y1="228" x2="940" y2="262" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- step2 verses -->
+  <rect x="60" y="264" width="1120" height="110" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="280" width="330" height="26" rx="13" fill="#0f172a"/>
+  <text x="241" y="298" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">2 · regroup notes into verses</text>
+  <text x="90" y="330" font-size="12.5" fill="#334155">split into a new verse when the gap to the next note is &gt; 2000 ms — silence in the timing = new verse</text>
+  <text x="90" y="352" font-size="12.5" fill="#334155">chorus notes become a separate <tspan font-family="Consolas, monospace" fill="#1d4ed8">chorus_lyrics</tspan> section (shown as a "Chorus" lyric block)</text>
+  <text x="90" y="372" font-size="11.5" fill="#64748b">every verse carries first_time_ms / last_time_ms / has_notes for the layout math</text>
+
+  <line x1="620" y1="374" x2="620" y2="408" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- step3 render -->
+  <rect x="60" y="410" width="1120" height="430" rx="12" fill="#1e1e2e"/>
+  <rect x="76" y="426" width="380" height="26" rx="13" fill="#f59e0b"/>
+  <text x="266" y="444" font-size="13" fill="#111827" text-anchor="middle" font-weight="bold">3 · render (HTML + inline CSS, no JS)</text>
+
+  <!-- lyric -->
+  <text x="100" y="486" font-size="17" fill="#fde68a">He  llo  wo  rld,</text>
+  <text x="100" y="520" font-size="11.5" fill="#94a3b8">verse lyric (rejoined syllables)</text>
+
+  <!-- timeline axis -->
+  <line x1="100" y1="548" x2="1140" y2="548" stroke="#45475a" stroke-width="1.5"/>
+  <text x="100"  y="568" font-size="10.5" fill="#6c7086" font-family="Consolas, monospace">0.0s</text>
+  <text x="355" y="568" font-size="10.5" fill="#6c7086" font-family="Consolas, monospace">0.5s</text>
+  <text x="610" y="568" font-size="10.5" fill="#6c7086" font-family="Consolas, monospace">1.0s</text>
+  <text x="865" y="568" font-size="10.5" fill="#6c7086" font-family="Consolas, monospace">1.5s</text>
+  <text x="1110" y="568" font-size="10.5" fill="#6c7086" font-family="Consolas, monospace">2.0s</text>
+  <!-- pitch scale 84..40 on right: map midi m to y = 84 - (m-40)*(520-596)/(84-40)... keep simple labels -->
+  <text x="1196" y="560" font-size="10.5" fill="#6c7086" text-anchor="end">C4</text>
+  <text x="1196" y="530" font-size="10.5" fill="#6c7086" text-anchor="end">C5</text>
+  <line x1="1150" y1="526" x2="1140" y2="526" stroke="#45475a" stroke-dasharray="3 3"/>
+  <line x1="1150" y1="556" x2="1140" y2="556" stroke="#45475a" stroke-dasharray="3 3"/>
+
+  <!-- note bars: x = (ms - first)/(last-first) * 1000 + 100, y by midi -->
+  <!-- He 0.42-0.78 C4(60): x 385->520? computed: first=380 last=2400 range 2020; He: (420-380)/2020*1000+100=119 -> (780-380)/2020*1000+100=297 ; but keep bars within line area y ~ 545 -->
+  <g font-family="Consolas, monospace" font-size="11" fill="#cdd6f4">
+    <rect x="119"  y="548" width="110" height="16" rx="3" fill="#f38ba8"/><text x="174"  y="608" text-anchor="middle">He</text>
+    <rect x="230"  y="552" width="95"  height="16" rx="3" fill="#fab387"/><text x="277"  y="608" text-anchor="middle">llo</text>
+    <rect x="325"  y="558" width="95"  height="16" rx="3" fill="#f9e2af"/><text x="372"  y="608" text-anchor="middle">wo</text>
+    <rect x="420"  y="552" width="46"  height="16" rx="3" fill="#f38ba8"/><text x="443"  y="608" text-anchor="middle">rd</text>
+    <rect x="607"  y="558" width="110" height="16" rx="3" fill="#f38ba8"/><text x="662"  y="608" text-anchor="middle">This</text>
+    <rect x="718"  y="564" width="95"  height="16" rx="3" fill="#f5c2e7"/><text x="765"  y="608" text-anchor="middle">is</text>
+    <rect x="813"  y="558" width="142" height="16" rx="3" fill="#a6e3a1"/><text x="884"  y="608" text-anchor="middle">a test</text>
+    <rect x="955"  y="552" width="110" height="16" rx="3" fill="#89b4fa"/><text x="1010" y="608" text-anchor="middle">song</text>
+  </g>
+  <text x="100" y="640" font-size="11.5" fill="#94a3b8">bar: x = start time · width = duration · color = syllable hash  (pitch mode: y = MIDI pitch, height constant)</text>
+
+  <!-- pitch mode illustration -->
+  <rect x="100" y="664" width="560" height="150" rx="10" fill="#2a2a3d"/>
+  <text x="120" y="690" font-size="13" font-weight="bold" fill="#a6e3a1">pitch mode (when pitch JSON given)</text>
+  <line x1="130" y1="782" x2="620" y2="782" stroke="#45475a" stroke-width="1.5"/>
+  <g>
+    <rect x="130" y="766" width="9" height="16" rx="2" fill="#ff5555"/>
+    <rect x="141" y="760" width="9" height="22" rx="2" fill="#ff9944"/>
+    <rect x="152" y="752" width="9" height="30" rx="2" fill="#ffdd33"/>
+    <rect x="163" y="756" width="9" height="26" rx="2" fill="#ffcc11"/>
+    <rect x="174" y="758" width="9" height="24" rx="2" fill="#eedd22"/>
+    <rect x="185" y="764" width="9" height="18" rx="2" fill="#aadd44"/>
+    <rect x="196" y="762" width="9" height="20" rx="2" fill="#66ee88"/>
+    <rect x="207" y="768" width="9" height="14" rx="2" fill="#ff3355"/>
+    <rect x="218" y="774" width="9" height="8"  rx="2" fill="#88bb44"/>
+    <rect x="229" y="758" width="9" height="24" rx="2" fill="#88cc33"/>
+    <rect x="240" y="750" width="9" height="32" rx="2" fill="#33dd66"/>
+    <rect x="251" y="754" width="9" height="28" rx="2" fill="#33cc99"/>
+    <rect x="262" y="760" width="9" height="22" rx="2" fill="#44ddaa"/>
+    <rect x="273" y="766" width="9" height="16" rx="2" fill="#44bbaa"/>
+    <rect x="284" y="772" width="9" height="10" rx="2" fill="#33774d"/>
+    <rect x="295" y="770" width="9" height="12" rx="2" fill="#77cc55"/>
+  </g>
+  <text x="130" y="800" font-size="11" fill="#94a3b8">one bar per CREPE frame: height = amplitude (green→red as it gets loud)</text>
+  <text x="330" y="800" font-size="11" fill="#94a3b8">    fill = CREPE confidence (red = low, green = sure pitch)</text>
+
+  <rect x="680" y="664" width="480" height="150" rx="10" fill="#2a2a3d"/>
+  <text x="700" y="690" font-size="13" font-weight="bold" fill="#89b4fa">page layout</text>
+  <text x="700" y="716" font-size="11.5" fill="#cdd6f4">• header: title, artist, BPM + beat-resolution badge, GAP</text>
+  <text x="700" y="738" font-size="11.5" fill="#cdd6f4">• one &lt;section class="verse"&gt; per verse: lyric on top,</text>
+  <text x="750" y="758" font-size="11.5" fill="#cdd6f4">note lane below, time axis 0.1 ms-precise</text>
+  <text x="700" y="780" font-size="11.5" fill="#cdd6f4">• chorus lyrics in their own amber "Chorus" block</text>
+  <text x="700" y="802" font-size="11.5" fill="#cdd6f4">• single self-contained file — open it in any browser</text>
+
+  <line x1="620" y1="840" x2="620" y2="874" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- outputs -->
+  <rect x="60" y="876" width="1120" height="64" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="80" y="902" font-size="13.5" font-weight="bold" fill="#166534">output/Test Song.html</text>
+  <text x="420" y="902" font-size="12.5" fill="#14532d">  ·  mid-pipeline, the same engine renders tmp/song_whisper_pitch.html (Whisper words vs. CREPE pitch) during Stage 2</text>
+  <text x="80" y="924" font-size="12" fill="#14532d">run with:  python -m cli preview --txt output/Test\ Song.txt --pitch tmp/song_pitch.json</text>
+</svg>

@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1640" viewBox="0 0 1400 1640" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1400" height="1640" fill="#f8fafc"/>
+
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 4 — Align</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/align.py · align_lyrics(lyrics, whisper_words, language, pauses, config, pitch_frames)</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Lyric text + Whisper words + CREPE pitch + pauses → AlignedSyllable[] (syllable, time range, MIDI, line breaks)</text>
+
+  <!-- Inputs -->
+  <rect x="60" y="118" width="560" height="112" rx="10" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+  <text x="80" y="146" font-size="14" font-weight="bold" fill="#9d174d">Input A — lyrics file (--lyrics lyrics.txt)</text>
+  <text x="80" y="172" font-size="13.5" fill="#0f172a" font-family="Consolas, monospace">Hello world</text>
+  <text x="80" y="190" font-size="13.5" fill="#0f172a" font-family="Consolas, monospace">This is a test</text>
+  <text x="80" y="216" font-size="11.5" fill="#9d174d">line structure matters: lyric lines become note line breaks</text>
+
+  <rect x="740" y="118" width="600" height="112" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="760" y="146" font-size="14" font-weight="bold" fill="#166534">Input B — TranscribeResult (Stage 2 output)</text>
+  <text x="760" y="172" font-size="12.5" fill="#14532d">words[]  word · start · end · midi · pitch_frames   (consensus, timestamped)</text>
+  <text x="760" y="192" font-size="12.5" fill="#14532d">pitch_frames[]  full CREPE timeline: time · midi · confidence · amplitude</text>
+  <text x="760" y="212" font-size="12.5" fill="#14532d">pauses[]  RMS silence regions from the vocal stem</text>
+
+  <line x1="340" y1="230" x2="540" y2="286" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1040" y1="230" x2="860" y2="286" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Step 1 -->
+  <rect x="60" y="288" width="1280" height="112" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="304" width="280" height="26" rx="13" fill="#be185d"/>
+  <text x="216" y="322" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">1 · normalize_char() — char cleanup</text>
+  <text x="380" y="322" font-size="12.5" fill="#334155">lowercase + NFD decompose + strip diacritics ("Café" → "cafe")</text>
+  <text x="90" y="354" font-size="12.5" fill="#0f172a">Build char sequences tagged with wordIdx + lineIdx; a " " token is inserted between words:</text>
+  <text x="90" y="384" font-size="14" fill="#9d174d" font-family="Consolas, monospace">"Hello world"  →  [ H  e  l  l  o  ␠  w  o  r  l  d ]      (same for the whisper transcript, fully normalized)</text>
+
+  <line x1="700" y1="400" x2="700" y2="428" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Step 2 -->
+  <rect x="60" y="430" width="1280" height="300" rx="10" fill="#fff1f2" stroke="#ef4444" stroke-width="2"/>
+  <rect x="76" y="446" width="360" height="26" rx="13" fill="#b91c1c"/>
+  <text x="256" y="464" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">2 · smith_waterman() — local, affine-gap DP</text>
+  <text x="90" y="498" font-size="13" fill="#0f172a">phonetic_score(x, y) per character pair:</text>
+  <text x="110" y="522" font-size="12.5" fill="#334155">identical = 1.0 · same phonetic group (aei / ou / szc / td / pb / kg / fvw / mn / lr / y-i / h-j) = 0.6 by distance</text>
+  <text x="110" y="544" font-size="12.5" fill="#334155">cross pairs (a-o, a-u, sh-zh, f-ph, b-p, d-t, g-k, …) = 0.5 · unrelated = −0.3</text>
+  <text x="90" y="576" font-size="12.5" fill="#334155">cell = score × MATCH(4); gaps: open 4 / extend 0.5 · matrices M (match), X (gap in whisper), Y (gap in lyrics)</text>
+  <text x="90" y="598" font-size="12.5" fill="#334155">local alignment: cells clamp at 0 → only the best-scoring lyric span is matched (unmatched intro/outro stays out)</text>
+
+  <rect x="90" y="616" width="620" height="92" rx="8" fill="#ffffff" stroke="#fca5a5"/>
+  <text x="106" y="640" font-size="11.5" fill="#64748b">backtrack from the max-score cell draws the alignment:</text>
+  <text x="106" y="664" font-size="15" fill="#0f172a" font-family="Consolas, monospace">lyric:     h  e  -  l  -  o</text>
+  <text x="106" y="684" font-size="15" fill="#16a34a" font-family="Consolas, monospace">sym:       |  .     |     |</text>
+  <text x="106" y="704" font-size="15" fill="#0f172a" font-family="Consolas, monospace">whisper:   h  a     l     o</text>
+  <text x="106" y="756" font-size="11.5" fill="#64748b">| exact · . phonetically similar · gaps align around Whisper's misreads</text>
+
+  <rect x="730" y="494" width="580" height="210" rx="8" fill="#ffffff" stroke="#fca5a5"/>
+  <text x="746" y="520" font-size="13" font-weight="bold" fill="#7f1d1d">Why phonetic, not exact?</text>
+  <text x="746" y="546" font-size="12.5" fill="#334155">Whisper mishears lyrics ("hello" → "hallo", "see" → "sea"). Groups</text>
+  <text x="746" y="566" font-size="12.5" fill="#334155">treat near-homophones as soft matches, so the correct words still win.</text>
+  <text x="746" y="592" font-size="13" font-weight="bold" fill="#7f1d1d">Same engine, different tokens:</text>
+  <text x="746" y="618" font-size="12.5" fill="#334155">consensus.py aligns whole WORDS with word_similarity, and this stage</text>
+  <text x="746" y="638" font-size="12.5" fill="#334155">aligns whole CHARACTERS — one generic smith_waterman() core.</text>
+  <text x="746" y="664" font-size="12.5" fill="#334155">Result: maxScore + maxI/maxJ + backtrack path (i, j, matrix per step).</text>
+
+  <line x1="400" y1="730" x2="370" y2="768" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1000" y1="730" x2="1030" y2="768" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Step 3 -->
+  <rect x="60" y="770" width="620" height="180" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="786" width="300" height="26" rx="13" fill="#0f172a"/>
+  <text x="226" y="804" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">3 · word timestamps for matched words</text>
+  <text x="90" y="838" font-size="12.5" fill="#334155">M-steps map lyric chars → whisper chars, grouped per word:</text>
+  <text x="90" y="862" font-size="12.5" fill="#334155">span = min(starts) … max(ends) of the matched whisper word(s)</text>
+  <text x="90" y="886" font-size="12.5" fill="#334155">MIDI = median of pitch frames in range (conf 0.5 → 0.3 → 0.1 fallback)</text>
+  <text x="90" y="910" font-size="12.5" fill="#334155">several lyric words sharing ONE whisper token: its time interval is</text>
+  <text x="90" y="930" font-size="12.5" fill="#334155">split proportionally to char counts instead of duplicated over all</text>
+
+  <!-- Step 4 -->
+  <rect x="720" y="770" width="620" height="180" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+  <rect x="736" y="786" width="330" height="26" rx="13" fill="#b45309"/>
+  <text x="901" y="804" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">4 · interpolate words SW did not match</text>
+  <text x="750" y="838" font-size="12.5" fill="#78350f">before first match: slots placed backwards from the anchor (≥ 0.1 s each)</text>
+  <text x="750" y="862" font-size="12.5" fill="#78350f">between matches: unused whisper words in the gap define the span;</text>
+  <text x="766" y="882" font-size="12.5" fill="#78350f">hard cap missing × 0.8 s; MIDI lerps between the two anchors</text>
+  <text x="750" y="906" font-size="12.5" fill="#78350f">after last match: continue at the average matched-word duration (≥ 0.2 s)</text>
+  <text x="750" y="930" font-size="11.5" fill="#b45309">zero-match fallback: spread lyrics evenly over the whole transcript</text>
+
+  <line x1="370" y1="950" x2="540" y2="988" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1030" y1="950" x2="860" y2="988" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <path d="M 1340 174 L 1360 174 L 1360 1040 L 1342 1040" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+  <text x="1398" y="976" font-size="11" fill="#94a3b8" text-anchor="end">pauses[]</text>
+
+  <!-- Step 5 -->
+  <rect x="60" y="990" width="1280" height="100" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="1006" width="280" height="26" rx="13" fill="#475569"/>
+  <text x="216" y="1024" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">5 · timing cleanup between neighbors</text>
+  <text x="380" y="1024" font-size="12.5" fill="#334155">a detected PAUSE between two adjacent words is a hard boundary:</text>
+  <text x="90" y="1056" font-size="12.5" fill="#334155">prev.end ← pause.start · next.start ← pause.end (nobody sings through silence)</text>
+  <text x="90" y="1078" font-size="12.5" fill="#334155">any residual overlap between neighbors is split at the midpoint</text>
+
+  <line x1="400" y1="1090" x2="370" y2="1128" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1000" y1="1090" x2="1030" y2="1128" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Step 6 -->
+  <rect x="60" y="1130" width="620" height="180" rx="10" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+  <rect x="76" y="1146" width="330" height="26" rx="13" fill="#be185d"/>
+  <text x="241" y="1164" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">6 · syllabify — split_word() via pyphen</text>
+  <text x="90" y="1198" font-size="12.5" fill="#9d174d">dictionary-hyphenated splitting, 20+ languages (config language code)</text>
+  <text x="90" y="1222" font-size="13.5" fill="#0f172a" font-family="Consolas, monospace">"sunshine" → "sun" + "shine"</text>
+  <text x="90" y="1248" font-size="12.5" fill="#9d174d">word interval split evenly; per-syllable MIDI = median of pitch</text>
+  <text x="90" y="1270" font-size="12.5" fill="#9d174d">frames inside the slice (again with 0.5/0.3/0.1 fallback)</text>
+  <text x="90" y="1294" font-size="11.5" fill="#be185d">unsupported language → word stays unsplit (1 syllable = 1 note)</text>
+
+  <!-- Step 7 -->
+  <rect x="720" y="1130" width="620" height="300" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+  <rect x="736" y="1146" width="380" height="26" rx="13" fill="#047857"/>
+  <text x="926" y="1164" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">7 · _note_segments() — trim + split by pitch change</text>
+  <text x="750" y="1196" font-size="12.5" fill="#065f46">activity threshold (song-relative, from the CREPE timeline):</text>
+  <text x="766" y="1216" font-size="11.5" fill="#065f46">noise = p90 of quiet frames (conf &lt; 0.2) · signal = p50 of voiced (conf ≥ 0.5) → thr = noise + 0.2·(signal−noise)</text>
+  <text x="750" y="1240" font-size="12.5" fill="#065f46">active frames: conf ≥ 0.3 (fallback 0.5) AND amplitude ≥ threshold</text>
+  <text x="750" y="1262" font-size="12.5" fill="#065f46">keep the strongest contiguous island — bridges dropouts ≤ 50 ms</text>
+  <text x="750" y="1284" font-size="12.5" fill="#065f46">median smoothing (5-frame window) kills vibrato/jitter</text>
+  <text x="750" y="1306" font-size="12.5" fill="#065f46">drift &gt; 1 semitone splits the syllable; runs &lt; 60 ms merged (noise)</text>
+  <text x="750" y="1328" font-size="12.5" fill="#065f46">segment MIDI = amplitude×confidence weighted median</text>
+  <text x="750" y="1360" font-size="13" fill="#047857" font-family="Consolas, monospace">"shining" → (0.10–0.28, C5) + (0.28–0.46, E5)</text>
+  <text x="750" y="1388" font-size="11.5" fill="#065f46">→ one syllable can become several pitch-change notes (Ultrastar needs one pitch per note)</text>
+  <text x="750" y="1410" font-size="11.5" fill="#065f46">no active frames → original (start, end, word-midi) fallback</text>
+
+  <line x1="370" y1="1310" x2="330" y2="1448" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1030" y1="1430" x2="900" y2="1448" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Step 8 -->
+  <rect x="60" y="1450" width="500" height="100" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="1466" width="240" height="26" rx="13" fill="#475569"/>
+  <text x="196" y="1484" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">8 · line breaks</text>
+  <text x="90" y="1518" font-size="12.5" fill="#334155">wherever the lyric LINE changes, insert an</text>
+  <text x="90" y="1540" font-size="12.5" fill="#334155">is_line_break syllable at the next syllable's start (→ "-" note in .txt)</text>
+
+  <!-- Output -->
+  <rect x="580" y="1450" width="760" height="150" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="600" y="1480" font-size="15" font-weight="bold" fill="#166534">AlignedSyllable[] — the note skeleton for Stage 5</text>
+  <g font-size="11.5" fill="#14532d">
+    <rect x="600" y="1494" width="120" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="660" y="1513" text-anchor="middle">syllable</text>
+    <rect x="728" y="1494" width="80" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="768" y="1513" text-anchor="middle">start</text>
+    <rect x="816" y="1494" width="80" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="856" y="1513" text-anchor="middle">end</text>
+    <rect x="904" y="1494" width="80" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="944" y="1513" text-anchor="middle">midi</text>
+    <rect x="992" y="1494" width="140" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="1062" y="1513" text-anchor="middle">is_line_break</text>
+  </g>
+  <text x="600" y="1548" font-size="12" fill="#166534">debug_alignment=true also writes: align_debug.json · align_backtrace.txt · whisper_pitch.json</text>
+  <text x="600" y="1570" font-size="12" fill="#166534">· whisper_pitch.html (mid-pipeline pitch preview, same engine as Stage 7 preview)</text>
+  <line x1="560" y1="1500" x2="578" y2="1500" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+</svg>

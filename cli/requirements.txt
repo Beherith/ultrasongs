@@ -1,5 +1,7 @@
+--extra-index-url https://download.pytorch.org/whl/cu124
+
 # Install CUDA-enabled PyTorch first:
-#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
 # Then install the rest:
 faster-whisper>=1.0.0
 demucs>=4.0.0

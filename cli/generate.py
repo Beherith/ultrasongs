@@ -20,12 +20,14 @@ def generate_ultrastar(
     artist: str,
     mp3_filename: str,
     video_filename: str | None = None,
+    first_beat_ms: float | None = None,
     config: Config | None = None,
 ) -> str:
     """Convert aligned syllables to Ultrastar .txt string.
 
     Handles:
         - Converting seconds to a high-resolution Ultrastar beat grid
+        - Anchoring the grid to the detected first beat via #GAP
         - Capping every duration at the next note onset
         - Ensuring every singing note has at least one beat of duration
         - Placing line breaks between adjacent singing notes
@@ -33,11 +35,14 @@ def generate_ultrastar(
     Args:
         aligned_syllables: Syllables with timestamps and MIDI from align_lyrics().
         bpm: Detected BPM.
-        gap_ms: Gap in milliseconds before first note.
+        gap_ms: Gap in milliseconds before first note (fallback #GAP).
         title: Song title.
         artist: Artist name.
         mp3_filename: MP3 filename for the #MP3 header.
         video_filename: Optional video filename.
+        first_beat_ms: Time in milliseconds of the song's first beat
+            (BpmResult.first_beat_ms). Used as #GAP so the beat grid aligns
+            with the actual groove. Falls back to first note minus gap_ms.
         config: Pipeline configuration.
 
     Returns:
@@ -48,9 +53,13 @@ def generate_ultrastar(
 
     ultra_notes: list[UltrastarNote] = []
 
-    # Calculate gap from first syllable
-    first_syl = next((s for s in aligned_syllables if not s.is_line_break), None)
-    gap = max(0, round(first_syl.start * 1000 - gap_ms)) if first_syl else 0
+    # Anchor the beat grid: #GAP is the offset from the audio start to the
+    # first beat, so a note sung on the downbeat lands on an integer beat.
+    if first_beat_ms is not None:
+        gap = max(0, round(first_beat_ms))
+    else:
+        first_syl = next((s for s in aligned_syllables if not s.is_line_break), None)
+        gap = max(0, round(first_syl.start * 1000 - gap_ms)) if first_syl else 0
     output_bpm = bpm * config.beat_resolution_multiplier
 
     # Quantize every onset once. Notes need distinct grid positions because an

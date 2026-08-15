@@ -1,6 +1,6 @@
 """Tests for shared pipeline data serialization."""
 
-from cli.pipeline_types import PitchFrame, TranscribeResult, WordTimestamp
+from cli.pipeline_types import BpmResult, PitchFrame, TranscribeResult, WordTimestamp
 
 
 def test_transcribe_result_preserves_global_pitch_frames():
@@ -32,3 +32,21 @@ def test_old_transcribe_result_recovers_word_pitch_frames():
     restored = TranscribeResult.from_dict(data)
 
     assert restored.pitch_frames == [frame]
+
+
+def test_transcribe_result_preserves_bpm_result():
+    bpm_result = BpmResult(bpm=118.0, first_beat_ms=735.0, stable=False, chunk_bpms=[117.0, 150.0])
+    result = TranscribeResult(
+        words=[WordTimestamp("hello", 0.1, 0.5, 60)],
+        language="en",
+        vocals_path="vocals.mp3",
+        accompaniment_path="accompaniment.mp3",
+        pauses=[],
+        bpm=bpm_result.bpm,
+        bpm_result=bpm_result,
+    )
+
+    restored = TranscribeResult.from_dict(result.to_dict())
+
+    assert restored.bpm_result == bpm_result
+    assert restored.bpm == bpm_result.bpm

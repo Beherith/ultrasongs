@@ -71,6 +71,26 @@ class AlignedSyllable:
 
 
 @dataclass
+class BpmResult:
+    bpm: float
+    first_beat_ms: float
+    stable: bool
+    chunk_bpms: list[float] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "BpmResult":
+        return cls(
+            bpm=d["bpm"],
+            first_beat_ms=d["first_beat_ms"],
+            stable=d["stable"],
+            chunk_bpms=list(d.get("chunk_bpms", [])),
+        )
+
+
+@dataclass
 class TranscribeResult:
     words: list[WordTimestamp]
     language: str
@@ -79,6 +99,7 @@ class TranscribeResult:
     pauses: list[Pause]
     pitch_frames: list[PitchFrame] = field(default_factory=list)
     bpm: float | None = None
+    bpm_result: BpmResult | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -89,6 +110,7 @@ class TranscribeResult:
             "pauses": [p.to_dict() for p in self.pauses],
             "pitch_frames": [pf.to_dict() for pf in self.pitch_frames],
             "bpm": self.bpm,
+            "bpm_result": self.bpm_result.to_dict() if self.bpm_result else None,
         }
 
     @classmethod
@@ -103,6 +125,11 @@ class TranscribeResult:
             }
             pitch_frames = [by_time[t] for t in sorted(by_time)]
 
+        bpm_result = (
+            BpmResult.from_dict(d["bpm_result"])
+            if d.get("bpm_result")
+            else None
+        )
         return cls(
             words=words,
             language=d["language"],
@@ -111,6 +138,7 @@ class TranscribeResult:
             pauses=[Pause.from_dict(p) for p in d.get("pauses", [])],
             pitch_frames=pitch_frames,
             bpm=d.get("bpm"),
+            bpm_result=bpm_result,
         )
 
 

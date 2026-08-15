@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1150" height="660" viewBox="0 0 1150 660" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1150" height="660" fill="#f8fafc"/>
+
+  <!-- Title -->
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 1 — Extract</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/ffmpeg_extract.py · extract_audio()</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Video or audio file → mono 128 kbps MP3 in tmp/  (single normalized artifact for every later stage)</text>
+
+  <!-- Input box -->
+  <rect x="60" y="130" width="300" height="150" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="80" y="158" font-size="14" font-weight="bold" fill="#0f172a">Input file</text>
+  <text x="80" y="182" font-size="16" fill="#0f172a" font-family="Consolas, monospace">song.mp4</text>
+  <text x="80" y="208" font-size="12" fill="#475569">video: mp4 mkv webm mov avi</text>
+  <text x="80" y="226" font-size="12" fill="#475569">audio:  mp3 ogg flac wav m4a</text>
+  <text x="80" y="252" font-size="12" fill="#64748b">(--mp3 CLI argument)</text>
+
+  <!-- Pre-flight checks -->
+  <rect x="430" y="130" width="330" height="150" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="450" y="158" font-size="14" font-weight="bold" fill="#0f172a">Pre-flight checks</text>
+  <line x1="450" y1="178" x2="700" y2="178" stroke="#e2e8f0"/>
+  <circle cx="462" cy="198" r="8" fill="#64748b"/><text x="462" y="202" font-size="10" fill="#fff" text-anchor="middle">1</text>
+  <text x="480" y="203" font-size="13" fill="#0f172a">file exists?</text>
+  <circle cx="462" cy="226" r="8" fill="#64748b"/><text x="462" y="230" font-size="10" fill="#fff" text-anchor="middle">2</text>
+  <text x="480" y="231" font-size="13" fill="#0f172a">extension in supported set?</text>
+  <circle cx="462" cy="254" r="8" fill="#64748b"/><text x="462" y="258" font-size="10" fill="#fff" text-anchor="middle">3</text>
+  <text x="480" y="259" font-size="13" fill="#0f172a">"ffmpeg" found in PATH (shutil.which)</text>
+
+  <!-- Failure box -->
+  <rect x="800" y="130" width="290" height="150" rx="10" fill="#fef2f2" stroke="#fca5a5" stroke-width="1.5"/>
+  <text x="820" y="158" font-size="14" font-weight="bold" fill="#b91c1c">Failures (raises)</text>
+  <text x="820" y="184" font-size="12.5" fill="#b91c1c" font-family="Consolas, monospace">FileNotFoundError  not found</text>
+  <text x="820" y="206" font-size="12.5" fill="#b91c1c" font-family="Consolas, monospace">ValueError  unsupported ext</text>
+  <text x="820" y="228" font-size="12.5" fill="#b91c1c" font-family="Consolas, monospace">RuntimeError  no ffmpeg</text>
+  <text x="820" y="254" font-size="12" fill="#b91c1c">RuntimeError  ffmpeg exits non-zero</text>
+  <text x="820" y="270" font-size="12" fill="#b91c1c">(includes ffmpeg stderr)</text>
+
+  <!-- Command box -->
+  <rect x="60" y="330" width="1030" height="160" rx="10" fill="#1e293b"/>
+  <text x="84" y="358" font-size="14" font-weight="bold" fill="#f59e0b">FFmpeg subprocess (subprocess.run, output captured)</text>
+  <text x="84" y="392" font-size="15" fill="#e2e8f0" font-family="Consolas, monospace">ffmpeg -y -i song.mp4 -vn -ac 1 -b:a 128k -codec:a libmp3lame tmp/song.mp3</text>
+  <text x="84" y="424" font-size="12.5" fill="#94a3b8">-y      overwrite output silently</text>
+  <text x="330" y="424" font-size="12.5" fill="#94a3b8">-vn        drop the video stream</text>
+  <text x="620" y="424" font-size="12.5" fill="#94a3b8">-ac 1      downmix stereo → mono</text>
+  <text x="88" y="448" font-size="12.5" fill="#94a3b8">-b:a     bitrate from config.ffmpeg_audio_bitrate (default "128k")</text>
+  <text x="620" y="448" font-size="12.5" fill="#94a3b8">-codec:a  libmp3lame MP3 encoder</text>
+
+  <!-- Output box -->
+  <rect x="60" y="540" width="430" height="90" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="80" y="568" font-size="14" font-weight="bold" fill="#0f172a">Output → temp dir</text>
+  <text x="80" y="592" font-size="15" fill="#0f172a" font-family="Consolas, monospace">tmp/song.mp3</text>
+  <text x="80" y="614" font-size="12.5" fill="#475569">mono · 128 kbps · MP3 (config.temp_dir, default ./tmp)</text>
+
+  <!-- Why normalized -->
+  <rect x="530" y="540" width="560" height="90" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="550" y="568" font-size="14" font-weight="bold" fill="#0f172a">Why normalize first?</text>
+  <text x="550" y="590" font-size="12.5" fill="#475569">One mono 16-bit/float stream keeps Demucs, torchcrepe and librosa on the</text>
+  <text x="550" y="608" font-size="12.5" fill="#475569">same input; size is logged (MB) and the path is chained into Stage 2.</text>
+
+  <!-- Arrows -->
+  <line x1="360" y1="205" x2="428" y2="205" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="725" y1="185" x2="798" y2="185" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="215" y1="280" x2="215" y2="328" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="575" y1="490" x2="275" y2="538" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+</svg>

@@ -26,6 +26,7 @@ class Config:
     device: str = "auto"
     whisper_model: str = "medium"
     whisper_language: str = "en"
+    transcribe_runs: int = 3
     demucs_model: str = "htdemucs"
     sample_rate: int = 44100
     pitch_min_hz: float = 65.41
@@ -87,6 +88,7 @@ def load_config(config_path: str | None = None) -> Config:
         "device": str,
         "whisper_model": str,
         "whisper_language": str,
+        "transcribe_runs": int,
         "demucs_model": str,
         "sample_rate": int,
         "pitch_min_hz": float,

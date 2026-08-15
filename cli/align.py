@@ -10,7 +10,7 @@ import re
 import unicodedata
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from cli.config import Config
 from cli.logging_setup import get_logger
@@ -77,11 +77,24 @@ def phonetic_score(x: str, y: str) -> float:
 
 # ── Smith-Waterman with affine gap penalties ─────────────────────────────────
 
-def smith_waterman(lyric_chars: list[str], whisper_chars: list[str]) -> dict[str, Any]:
+def smith_waterman(
+    lyric_chars: list[str],
+    whisper_chars: list[str],
+    score_fn: Callable[[str, str], float] | None = None,
+) -> dict[str, Any]:
     """Local sequence alignment with affine gaps.
+
+    Args:
+        lyric_chars: First sequence (rows).
+        whisper_chars: Second sequence (columns).
+        score_fn: Similarity function for two tokens; defaults to
+            ``phonetic_score`` (character-level). Provide a custom scorer to
+            align other token types (e.g. whole words).
 
     Returns dict with maxScore, maxI, maxJ, and backtrack path.
     """
+    scorer = score_fn if score_fn is not None else phonetic_score
+
     L = len(lyric_chars)
     W = len(whisper_chars)
 
@@ -101,7 +114,7 @@ def smith_waterman(lyric_chars: list[str], whisper_chars: list[str]) -> dict[str
 
     for i in range(1, L + 1):
         for j in range(1, W + 1):
-            s = phonetic_score(lyric_chars[i - 1], whisper_chars[j - 1]) * MATCH_SCORE
+            s = scorer(lyric_chars[i - 1], whisper_chars[j - 1]) * MATCH_SCORE
 
             M[i][j] = max(0, s + M[i - 1][j - 1], s - GAP_OPEN + max(X[i - 1][j - 1], Y[i - 1][j - 1]))
             if M[i][j] == 0:

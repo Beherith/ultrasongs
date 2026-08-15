@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Ultrasongs — Pipeline Diagrams</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; background: #f1f5f9; color: #0f172a;
+         font-family: "Segoe UI", Arial, sans-serif; }
+  header { background: #0f172a; color: #fff; padding: 28px 40px 20px; }
+  header h1 { margin: 0 0 6px; font-size: 26px; }
+  header p { margin: 0; color: #94a3b8; font-size: 14px; max-width: 900px; }
+  nav.toc { position: sticky; top: 0; z-index: 10; background: #1e293b; padding: 10px 40px;
+            display: flex; gap: 18px; flex-wrap: wrap; box-shadow: 0 2px 8px rgba(0,0,0,.25); }
+  .nav { display: inline-flex; align-items: center; gap: 8px; color: #e2e8f0; text-decoration: none;
+         font-size: 14px; padding: 4px 6px; }
+  .nav:hover { color: #fff; }
+  .num { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+         border-radius: 50%; background: #334155; color: #fff; font-size: 12px; font-weight: bold; }
+  main { max-width: 1280px; margin: 0 auto; padding: 24px 40px 60px; }
+  .stage { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px;
+           padding: 20px 24px 12px; margin: 0 0 28px; scroll-margin-top: 64px; }
+  .stage-head { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .badge { background: #0e7490; color: #fff; border-radius: 10px; padding: 6px 12px;
+           font-size: 13px; font-weight: bold; white-space: nowrap; }
+  .stage-head h2 { margin: 0; font-size: 22px; }
+  .desc { margin: 2px 0 0; color: #64748b; font-size: 13.5px; }
+  .figure { overflow-x: auto; }
+  .figure svg { display: block; margin: 0 auto; width: 100%; height: auto; max-width: 1240px;
+                border: 1px solid #e2e8f0; border-radius: 10px; background: #f8fafc; }
+  .pager-row { display: flex; justify-content: space-between; padding: 10px 0 6px; }
+  .pager { color: #0e7490; text-decoration: none; font-size: 14px; font-weight: 600; }
+  .pager:hover { text-decoration: underline; }
+  footer { text-align: center; color: #94a3b8; font-size: 12.5px; padding: 0 40px 40px; }
+  a.top { float: right; font-size: 12.5px; color: #94a3b8; text-decoration: none; }
+  a.top:hover { color: #0e7490; }
+</style>
+</head>
+<body>
+  <header id="top">
+    <a class="top-link" href="#top" style="float:right;color:#94a3b8;text-decoration:none;font-size:13px;">back to top &uarr;</a>
+    <h1>Ultrasongs &mdash; Pipeline Diagrams</h1>
+    <p>What happens in each stage of <code>ultrasongs process</code>, from the exact code in
+       <code>cli/</code>: FFmpeg extract &rarr; Demucs + Whisper transcription &rarr; BPM detect &rarr;
+       Smith-Waterman alignment &rarr; Ultrastar .txt generation &rarr; packaging &rarr; HTML preview.</p>
+  </header>
+  <nav class="toc">
+      <a class="nav" href="#stage-1" title="Video/audio -> normalized mono MP3 via FFmpeg"><span class="num">1</span>Extract</a>
+      <a class="nav" href="#stage-2" title="Demucs + Whisper consensus, CREPE pitch, stems, pauses"><span class="num">2</span>Transcribe</a>
+      <a class="nav" href="#stage-3" title="Tempo, chunk stability, first beat via librosa"><span class="num">3</span>BPM Detect</a>
+      <a class="nav" href="#stage-4" title="Smith-Waterman phonetic alignment + note segmentation"><span class="num">4</span>Align</a>
+      <a class="nav" href="#stage-5" title="Syllables + BPM -> Ultrastar .txt beat mapping"><span class="num">5</span>Generate</a>
+      <a class="nav" href="#stage-6" title="output/ folder: .txt, MP3, stems, ZIP"><span class="num">6</span>Package</a>
+      <a class="nav" href="#stage-7" title="HTML songbook with SVG note/pitch visualization"><span class="num">7</span>Preview</a>
+  </nav>
+  <main>
+
+  <section id="stage-1" class="stage">
+    <div class="stage-head">
+      <span class="badge">Stage 1</span>
+      <div>
+        <h2>Extract</h2>
+        <p class="desc">Video/audio -> normalized mono MP3 via FFmpeg</p>
+      </div>
+    </div>
+    <div class="figure"><svg xmlns="http://www.w3.org/2000/svg" width="1150" height="660" viewBox="0 0 1150 660" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1150" height="660" fill="#f8fafc"/>
+
+  <!-- Title -->
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 1 — Extract</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/ffmpeg_extract.py · extract_audio()</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Video or audio file → mono 128 kbps MP3 in tmp/  (single normalized artifact for every later stage)</text>
+
+  <!-- Input box -->
+  <rect x="60" y="130" width="300" height="150" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="80" y="158" font-size="14" font-weight="bold" fill="#0f172a">Input file</text>
+  <text x="80" y="182" font-size="16" fill="#0f172a" font-family="Consolas, monospace">song.mp4</text>
+  <text x="80" y="208" font-size="12" fill="#475569">video: mp4 mkv webm mov avi</text>
+  <text x="80" y="226" font-size="12" fill="#475569">audio:  mp3 ogg flac wav m4a</text>
+  <text x="80" y="252" font-size="12" fill="#64748b">(--mp3 CLI argument)</text>
+
+  <!-- Pre-flight checks -->
+  <rect x="430" y="130" width="330" height="150" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="450" y="158" font-size="14" font-weight="bold" fill="#0f172a">Pre-flight checks</text>
+  <line x1="450" y1="178" x2="700" y2="178" stroke="#e2e8f0"/>
+  <circle cx="462" cy="198" r="8" fill="#64748b"/><text x="462" y="202" font-size="10" fill="#fff" text-anchor="middle">1</text>
+  <text x="480" y="203" font-size="13" fill="#0f172a">file exists?</text>
+  <circle cx="462" cy="226" r="8" fill="#64748b"/><text x="462" y="230" font-size="10" fill="#fff" text-anchor="middle">2</text>
+  <text x="480" y="231" font-size="13" fill="#0f172a">extension in supported set?</text>
+  <circle cx="462" cy="254" r="8" fill="#64748b"/><text x="462" y="258" font-size="10" fill="#fff" text-anchor="middle">3</text>
+  <text x="480" y="259" font-size="13" fill="#0f172a">"ffmpeg" found in PATH (shutil.which)</text>
+
+  <!-- Failure box -->
+  <rect x="800" y="130" width="290" height="150" rx="10" fill="#fef2f2" stroke="#fca5a5" stroke-width="1.5"/>
+  <text x="820" y="158" font-size="14" font-weight="bold" fill="#b91c1c">Failures (raises)</text>
+  <text x="820" y="184" font-size="12.5" fill="#b91c1c" font-family="Consolas, monospace">FileNotFoundError  not found</text>
+  <text x="820" y="206" font-size="12.5" fill="#b91c1c" font-family="Consolas, monospace">ValueError  unsupported ext</text>
+  <text x="820" y="228" font-size="12.5" fill="#b91c1c" font-family="Consolas, monospace">RuntimeError  no ffmpeg</text>
+  <text x="820" y="254" font-size="12" fill="#b91c1c">RuntimeError  ffmpeg exits non-zero</text>
+  <text x="820" y="270" font-size="12" fill="#b91c1c">(includes ffmpeg stderr)</text>
+
+  <!-- Command box -->
+  <rect x="60" y="330" width="1030" height="160" rx="10" fill="#1e293b"/>
+  <text x="84" y="358" font-size="14" font-weight="bold" fill="#f59e0b">FFmpeg subprocess (subprocess.run, output captured)</text>
+  <text x="84" y="392" font-size="15" fill="#e2e8f0" font-family="Consolas, monospace">ffmpeg -y -i song.mp4 -vn -ac 1 -b:a 128k -codec:a libmp3lame tmp/song.mp3</text>
+  <text x="84" y="424" font-size="12.5" fill="#94a3b8">-y      overwrite output silently</text>
+  <text x="330" y="424" font-size="12.5" fill="#94a3b8">-vn        drop the video stream</text>
+  <text x="620" y="424" font-size="12.5" fill="#94a3b8">-ac 1      downmix stereo → mono</text>
+  <text x="88" y="448" font-size="12.5" fill="#94a3b8">-b:a     bitrate from config.ffmpeg_audio_bitrate (default "128k")</text>
+  <text x="620" y="448" font-size="12.5" fill="#94a3b8">-codec:a  libmp3lame MP3 encoder</text>
+
+  <!-- Output box -->
+  <rect x="60" y="540" width="430" height="90" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="80" y="568" font-size="14" font-weight="bold" fill="#0f172a">Output → temp dir</text>
+  <text x="80" y="592" font-size="15" fill="#0f172a" font-family="Consolas, monospace">tmp/song.mp3</text>
+  <text x="80" y="614" font-size="12.5" fill="#475569">mono · 128 kbps · MP3 (config.temp_dir, default ./tmp)</text>
+
+  <!-- Why normalized -->
+  <rect x="530" y="540" width="560" height="90" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="550" y="568" font-size="14" font-weight="bold" fill="#0f172a">Why normalize first?</text>
+  <text x="550" y="590" font-size="12.5" fill="#475569">One mono 16-bit/float stream keeps Demucs, torchcrepe and librosa on the</text>
+  <text x="550" y="608" font-size="12.5" fill="#475569">same input; size is logged (MB) and the path is chained into Stage 2.</text>
+
+  <!-- Arrows -->
+  <line x1="360" y1="205" x2="428" y2="205" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="725" y1="185" x2="798" y2="185" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="215" y1="280" x2="215" y2="328" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="575" y1="490" x2="275" y2="538" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+</svg></div>
+    <div class="pager-row"><a class="pager" href="#stage-2">Transcribe &rarr;</a></div>
+  </section>
+
+  <section id="stage-2" class="stage">
+    <div class="stage-head">
+      <span class="badge">Stage 2</span>
+      <div>
+        <h2>Transcribe</h2>
+        <p class="desc">Demucs + Whisper consensus, CREPE pitch, stems, pauses</p>
+      </div>
+    </div>
+    <div class="figure"><svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1680" viewBox="0 0 1400 1680" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1400" height="1680" fill="#f8fafc"/>
+
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 2 — Transcribe</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/transcribe.py · transcribe() · internal steps 1/6 … 6/6</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">MP3 → vocal/accompaniment stems + timestamped words + CREPE pitch timeline + pauses + BPM → TranscribeResult</text>
+
+  <!-- Step 1 -->
+  <rect x="60" y="118" width="1280" height="78" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="134" width="96" height="26" rx="13" fill="#0f172a"/>
+  <text x="124" y="152" font-size="13" fill="#fff" text-anchor="middle">STEP 1/6</text>
+  <text x="190" y="152" font-size="15" font-weight="bold" fill="#0f172a">Load audio — soundfile.sf.read(mp3)  →  float32 samples @ sr</text>
+  <text x="190" y="178" font-size="12.5" fill="#475569">if audio.ndim &gt; 1: mix down to mono by averaging channels  ·  device: config.device (auto → cuda if available, else cpu)</text>
+
+  <line x1="700" y1="196" x2="700" y2="256" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Loop container -->
+  <rect x="60" y="222" width="1280" height="430" rx="12" fill="#ffffff" stroke="#64748b" stroke-width="2" stroke-dasharray="8 5"/>
+  <rect x="80" y="208" width="480" height="28" rx="14" fill="#334155"/>
+  <text x="320" y="227" font-size="13.5" fill="#fff" text-anchor="middle" font-weight="bold">STEP 2/6 · for run = 1 … transcribe_runs (config, default 3):</text>
+
+  <!-- Demucs box -->
+  <rect x="90" y="262" width="580" height="372" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+  <text x="110" y="290" font-size="15" font-weight="bold" fill="#6d28d9">Demucs — htdemucs, 44100 Hz (loaded once, reused per pass)</text>
+  <text x="110" y="314" font-size="12.5" fill="#475569">mono duplicated to stereo → resample to 44.1 kHz → apply_model</text>
+
+  <rect x="110" y="330" width="125" height="40" rx="8" fill="#ede9fe" stroke="#a78bfa"/>
+  <text x="172" y="355" font-size="13" fill="#4c1d95" text-anchor="middle">drums</text>
+  <rect x="247" y="330" width="125" height="40" rx="8" fill="#ede9fe" stroke="#a78bfa"/>
+  <text x="309" y="355" font-size="13" fill="#4c1d95" text-anchor="middle">bass</text>
+  <rect x="384" y="330" width="125" height="40" rx="8" fill="#ede9fe" stroke="#a78bfa"/>
+  <text x="446" y="355" font-size="13" fill="#4c1d95" text-anchor="middle">other</text>
+  <rect x="521" y="330" width="125" height="40" rx="8" fill="#8b5cf6" stroke="#6d28d9" stroke-width="2"/>
+  <text x="583" y="355" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">vocals</text>
+
+  <line x1="583" y1="370" x2="583" y2="402" stroke="#8b5cf6" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="172" y1="370" x2="172" y2="388" stroke="#a78bfa" stroke-width="1.5"/>
+  <line x1="309" y1="370" x2="309" y2="388" stroke="#a78bfa" stroke-width="1.5"/>
+  <line x1="446" y1="370" x2="446" y2="388" stroke="#a78bfa" stroke-width="1.5"/>
+  <line x1="172" y1="388" x2="520" y2="388" stroke="#a78bfa" stroke-width="1.5"/>
+
+  <text x="110" y="426" font-size="13" fill="#0f172a">vocals = stem 3 → mono</text>
+  <text x="110" y="450" font-size="13" fill="#0f172a">accompaniment = drums + bass + other (summed) → mono</text>
+
+  <rect x="110" y="468" width="540" height="58" rx="8" fill="#ffffff" stroke="#c4b5fd"/>
+  <text x="124" y="492" font-size="12" fill="#6d28d9">Demucs is not fully deterministic, so each pass yields a slightly</text>
+  <text x="124" y="510" font-size="12" fill="#6d28d9">different split → repeated passes enable voting (below).</text>
+
+  <text x="110" y="564" font-size="12.5" fill="#475569" font-family="Consolas, monospace">sf.write(tmp/song_vocals.wav)</text>
+  <text x="110" y="586" font-size="12.5" fill="#64748b">only pass 1 stems are kept; later passes freed (gc + cuda empty_cache)</text>
+
+  <!-- Whisper box -->
+  <rect x="710" y="262" width="640" height="372" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="730" y="290" font-size="15" font-weight="bold" fill="#1d4ed8">faster-whisper — WhisperModel(config.whisper_model, default "medium")</text>
+  <text x="730" y="314" font-size="12.5" fill="#475569">input: tmp/song_vocals.wav (vocals only, so recognition ignores instruments)</text>
+  <text x="730" y="342" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">whisper.transcribe(path, word_timestamps=True,</text>
+  <text x="730" y="362" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">    initial_prompt=lyrics_text,   # --lyrics steers pronunciation</text>
+  <text x="730" y="382" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">    language=config.whisper_language)</text>
+
+  <rect x="730" y="400" width="120" height="44" rx="8" fill="#bfdbfe" stroke="#3b82f6"/>
+  <text x="790" y="420" font-size="13" fill="#1e3a8a" text-anchor="middle">hello</text>
+  <text x="790" y="437" font-size="10.5" fill="#1e3a8a" text-anchor="middle">0.42 – 0.70 s</text>
+  <rect x="862" y="400" width="120" height="44" rx="8" fill="#bfdbfe" stroke="#3b82f6"/>
+  <text x="922" y="420" font-size="13" fill="#1e3a8a" text-anchor="middle">world</text>
+  <text x="922" y="437" font-size="10.5" fill="#1e3a8a" text-anchor="middle">0.71 – 1.02 s</text>
+  <rect x="994" y="400" width="120" height="44" rx="8" fill="#bfdbfe" stroke="#3b82f6"/>
+  <text x="1054" y="420" font-size="13" fill="#1e3a8a" text-anchor="middle">this</text>
+  <text x="1054" y="437" font-size="10.5" fill="#1e3a8a" text-anchor="middle">1.88 – 2.05 s</text>
+  <text x="1150" y="428" font-size="16" fill="#64748b">…</text>
+
+  <text x="730" y="486" font-size="12.5" fill="#475569">raw words per pass: [{word, start, end}]  (compute_type "int8" only for large + CUDA)</text>
+  <text x="730" y="510" font-size="12.5" fill="#475569">language auto-detected, fallback config.whisper_language</text>
+  <rect x="730" y="528" width="600" height="58" rx="8" fill="#ffffff" stroke="#93c5fd"/>
+  <text x="744" y="552" font-size="12" fill="#1d4ed8">Debug dump: tmp/song_whisper_passes.json (all runs, full word lists).</text>
+  <text x="744" y="570" font-size="12" fill="#1d4ed8">Empty runs skipped; all runs empty → RuntimeError.</text>
+
+  <line x1="670" y1="446" x2="708" y2="446" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="689" y="434" font-size="11" fill="#475569" text-anchor="middle">wav</text>
+
+  <!-- Consolidation -->
+  <line x1="700" y1="652" x2="700" y2="696" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="60" y="678" width="1280" height="212" rx="10" fill="#fff1f2" stroke="#ef4444" stroke-width="2"/>
+  <rect x="76" y="664" width="460" height="28" rx="14" fill="#b91c1c"/>
+  <text x="306" y="683" font-size="13.5" fill="#fff" text-anchor="middle" font-weight="bold">Consensus — cli/consensus.py (only when runs &gt; 1)</text>
+  <text x="90" y="716" font-size="13" fill="#0f172a">1. Longest run = structural reference (its word boundaries define the consensus).</text>
+  <text x="90" y="740" font-size="13" fill="#0f172a">2. Every other run aligned to the reference with Smith–Waterman on whole words (score = word_similarity:</text>
+  <text x="110" y="760" font-size="13" fill="#0f172a">symmetric average of best phonetic char matches — near-homophones align, unrelated words don't).</text>
+  <text x="90" y="786" font-size="13" fill="#0f172a">3. Column-wise: majority vote picks the word (reference wins ties) · start/end = average of aligned words.</text>
+  <text x="90" y="838" font-size="12.5" fill="#7f1d1d" font-family="Consolas, monospace">run 1:    hello   world   this   is   a   test</text>
+  <text x="90" y="858" font-size="12.5" fill="#7f1d1d" font-family="Consolas, monospace">run 2:    hallo   wordl   this   is   a   test   →   consensus:  hello  world  this  is  a  test</text>
+
+  <!-- Step 3 & 4 -->
+  <line x1="360" y1="890" x2="360" y2="928" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1010" y1="890" x2="1010" y2="928" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="60" y="910" width="640" height="100" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="926" width="96" height="26" rx="13" fill="#0f172a"/>
+  <text x="124" y="944" font-size="13" fill="#fff" text-anchor="middle">STEP 3/6</text>
+  <text x="190" y="944" font-size="15" font-weight="bold" fill="#0f172a">Save stems from pass 1 (lameenc, mono, 128 kbps)</text>
+  <text x="190" y="970" font-size="12.5" fill="#475569" font-family="Consolas, monospace">tmp/song_vocals.mp3   ·   tmp/song_accompaniment.mp3</text>
+  <text x="190" y="992" font-size="12" fill="#64748b">encoded from float32 via int16 → lameenc (no temp WAV files)</text>
+
+  <rect x="720" y="910" width="620" height="100" rx="10" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+  <rect x="736" y="926" width="96" height="26" rx="13" fill="#0e7490"/>
+  <text x="784" y="944" font-size="13" fill="#fff" text-anchor="middle">STEP 4/6</text>
+  <text x="850" y="944" font-size="15" font-weight="bold" fill="#155e75">BPM — detect_bpm() (librosa, see diagram 3)</text>
+  <text x="850" y="970" font-size="12.5" fill="#155e75">input: accompaniment.mp3 if bpm_use_accompaniment (default) else song.mp3</text>
+  <text x="850" y="992" font-size="12.5" fill="#155e75">→ BpmResult {bpm, first_beat_ms, stable, chunk_bpms}</text>
+
+  <!-- Step 5 & 6 -->
+  <line x1="360" y1="1010" x2="360" y2="1038" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1010" y1="1010" x2="1010" y2="1038" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="60" y="1036" width="640" height="240" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+  <rect x="76" y="1052" width="96" height="26" rx="13" fill="#047857"/>
+  <text x="124" y="1070" font-size="13" fill="#fff" text-anchor="middle">STEP 5/6</text>
+  <text x="190" y="1070" font-size="15" font-weight="bold" fill="#065f46">Pitch — torchcrepe on pass-1 vocals (model "full", Viterbi decode)</text>
+  <text x="90" y="1100" font-size="12.5" fill="#065f46">resampled to 16000 Hz · hop = crepe_hop_ms (10 ms) · fmin 65.41 Hz (C2) – fmax 1046.5 Hz (C6)</text>
+  <text x="90" y="1124" font-size="12.5" fill="#065f46">per frame: frequency + periodicity (confidence 0..1)</text>
+  <text x="90" y="1148" font-size="12.5" fill="#065f46">amplitude proxy: band energy 60–1000 Hz (Hann window, FFT 1024 samples frame),</text>
+  <text x="110" y="1166" font-size="12.5" fill="#065f46">normalized to 0..1 (max = 1), zero-padded/truncated to CREPE frame count</text>
+  <rect x="90" y="1184" width="580" height="72" rx="8" fill="#ffffff" stroke="#6ee7b7"/>
+  <text x="104" y="1208" font-size="12.5" fill="#065f46">→ PitchFrame(time, midi, confidence, amplitude) — FULL timeline,</text>
+  <text x="104" y="1228" font-size="12.5" fill="#065f46">quiet frames included (needed for activity thresholds and preview overlay).</text>
+  <text x="104" y="1250" font-size="11.5" fill="#64748b">midi = round(12·log2(hz/440) + 69), hz ≤ 0 → 0</text>
+
+  <rect x="720" y="1036" width="620" height="240" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="736" y="1052" width="96" height="26" rx="13" fill="#0f172a"/>
+  <text x="784" y="1070" font-size="13" fill="#fff" text-anchor="middle">STEP 6/6</text>
+  <text x="850" y="1070" font-size="15" font-weight="bold" fill="#0f172a">Pauses — RMS energy on pass-1 vocals</text>
+  <text x="750" y="1100" font-size="12.5" fill="#334155">frame 25 ms, hop 10 ms → per-frame RMS</text>
+  <text x="750" y="1124" font-size="12.5" fill="#334155">silent when RMS &lt; 5% of the 95th percentile (pause_threshold_pct / 100)</text>
+  <text x="750" y="1148" font-size="12.5" fill="#334155">keep silences of ≥ 400 ms (pause_min_silence_ms) → Pause(start, end)</text>
+  <!-- mini rms bars -->
+  <g>
+    <rect x="750" y="1180" width="14" height="20" fill="#94a3b8"/>
+    <rect x="768" y="1168" width="14" height="32" fill="#475569"/>
+    <rect x="786" y="1174" width="14" height="26" fill="#64748b"/>
+    <rect x="804" y="1184" width="14" height="16" fill="#cbd5e1"/>
+    <rect x="822" y="1186" width="14" height="14" fill="#e2e8f0"/>
+    <rect x="840" y="1186" width="14" height="14" fill="#e2e8f0"/>
+    <rect x="858" y="1185" width="14" height="15" fill="#e2e8f0"/>
+    <rect x="876" y="1170" width="14" height="30" fill="#475569"/>
+    <rect x="894" y="1164" width="14" height="36" fill="#334155"/>
+    <rect x="912" y="1178" width="14" height="22" fill="#64748b"/>
+    <rect x="930" y="1184" width="14" height="16" fill="#cbd5e1"/>
+    <rect x="948" y="1186" width="14" height="14" fill="#e2e8f0"/>
+    <rect x="966" y="1168" width="14" height="32" fill="#475569"/>
+    <rect x="984" y="1172" width="14" height="28" fill="#64748b"/>
+    <rect x="1002" y="1180" width="14" height="20" fill="#94a3b8"/>
+    <rect x="822" y="1178" width="50" height="34" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <rect x="930" y="1178" width="32" height="34" fill="none" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4 3"/>
+  </g>
+  <text x="1050" y="1198" font-size="11.5" fill="#b91c1c">RMS bars:</text>
+  <text x="1050" y="1214" font-size="11.5" fill="#b91c1c">dashed = pause kept</text>
+  <text x="750" y="1252" font-size="11.5" fill="#64748b">→ hard timing boundaries for alignment (silence is never sung across)</text>
+
+  <!-- Attach pitch -->
+  <line x1="380" y1="1276" x2="600" y2="1334" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1000" y1="1276" x2="800" y2="1334" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="60" y="1306" width="1280" height="120" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="90" y="1336" font-size="15" font-weight="bold" fill="#0f172a">Attach pitch to words — add_pitch_to_words()</text>
+  <text x="90" y="1362" font-size="12.5" fill="#334155">per word: median Hz→MIDI inside [start, end] using first confidence threshold with data (0.5 → 0.3 → 0.1, else 60), fallback word.midi</text>
+  <text x="90" y="1386" font-size="12.5" fill="#334155">word's pitch frames kept (confidence &gt; 0.1) → WordTimestamp(word, start, end, midi, pitch_frames)</text>
+  <text x="90" y="1410" font-size="12" fill="#64748b">consensus words + pitch + pauses + stems + BpmResult are all combined here</text>
+
+  <!-- Output -->
+  <line x1="700" y1="1426" x2="700" y2="1462" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="60" y="1456" width="1280" height="170" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="90" y="1488" font-size="15" font-weight="bold" fill="#166534">TranscribeResult (cli/pipeline_types.py)</text>
+  <g font-size="12" fill="#14532d">
+    <rect x="90" y="1504" width="190" height="30" rx="15" fill="#dcfce7" stroke="#86efac"/><text x="185" y="1524" text-anchor="middle">words: [WordTimestamp]</text>
+    <rect x="292" y="1504" width="120" height="30" rx="15" fill="#dcfce7" stroke="#86efac"/><text x="352" y="1524" text-anchor="middle">language</text>
+    <rect x="424" y="1504" width="120" height="30" rx="15" fill="#dcfce7" stroke="#86efac"/><text x="484" y="1524" text-anchor="middle">vocals_path</text>
+    <rect x="556" y="1504" width="180" height="30" rx="15" fill="#dcfce7" stroke="#86efac"/><text x="646" y="1524" text-anchor="middle">accompaniment_path</text>
+    <rect x="748" y="1504" width="110" height="30" rx="15" fill="#dcfce7" stroke="#86efac"/><text x="803" y="1524" text-anchor="middle">pauses: [Pause]</text>
+    <rect x="870" y="1504" width="150" height="30" rx="15" fill="#dcfce7" stroke="#86efac"/><text x="945" y="1524" text-anchor="middle">pitch_frames: [PitchFrame]</text>
+    <rect x="1032" y="1504" width="150" height="30" rx="15" fill="#dcfce7" stroke="#86efac"/><text x="1107" y="1524" text-anchor="middle">bpm / bpm_result</text>
+  </g>
+  <text x="90" y="1566" font-size="12.5" fill="#166534">Saved to tmp/song_transcribe.json → resume point: "ultrasongs process … --resume" or "--stage align"</text>
+  <text x="90" y="1590" font-size="12.5" fill="#166534">Feeds Stage 3/4/5: pitch frames + pauses → align · bpm_result + stems → generate + package</text>
+</svg></div>
+    <div class="pager-row"><a class="pager" href="#stage-1">&larr; Extract</a><a class="pager" href="#stage-3">BPM Detect &rarr;</a></div>
+  </section>
+
+  <section id="stage-3" class="stage">
+    <div class="stage-head">
+      <span class="badge">Stage 3</span>
+      <div>
+        <h2>BPM Detect</h2>
+        <p class="desc">Tempo, chunk stability, first beat via librosa</p>
+      </div>
+    </div>
+    <div class="figure"><svg xmlns="http://www.w3.org/2000/svg" width="1150" height="1000" viewBox="0 0 1150 1000" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1150" height="1000" fill="#f8fafc"/>
+
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 3 — BPM Detect</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/bpm_detect.py · detect_bpm()  (also run inline inside Stage 2; re-run here only if the resume file has no BpmResult)</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Tempo + first-beat time via librosa, with a 30 s chunk stability check → BpmResult</text>
+
+  <!-- Input -->
+  <rect x="60" y="120" width="360" height="100" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
+  <text x="80" y="150" font-size="14" font-weight="bold" fill="#0f172a">Input</text>
+  <text x="80" y="176" font-size="13" fill="#334155">tmp/song_accompaniment.mp3</text>
+  <text x="80" y="198" font-size="11.5" fill="#64748b">(or song.mp3 when bpm_use_accompaniment = false — instrumental</text>
+  <text x="80" y="212" font-size="11.5" fill="#64748b">stems give a cleaner tempo signal than the mix)</text>
+  <line x1="420" y1="170" x2="478" y2="170" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- load -->
+  <rect x="480" y="120" width="330" height="100" rx="10" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+  <text x="500" y="150" font-size="14" font-weight="bold" fill="#155e75">librosa.load(path, sr=22050, mono=True)</text>
+  <text x="500" y="176" font-size="12" fill="#155e75">resampled to a fixed 22.05 kHz for tempo analysis</text>
+  <text x="500" y="196" font-size="12" fill="#64748b">(independent of the pipeline's 44.1 kHz config rate)</text>
+  <line x1="810" y1="170" x2="868" y2="170" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- overall tempo -->
+  <rect x="870" y="120" width="220" height="100" rx="10" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+  <text x="890" y="150" font-size="13.5" font-weight="bold" fill="#155e75">Overall tempo</text>
+  <text x="890" y="174" font-size="11.5" fill="#155e75" font-family="Consolas, monospace">librosa.feature.tempo(y, sr)</text>
+  <text x="890" y="194" font-size="11.5" fill="#155e75">→ median of candidate BPMs</text>
+  <text x="890" y="212" font-size="11.5" fill="#64748b">e.g. 148.1</text>
+  <line x1="980" y1="220" x2="980" y2="252" stroke="#475569" stroke-width="2"/>
+  <line x1="980" y1="252" x2="575" y2="252" stroke="#475569" stroke-width="2"/>
+  <line x1="575" y1="252" x2="575" y2="278" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- chunk container -->
+  <rect x="60" y="280" width="1030" height="170" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="80" y="308" font-size="15" font-weight="bold" fill="#0f172a">30 s chunk stability check</text>
+  <text x="80" y="334" font-size="12.5" fill="#334155">audio split into 30 s chunks (CHUNK_DURATION_S); each chunk gets its own median librosa tempo.</text>
+  <text x="80" y="356" font-size="12.5" fill="#334155">Chunks shorter than 10 s (usually the tail) are skipped — too short for a reliable estimate.</text>
+  <g font-size="12" fill="#0f172a">
+    <rect x="80" y="372" width="150" height="38" rx="8" fill="#ecfeff" stroke="#06b6d4"/>
+    <text x="155" y="389" text-anchor="middle" font-weight="bold">chunk 0 (0–30 s)</text>
+    <text x="155" y="405" text-anchor="middle">148.2</text>
+    <rect x="242" y="372" width="150" height="38" rx="8" fill="#ecfeff" stroke="#06b6d4"/>
+    <text x="317" y="389" text-anchor="middle" font-weight="bold">chunk 1 (30–60 s)</text>
+    <text x="317" y="405" text-anchor="middle">147.9</text>
+    <rect x="404" y="372" width="150" height="38" rx="8" fill="#ecfeff" stroke="#06b6d4"/>
+    <text x="479" y="389" text-anchor="middle" font-weight="bold">chunk 2 (60–90 s)</text>
+    <text x="479" y="405" text-anchor="middle">148.6</text>
+    <rect x="566" y="372" width="150" height="38" rx="8" fill="#fee2e2" stroke="#ef4444"/>
+    <text x="641" y="389" text-anchor="middle" font-weight="bold">chunk 3 (ramp!)</text>
+    <text x="641" y="405" text-anchor="middle">90.1</text>
+    <rect x="728" y="372" width="170" height="38" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="813" y="389" text-anchor="middle" font-weight="bold">chunk 4 (tail &lt; 10 s)</text>
+    <text x="813" y="405" text-anchor="middle">skipped</text>
+  </g>
+
+  <!-- median -->
+  <line x1="300" y1="450" x2="300" y2="494" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="60" y="496" width="500" height="100" rx="10" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+  <text x="80" y="526" font-size="14" font-weight="bold" fill="#155e75">Final BPM = median(overall + all chunk BPMs)</text>
+  <text x="80" y="552" font-size="12.5" fill="#155e75">median ignores the 90.1 outlier → 148.1</text>
+  <text x="80" y="574" font-size="12" fill="#64748b">robust to intros, outros, one tempo change, or a noisy estimate</text>
+
+  <!-- stability -->
+  <line x1="700" y1="450" x2="700" y2="494" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="600" y="496" width="490" height="100" rx="10" fill="#fff7ed" stroke="#f59e0b" stroke-width="2"/>
+  <text x="620" y="526" font-size="14" font-weight="bold" fill="#9a3412">stable = every chunk within ± max(2 BPM, 5% of median)</text>
+  <text x="620" y="552" font-size="12.5" fill="#9a3412">90.1 is outside → stable = false → WARNING logged:</text>
+  <text x="620" y="574" font-size="12.5" fill="#9a3412">"fixed Ultrastar beat grid may drift on this song"</text>
+
+  <!-- first beat -->
+  <line x1="575" y1="596" x2="575" y2="638" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="60" y="640" width="1030" height="180" rx="10" fill="#ffffff" stroke="#06b6d4" stroke-width="2"/>
+  <text x="80" y="668" font-size="15" font-weight="bold" fill="#155e75">First beat — where does the grid start? (becomes #GAP)</text>
+  <text x="80" y="694" font-size="12.5" fill="#334155">1. librosa.onset.onset_strength(y, hop 512) — onset envelope from energy increases</text>
+  <text x="80" y="716" font-size="12.5" fill="#334155">2. librosa.beat.beat_track(start_bpm=bpm) — beat tracker seeded with the estimated tempo → grid + phase</text>
+  <text x="80" y="738" font-size="12.5" fill="#334155">3. walk the locked grid back toward t = 0 in beat_size steps; the earliest grid position with a strong</text>
+  <text x="100" y="758" font-size="12.5" fill="#334155">onset (≥ 50% of max envelope, ± 2 frames tolerance) wins → first_beat_ms = 483</text>
+  <text x="80" y="784" font-size="12.5" fill="#334155">4. edge case: attack exactly at t = 0 (envelope only sees increases, can't see it) — if the grid phase is near 0 and the</text>
+  <text x="100" y="802" font-size="12.5" fill="#334155">raw RMS at t = 0 is ≥ 50% of the median onset RMS, count the downbeat as t ≈ 0</text>
+  <!-- mini grid -->
+  <g>
+    <line x1="640" y1="745" x2="1060" y2="745" stroke="#94a3b8" stroke-width="2"/>
+    <line x1="640" y1="735" x2="640" y2="755" stroke="#64748b" stroke-width="1.5"/>
+    <line x1="745" y1="735" x2="745" y2="755" stroke="#64748b" stroke-width="1.5"/>
+    <line x1="850" y1="735" x2="850" y2="755" stroke="#64748b" stroke-width="1.5"/>
+    <line x1="955" y1="735" x2="955" y2="755" stroke="#64748b" stroke-width="1.5"/>
+    <line x1="1060" y1="735" x2="1060" y2="755" stroke="#64748b" stroke-width="1.5"/>
+    <circle cx="672" cy="745" r="6" fill="#06b6d4"/>
+    <text x="672" y="724" font-size="11" fill="#155e75" text-anchor="middle">beat 0 @ 483 ms = #GAP</text>
+    <text x="745" y="775" font-size="11" fill="#64748b" text-anchor="middle">b1</text>
+    <text x="850" y="775" font-size="11" fill="#64748b" text-anchor="middle">b2</text>
+    <text x="955" y="775" font-size="11" fill="#64748b" text-anchor="middle">b3</text>
+    <text x="1060" y="775" font-size="11" fill="#64748b" text-anchor="middle">b4</text>
+    <line x1="612" y1="745" x2="640" y2="745" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="3 3"/>
+    <text x="620" y="795" font-size="10.5" fill="#94a3b6" text-anchor="middle">t=0</text>
+  </g>
+
+  <!-- fallback + output -->
+  <rect x="60" y="850" width="560" height="54" rx="10" fill="#fef2f2" stroke="#fca5a5"/>
+  <text x="80" y="874" font-size="13" font-weight="bold" fill="#b91c1c">Any exception  →  fallback</text>
+  <text x="80" y="894" font-size="12.5" fill="#b91c1c">BpmResult(bpm=120.0, first_beat_ms=0, stable=true)  (pipeline never dies on tempo)</text>
+
+  <rect x="650" y="850" width="440" height="54" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="670" y="874" font-size="13" font-weight="bold" fill="#166534">BpmResult</text>
+  <text x="670" y="894" font-size="12" fill="#14532d" font-family="Consolas, monospace">{bpm, first_beat_ms, stable, chunk_bpms}</text>
+  <line x1="340" y1="828" x2="340" y2="848" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="870" y1="828" x2="870" y2="848" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="60" y="952" font-size="12.5" fill="#64748b">Used by Stage 5: bpm → export rate (×2), first_beat_ms → #GAP so notes land on the song's actual groove.</text>
+</svg></div>
+    <div class="pager-row"><a class="pager" href="#stage-2">&larr; Transcribe</a><a class="pager" href="#stage-4">Align &rarr;</a></div>
+  </section>
+
+  <section id="stage-4" class="stage">
+    <div class="stage-head">
+      <span class="badge">Stage 4</span>
+      <div>
+        <h2>Align</h2>
+        <p class="desc">Smith-Waterman phonetic alignment + note segmentation</p>
+      </div>
+    </div>
+    <div class="figure"><svg xmlns="http://www.w3.org/2000/svg" width="1400" height="1640" viewBox="0 0 1400 1640" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1400" height="1640" fill="#f8fafc"/>
+
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 4 — Align</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/align.py · align_lyrics(lyrics, whisper_words, language, pauses, config, pitch_frames)</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Lyric text + Whisper words + CREPE pitch + pauses → AlignedSyllable[] (syllable, time range, MIDI, line breaks)</text>
+
+  <!-- Inputs -->
+  <rect x="60" y="118" width="560" height="112" rx="10" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+  <text x="80" y="146" font-size="14" font-weight="bold" fill="#9d174d">Input A — lyrics file (--lyrics lyrics.txt)</text>
+  <text x="80" y="172" font-size="13.5" fill="#0f172a" font-family="Consolas, monospace">Hello world</text>
+  <text x="80" y="190" font-size="13.5" fill="#0f172a" font-family="Consolas, monospace">This is a test</text>
+  <text x="80" y="216" font-size="11.5" fill="#9d174d">line structure matters: lyric lines become note line breaks</text>
+
+  <rect x="740" y="118" width="600" height="112" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="760" y="146" font-size="14" font-weight="bold" fill="#166534">Input B — TranscribeResult (Stage 2 output)</text>
+  <text x="760" y="172" font-size="12.5" fill="#14532d">words[]  word · start · end · midi · pitch_frames   (consensus, timestamped)</text>
+  <text x="760" y="192" font-size="12.5" fill="#14532d">pitch_frames[]  full CREPE timeline: time · midi · confidence · amplitude</text>
+  <text x="760" y="212" font-size="12.5" fill="#14532d">pauses[]  RMS silence regions from the vocal stem</text>
+
+  <line x1="340" y1="230" x2="540" y2="286" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1040" y1="230" x2="860" y2="286" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Step 1 -->
+  <rect x="60" y="288" width="1280" height="112" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="304" width="280" height="26" rx="13" fill="#be185d"/>
+  <text x="216" y="322" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">1 · normalize_char() — char cleanup</text>
+  <text x="380" y="322" font-size="12.5" fill="#334155">lowercase + NFD decompose + strip diacritics ("Café" → "cafe")</text>
+  <text x="90" y="354" font-size="12.5" fill="#0f172a">Build char sequences tagged with wordIdx + lineIdx; a " " token is inserted between words:</text>
+  <text x="90" y="384" font-size="14" fill="#9d174d" font-family="Consolas, monospace">"Hello world"  →  [ H  e  l  l  o  ␠  w  o  r  l  d ]      (same for the whisper transcript, fully normalized)</text>
+
+  <line x1="700" y1="400" x2="700" y2="428" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Step 2 -->
+  <rect x="60" y="430" width="1280" height="300" rx="10" fill="#fff1f2" stroke="#ef4444" stroke-width="2"/>
+  <rect x="76" y="446" width="360" height="26" rx="13" fill="#b91c1c"/>
+  <text x="256" y="464" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">2 · smith_waterman() — local, affine-gap DP</text>
+  <text x="90" y="498" font-size="13" fill="#0f172a">phonetic_score(x, y) per character pair:</text>
+  <text x="110" y="522" font-size="12.5" fill="#334155">identical = 1.0 · same phonetic group (aei / ou / szc / td / pb / kg / fvw / mn / lr / y-i / h-j) = 0.6 by distance</text>
+  <text x="110" y="544" font-size="12.5" fill="#334155">cross pairs (a-o, a-u, sh-zh, f-ph, b-p, d-t, g-k, …) = 0.5 · unrelated = −0.3</text>
+  <text x="90" y="576" font-size="12.5" fill="#334155">cell = score × MATCH(4); gaps: open 4 / extend 0.5 · matrices M (match), X (gap in whisper), Y (gap in lyrics)</text>
+  <text x="90" y="598" font-size="12.5" fill="#334155">local alignment: cells clamp at 0 → only the best-scoring lyric span is matched (unmatched intro/outro stays out)</text>
+
+  <rect x="90" y="616" width="620" height="92" rx="8" fill="#ffffff" stroke="#fca5a5"/>
+  <text x="106" y="640" font-size="11.5" fill="#64748b">backtrack from the max-score cell draws the alignment:</text>
+  <text x="106" y="664" font-size="15" fill="#0f172a" font-family="Consolas, monospace">lyric:     h  e  -  l  -  o</text>
+  <text x="106" y="684" font-size="15" fill="#16a34a" font-family="Consolas, monospace">sym:       |  .     |     |</text>
+  <text x="106" y="704" font-size="15" fill="#0f172a" font-family="Consolas, monospace">whisper:   h  a     l     o</text>
+  <text x="106" y="756" font-size="11.5" fill="#64748b">| exact · . phonetically similar · gaps align around Whisper's misreads</text>
+
+  <rect x="730" y="494" width="580" height="210" rx="8" fill="#ffffff" stroke="#fca5a5"/>
+  <text x="746" y="520" font-size="13" font-weight="bold" fill="#7f1d1d">Why phonetic, not exact?</text>
+  <text x="746" y="546" font-size="12.5" fill="#334155">Whisper mishears lyrics ("hello" → "hallo", "see" → "sea"). Groups</text>
+  <text x="746" y="566" font-size="12.5" fill="#334155">treat near-homophones as soft matches, so the correct words still win.</text>
+  <text x="746" y="592" font-size="13" font-weight="bold" fill="#7f1d1d">Same engine, different tokens:</text>
+  <text x="746" y="618" font-size="12.5" fill="#334155">consensus.py aligns whole WORDS with word_similarity, and this stage</text>
+  <text x="746" y="638" font-size="12.5" fill="#334155">aligns whole CHARACTERS — one generic smith_waterman() core.</text>
+  <text x="746" y="664" font-size="12.5" fill="#334155">Result: maxScore + maxI/maxJ + backtrack path (i, j, matrix per step).</text>
+
+  <line x1="400" y1="730" x2="370" y2="768" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1000" y1="730" x2="1030" y2="768" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Step 3 -->
+  <rect x="60" y="770" width="620" height="180" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="786" width="300" height="26" rx="13" fill="#0f172a"/>
+  <text x="226" y="804" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">3 · word timestamps for matched words</text>
+  <text x="90" y="838" font-size="12.5" fill="#334155">M-steps map lyric chars → whisper chars, grouped per word:</text>
+  <text x="90" y="862" font-size="12.5" fill="#334155">span = min(starts) … max(ends) of the matched whisper word(s)</text>
+  <text x="90" y="886" font-size="12.5" fill="#334155">MIDI = median of pitch frames in range (conf 0.5 → 0.3 → 0.1 fallback)</text>
+  <text x="90" y="910" font-size="12.5" fill="#334155">several lyric words sharing ONE whisper token: its time interval is</text>
+  <text x="90" y="930" font-size="12.5" fill="#334155">split proportionally to char counts instead of duplicated over all</text>
+
+  <!-- Step 4 -->
+  <rect x="720" y="770" width="620" height="180" rx="10" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+  <rect x="736" y="786" width="330" height="26" rx="13" fill="#b45309"/>
+  <text x="901" y="804" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">4 · interpolate words SW did not match</text>
+  <text x="750" y="838" font-size="12.5" fill="#78350f">before first match: slots placed backwards from the anchor (≥ 0.1 s each)</text>
+  <text x="750" y="862" font-size="12.5" fill="#78350f">between matches: unused whisper words in the gap define the span;</text>
+  <text x="766" y="882" font-size="12.5" fill="#78350f">hard cap missing × 0.8 s; MIDI lerps between the two anchors</text>
+  <text x="750" y="906" font-size="12.5" fill="#78350f">after last match: continue at the average matched-word duration (≥ 0.2 s)</text>
+  <text x="750" y="930" font-size="11.5" fill="#b45309">zero-match fallback: spread lyrics evenly over the whole transcript</text>
+
+  <line x1="370" y1="950" x2="540" y2="988" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1030" y1="950" x2="860" y2="988" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <path d="M 1340 174 L 1360 174 L 1360 1040 L 1342 1040" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr)"/>
+  <text x="1398" y="976" font-size="11" fill="#94a3b8" text-anchor="end">pauses[]</text>
+
+  <!-- Step 5 -->
+  <rect x="60" y="990" width="1280" height="100" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="1006" width="280" height="26" rx="13" fill="#475569"/>
+  <text x="216" y="1024" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">5 · timing cleanup between neighbors</text>
+  <text x="380" y="1024" font-size="12.5" fill="#334155">a detected PAUSE between two adjacent words is a hard boundary:</text>
+  <text x="90" y="1056" font-size="12.5" fill="#334155">prev.end ← pause.start · next.start ← pause.end (nobody sings through silence)</text>
+  <text x="90" y="1078" font-size="12.5" fill="#334155">any residual overlap between neighbors is split at the midpoint</text>
+
+  <line x1="400" y1="1090" x2="370" y2="1128" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1000" y1="1090" x2="1030" y2="1128" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Step 6 -->
+  <rect x="60" y="1130" width="620" height="180" rx="10" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+  <rect x="76" y="1146" width="330" height="26" rx="13" fill="#be185d"/>
+  <text x="241" y="1164" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">6 · syllabify — split_word() via pyphen</text>
+  <text x="90" y="1198" font-size="12.5" fill="#9d174d">dictionary-hyphenated splitting, 20+ languages (config language code)</text>
+  <text x="90" y="1222" font-size="13.5" fill="#0f172a" font-family="Consolas, monospace">"sunshine" → "sun" + "shine"</text>
+  <text x="90" y="1248" font-size="12.5" fill="#9d174d">word interval split evenly; per-syllable MIDI = median of pitch</text>
+  <text x="90" y="1270" font-size="12.5" fill="#9d174d">frames inside the slice (again with 0.5/0.3/0.1 fallback)</text>
+  <text x="90" y="1294" font-size="11.5" fill="#be185d">unsupported language → word stays unsplit (1 syllable = 1 note)</text>
+
+  <!-- Step 7 -->
+  <rect x="720" y="1130" width="620" height="300" rx="10" fill="#ecfdf5" stroke="#10b981" stroke-width="2"/>
+  <rect x="736" y="1146" width="380" height="26" rx="13" fill="#047857"/>
+  <text x="926" y="1164" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">7 · _note_segments() — trim + split by pitch change</text>
+  <text x="750" y="1196" font-size="12.5" fill="#065f46">activity threshold (song-relative, from the CREPE timeline):</text>
+  <text x="766" y="1216" font-size="11.5" fill="#065f46">noise = p90 of quiet frames (conf &lt; 0.2) · signal = p50 of voiced (conf ≥ 0.5) → thr = noise + 0.2·(signal−noise)</text>
+  <text x="750" y="1240" font-size="12.5" fill="#065f46">active frames: conf ≥ 0.3 (fallback 0.5) AND amplitude ≥ threshold</text>
+  <text x="750" y="1262" font-size="12.5" fill="#065f46">keep the strongest contiguous island — bridges dropouts ≤ 50 ms</text>
+  <text x="750" y="1284" font-size="12.5" fill="#065f46">median smoothing (5-frame window) kills vibrato/jitter</text>
+  <text x="750" y="1306" font-size="12.5" fill="#065f46">drift &gt; 1 semitone splits the syllable; runs &lt; 60 ms merged (noise)</text>
+  <text x="750" y="1328" font-size="12.5" fill="#065f46">segment MIDI = amplitude×confidence weighted median</text>
+  <text x="750" y="1360" font-size="13" fill="#047857" font-family="Consolas, monospace">"shining" → (0.10–0.28, C5) + (0.28–0.46, E5)</text>
+  <text x="750" y="1388" font-size="11.5" fill="#065f46">→ one syllable can become several pitch-change notes (Ultrastar needs one pitch per note)</text>
+  <text x="750" y="1410" font-size="11.5" fill="#065f46">no active frames → original (start, end, word-midi) fallback</text>
+
+  <line x1="370" y1="1310" x2="330" y2="1448" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="1030" y1="1430" x2="900" y2="1448" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Step 8 -->
+  <rect x="60" y="1450" width="500" height="100" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="1466" width="240" height="26" rx="13" fill="#475569"/>
+  <text x="196" y="1484" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">8 · line breaks</text>
+  <text x="90" y="1518" font-size="12.5" fill="#334155">wherever the lyric LINE changes, insert an</text>
+  <text x="90" y="1540" font-size="12.5" fill="#334155">is_line_break syllable at the next syllable's start (→ "-" note in .txt)</text>
+
+  <!-- Output -->
+  <rect x="580" y="1450" width="760" height="150" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="600" y="1480" font-size="15" font-weight="bold" fill="#166534">AlignedSyllable[] — the note skeleton for Stage 5</text>
+  <g font-size="11.5" fill="#14532d">
+    <rect x="600" y="1494" width="120" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="660" y="1513" text-anchor="middle">syllable</text>
+    <rect x="728" y="1494" width="80" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="768" y="1513" text-anchor="middle">start</text>
+    <rect x="816" y="1494" width="80" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="856" y="1513" text-anchor="middle">end</text>
+    <rect x="904" y="1494" width="80" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="944" y="1513" text-anchor="middle">midi</text>
+    <rect x="992" y="1494" width="140" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="1062" y="1513" text-anchor="middle">is_line_break</text>
+  </g>
+  <text x="600" y="1548" font-size="12" fill="#166534">debug_alignment=true also writes: align_debug.json · align_backtrace.txt · whisper_pitch.json</text>
+  <text x="600" y="1570" font-size="12" fill="#166534">· whisper_pitch.html (mid-pipeline pitch preview, same engine as Stage 7 preview)</text>
+  <line x1="560" y1="1500" x2="578" y2="1500" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+</svg></div>
+    <div class="pager-row"><a class="pager" href="#stage-3">&larr; BPM Detect</a><a class="pager" href="#stage-5">Generate &rarr;</a></div>
+  </section>
+
+  <section id="stage-5" class="stage">
+    <div class="stage-head">
+      <span class="badge">Stage 5</span>
+      <div>
+        <h2>Generate</h2>
+        <p class="desc">Syllables + BPM -> Ultrastar .txt beat mapping</p>
+      </div>
+    </div>
+    <div class="figure"><svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1100" viewBox="0 0 1200 1100" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="1100" fill="#f8fafc"/>
+
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 5 — Generate</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/generate.py · generate_ultrastar()  +  cli/ultrastar.py · build_ultrastar_txt()</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Aligned syllables + BpmResult → a complete Ultrastar Deluxe .txt string (seconds → fine beat grid, anchored to the downbeat)</text>
+
+  <!-- inputs -->
+  <rect x="60" y="118" width="520" height="100" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="80" y="146" font-size="14" font-weight="bold" fill="#166534">AlignedSyllable[]  (Stage 4)</text>
+  <g font-size="11.5" fill="#14532d">
+    <rect x="80" y="158" width="120" height="30" rx="8" fill="#dcfce7" stroke="#86efac"/><text x="140" y="178" text-anchor="middle">"He" 0.42–0.78 · C4</text>
+    <rect x="208" y="158" width="120" height="30" rx="8" fill="#dcfce7" stroke="#86efac"/><text x="268" y="178" text-anchor="middle">"llo" 0.78–1.10 · E4</text>
+    <rect x="336" y="158" width="110" height="30" rx="8" fill="#fef9c3" stroke="#fde047"/><text x="391" y="178" text-anchor="middle">LINE BREAK</text>
+    <rect x="454" y="158" width="110" height="30" rx="8" fill="#dcfce7" stroke="#86efac"/><text x="509" y="178" text-anchor="middle">"This" 1.9–2.3 · C4</text>
+  </g>
+  <text x="80" y="208" font-size="11.5" fill="#166534">each note: syllable text · start/end in seconds · MIDI pitch</text>
+
+  <rect x="700" y="118" width="440" height="100" rx="10" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+  <text x="720" y="146" font-size="14" font-weight="bold" fill="#155e75">BpmResult  (Stage 3)</text>
+  <text x="720" y="172" font-size="12.5" fill="#155e75" font-family="Consolas, monospace">bpm = 148.2</text>
+  <text x="720" y="192" font-size="12.5" fill="#155e75" font-family="Consolas, monospace">first_beat_ms = 483</text>
+  <text x="920" y="172" font-size="12.5" fill="#155e75">stable = true</text>
+  <text x="920" y="192" font-size="12" fill="#64748b">chunk_bpms: [148.2, 147.9, 148.6]</text>
+
+  <line x1="320" y1="218" x2="320" y2="256" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="920" y1="218" x2="920" y2="256" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- step 1 -->
+  <rect x="60" y="258" width="520" height="140" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="274" width="300" height="26" rx="13" fill="#0e7490"/>
+  <text x="226" y="292" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">1 · anchor the grid — #GAP</text>
+  <text x="90" y="326" font-size="12.5" fill="#334155">preferred: #GAP = round(first_beat_ms) = 483 ms</text>
+  <text x="110" y="348" font-size="12.5" fill="#334155">→ file beat 0 is exactly the song's downbeat, so a note sung ON the</text>
+  <text x="110" y="368" font-size="12.5" fill="#334155">beat lands on an integer beat. Without it: first note start − gap_lead_in_ms (500).</text>
+  <text x="90" y="390" font-size="11.5" fill="#0e7490">GAP shifts the whole grid without touching the timing of the audio</text>
+
+  <!-- step 2 -->
+  <rect x="700" y="258" width="440" height="140" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="716" y="274" width="330" height="26" rx="13" fill="#0e7490"/>
+  <text x="881" y="292" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">2 · multiply BPM for a fine beat grid</text>
+  <text x="726" y="326" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">export BPM = 148.2 × 2 = 296.40</text>
+  <text x="726" y="350" font-size="11.5" fill="#334155">beat(ms) = round((ms − GAP)/1000 × bpm/60 × 4)</text>
+  <text x="726" y="372" font-size="11.5" fill="#334155">doubled BPM → each file beat = 60000/(2·bpm)/4 ms: a 4× finer</text>
+  <text x="726" y="390" font-size="11.5" fill="#334155">grid, so note edges can sit between quarter notes cleanly</text>
+
+  <line x1="320" y1="398" x2="320" y2="436" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="920" y1="398" x2="920" y2="436" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- step 3 -->
+  <rect x="60" y="438" width="520" height="140" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="454" width="350" height="26" rx="13" fill="#0f172a"/>
+  <text x="251" y="472" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">3 · quantize every note start onto the grid</text>
+  <text x="90" y="504" font-size="12.5" fill="#334155">each syllable → start_beat = beat(syl.start)</text>
+  <text x="90" y="528" font-size="12.5" fill="#334155">onsets must be distinct: start_beat ≥ previous_start + 1</text>
+  <text x="90" y="550" font-size="12.5" fill="#334155">(Ultrastar needs a duration of at least 1 beat per note)</text>
+  <text x="90" y="572" font-size="11.5" fill="#64748b">line-break entries are skipped here (handled next)</text>
+
+  <!-- step 4 -->
+  <rect x="700" y="438" width="440" height="140" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="716" y="454" width="290" height="26" rx="13" fill="#0f172a"/>
+  <text x="861" y="472" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">4 · durations (never overlap)</text>
+  <text x="726" y="504" font-size="12.5" fill="#334155">end_beat = beat(syl.end)</text>
+  <text x="726" y="528" font-size="12.5" fill="#334155">duration = end_beat − start_beat, but minimum 1 beat</text>
+  <text x="726" y="550" font-size="12.5" fill="#334155">and capped at the next note's start: duration ≤ next_start − start,</text>
+  <text x="726" y="570" font-size="12.5" fill="#334155">so two syllables can never occupy the same beat</text>
+
+  <line x1="320" y1="578" x2="320" y2="616" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="920" y1="578" x2="920" y2="616" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- step 5 -->
+  <rect x="60" y="618" width="520" height="130" rx="10" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+  <rect x="76" y="634" width="330" height="26" rx="13" fill="#be185d"/>
+  <text x="241" y="652" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">5 · place line breaks ("-" notes)</text>
+  <text x="90" y="684" font-size="12.5" fill="#9d174d">for each is_line_break syllable: a duration-0 "-" note at</text>
+  <text x="90" y="706" font-size="12.5" fill="#9d174d">max(0, next_note_start − 4 × 2), clamped to ≥ previous note's end</text>
+  <text x="90" y="728" font-size="12.5" fill="#9d174d">→ the next line's word gets 8 file beats of lead-in (linebreak_beat_offset)</text>
+
+  <line x1="320" y1="748" x2="320" y2="786" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="920" y1="748" x2="920" y2="786" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- output txt example -->
+  <rect x="60" y="788" width="1080" height="250" rx="10" fill="#1e293b"/>
+  <text x="84" y="816" font-size="14" font-weight="bold" fill="#22c55e">build_ultrastar_txt() → the .txt string (Stage 6 writes it to disk)</text>
+  <text x="84" y="848" font-size="13.5" fill="#e2e8f0" font-family="Consolas, monospace">#TITLE:Test Song</text>
+  <text x="84" y="868" font-size="13.5" fill="#e2e8f0" font-family="Consolas, monospace">#ARTIST:Someone</text>
+  <text x="84" y="888" font-size="13.5" fill="#e2e8f0" font-family="Consolas, monospace">#MP3:Test Song.mp3</text>
+  <text x="84" y="908" font-size="13.5" fill="#e2e8f0" font-family="Consolas, monospace">#BPM:296.40</text>
+  <text x="84" y="928" font-size="13.5" fill="#e2e8f0" font-family="Consolas, monospace">#GAP:483</text>
+  <text x="84" y="964" font-size="13.5" fill="#a5f3fc" font-family="Consolas, monospace">:   0   8  60  He</text>
+  <text x="84" y="984" font-size="13.5" fill="#a5f3fc" font-family="Consolas, monospace">:   8  12  62  llo</text>
+  <text x="84" y="1004" font-size="13.5" fill="#fcd34d" font-family="Consolas, monospace">-  39</text>
+  <text x="84" y="1024" font-size="13.5" fill="#a5f3fc" font-family="Consolas, monospace">:  47   8  60  This   …          E</text>
+
+  <text x="400" y="852" font-size="12.5" fill="#94a3b8">:  singing note (verse)</text>
+  <text x="400" y="874" font-size="12.5" fill="#94a3b8">*  singing note (chorus)</text>
+  <text x="400" y="896" font-size="12.5" fill="#94a3b8">-  line break / hold (duration 0)</text>
+  <text x="400" y="918" font-size="12.5" fill="#94a3b8">E  end-of-file marker</text>
+  <text x="400" y="948" font-size="12" fill="#64748b">note line =  type  start_beat  duration  midi  syllable</text>
+  <text x="400" y="970" font-size="12" fill="#64748b">#VIDEO is inserted when a --video file is given</text>
+  <text x="400" y="992" font-size="12" fill="#64748b">#BPM and #GAP come from the beat grid above; a note sung</text>
+  <text x="400" y="1012" font-size="12" fill="#64748b">exactly on the downbeat ends up at start_beat 0</text>
+
+  <text x="60" y="1072" font-size="12.5" fill="#64748b">Full song: ~40 lines of lyrics → hundreds of syllable notes (pitch per note from CREPE) + one "-" per lyric line.</text>
+</svg></div>
+    <div class="pager-row"><a class="pager" href="#stage-4">&larr; Align</a><a class="pager" href="#stage-6">Package &rarr;</a></div>
+  </section>
+
+  <section id="stage-6" class="stage">
+    <div class="stage-head">
+      <span class="badge">Stage 6</span>
+      <div>
+        <h2>Package</h2>
+        <p class="desc">output/ folder: .txt, MP3, stems, ZIP</p>
+      </div>
+    </div>
+    <div class="figure"><svg xmlns="http://www.w3.org/2000/svg" width="1100" height="800" viewBox="0 0 1100 800" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1100" height="800" fill="#f8fafc"/>
+
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 6 — Package</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/package.py · package_output(txt_content, mp3_path, output_dir, title, video?, vocals?, accompaniment?)</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Assemble the player-ready folder: song file + audio + stems + one-click ZIP</text>
+
+  <!-- inputs -->
+  <rect x="60" y="120" width="380" height="260" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="80" y="148" font-size="14" font-weight="bold" fill="#0f172a">Artifacts coming in</text>
+  <g font-size="12">
+    <rect x="80" y="164" width="340" height="34" rx="8" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="96" y="186" fill="#14532d">.txt content (in memory, from Stage 5)</text>
+    <rect x="80" y="206" width="340" height="34" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="96" y="228" fill="#334155">tmp/song.mp3  (normalized audio, Stage 1)</text>
+    <rect x="80" y="248" width="340" height="34" rx="8" fill="#f5f3ff" stroke="#c4b5fd"/>
+    <text x="96" y="270" fill="#4c1d95">tmp/song_vocals.mp3  (Stage 2 stem)</text>
+    <rect x="80" y="290" width="340" height="34" rx="8" fill="#f5f3ff" stroke="#c4b5fd"/>
+    <text x="96" y="312" fill="#4c1d95">tmp/song_accompaniment.mp3  (Stage 2)</text>
+    <rect x="80" y="332" width="340" height="34" rx="8" fill="#fffbeb" stroke="#fde68a"/>
+    <text x="96" y="354" fill="#92400e">optional: --video file (kept under its own name)</text>
+  </g>
+
+  <!-- actions -->
+  <rect x="480" y="120" width="300" height="260" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="500" y="148" font-size="14" font-weight="bold" fill="#0f172a">What it does</text>
+  <circle cx="516" cy="178" r="9" fill="#22c55e"/><text x="516" y="182" font-size="11" fill="#fff" text-anchor="middle">1</text>
+  <text x="534" y="183" font-size="12.5" fill="#334155">mkdir output/ (config.output_dir, ./output)</text>
+  <circle cx="516" cy="210" r="9" fill="#22c55e"/><text x="516" y="214" font-size="11" fill="#fff" text-anchor="middle">2</text>
+  <text x="534" y="215" font-size="12.5" fill="#334155">write &lt;title&gt;.txt (UTF-8)</text>
+  <circle cx="516" cy="242" r="9" fill="#22c55e"/><text x="516" y="246" font-size="11" fill="#fff" text-anchor="middle">3</text>
+  <text x="534" y="247" font-size="12.5" fill="#334155">copy MP3 → &lt;title&gt;.mp3 (shutil.copy2)</text>
+  <circle cx="516" cy="274" r="9" fill="#94a3b8"/><text x="516" y="278" font-size="11" fill="#fff" text-anchor="middle">4</text>
+  <text x="534" y="279" font-size="12.5" fill="#334155">optional: copy video (original filename)</text>
+  <circle cx="516" cy="306" r="9" fill="#22c55e"/><text x="516" y="310" font-size="11" fill="#fff" text-anchor="middle">5</text>
+  <text x="534" y="311" font-size="12.5" fill="#334155">copy stems → vocals.mp3 / accompaniment.mp3</text>
+  <circle cx="516" cy="338" r="9" fill="#22c55e"/><text x="516" y="342" font-size="11" fill="#fff" text-anchor="middle">6</text>
+  <text x="534" y="343" font-size="12.5" fill="#334155">zip every file except .zip → &lt;title&gt;.zip (DEFLATED)</text>
+  <line x1="440" y1="250" x2="478" y2="250" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="780" y1="250" x2="818" y2="250" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- output tree -->
+  <rect x="820" y="120" width="240" height="260" rx="10" fill="#0f172a"/>
+  <text x="840" y="148" font-size="13" font-weight="bold" fill="#4ade80" font-family="Consolas, monospace">output/</text>
+  <text x="840" y="178" font-size="12.5" fill="#e2e8f0" font-family="Consolas, monospace">├─ Test Song.txt</text>
+  <text x="840" y="204" font-size="12.5" fill="#e2e8f0" font-family="Consolas, monospace">├─ Test Song.mp3</text>
+  <text x="840" y="230" font-size="12.5" fill="#e2e8f0" font-family="Consolas, monospace">├─ Test Song.mp4</text>
+  <text x="840" y="256" font-size="12.5" fill="#e2e8f0" font-family="Consolas, monospace">├─ vocals.mp3</text>
+  <text x="840" y="282" font-size="12.5" fill="#e2e8f0" font-family="Consolas, monospace">├─ accompaniment.mp3</text>
+  <text x="840" y="308" font-size="12.5" fill="#4ade80" font-family="Consolas, monospace">└─ Test Song.zip</text>
+  <text x="840" y="336" font-size="10.5" fill="#64748b">(video line only when given)</text>
+  <text x="840" y="354" font-size="10.5" fill="#64748b">(zip contains all of the above)</text>
+
+  <!-- notes -->
+  <rect x="60" y="420" width="1000" height="120" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="80" y="448" font-size="14" font-weight="bold" fill="#0f172a">Notes</text>
+  <text x="80" y="474" font-size="12.5" fill="#334155">• Filenames come from --title (title.txt / title.mp3 / title.zip); stems get the fixed names vocals.mp3 and accompaniment.mp3.</text>
+  <text x="80" y="498" font-size="12.5" fill="#334155">• The .txt's #MP3 header points at &lt;title&gt;.mp3, so the folder is drop-in for Ultrastar Deluxe: just open the .txt.</text>
+  <text x="80" y="522" font-size="12.5" fill="#334155">• The ZIP is the shareable artifact — one file you can hand to a friend with an Ultrastar client.</text>
+
+  <!-- same for import -->
+  <rect x="60" y="572" width="1000" height="100" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="80" y="600" font-size="14" font-weight="bold" fill="#1d4ed8">Same packaging path for "ultrasongs import"</text>
+  <text x="80" y="626" font-size="12.5" fill="#1e40af">import --txt song.txt --mp3 song.mp3 parses the existing .txt (cli/ultrastar.py), rebuilds it canonically,</text>
+  <text x="80" y="648" font-size="12.5" fill="#1e40af">and runs the identical package_output() so imported songs land in the same output/ layout as generated ones.</text>
+
+  <text x="60" y="724" font-size="12.5" fill="#64748b">tmp/ still holds intermediates (stems, transcribe JSON, pitch JSON, debug files) for --resume, --stage and re-runs.</text>
+</svg></div>
+    <div class="pager-row"><a class="pager" href="#stage-5">&larr; Generate</a><a class="pager" href="#stage-7">Preview &rarr;</a></div>
+  </section>
+
+  <section id="stage-7" class="stage">
+    <div class="stage-head">
+      <span class="badge">Stage 7</span>
+      <div>
+        <h2>Preview</h2>
+        <p class="desc">HTML songbook with SVG note/pitch visualization</p>
+      </div>
+    </div>
+    <div class="figure"><svg xmlns="http://www.w3.org/2000/svg" width="1240" height="960" viewBox="0 0 1240 960" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+    <marker id="arrw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ffffff"/>
+    </marker>
+  </defs>
+  <rect width="1240" height="960" fill="#f8fafc"/>
+
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 7 — Preview</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/html_preview.py · generate_preview(txt_path, output_html_path, pitch_json_path?)</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Render the .txt as a scrollable dark-themed HTML songbook with per-syllable note bars (optionally pitched) — also used mid-pipeline for whisper_pitch.html</text>
+
+  <!-- input -->
+  <rect x="60" y="118" width="500" height="110" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="80" y="146" font-size="14" font-weight="bold" fill="#166534">Input</text>
+  <text x="80" y="172" font-size="12.5" fill="#14532d" font-family="Consolas, monospace">output/Test Song.txt          (parse_ultrastar_txt)</text>
+  <text x="80" y="196" font-size="12.5" fill="#14532d" font-family="Consolas, monospace">tmp/song_pitch.json  (optional, Stage 2)</text>
+
+  <!-- step1 parse -->
+  <rect x="700" y="118" width="480" height="110" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="1140" y="146" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="end">1 · parse back into data</text>
+  <text x="720" y="172" font-size="12" fill="#334155">header → title/artist/mp3/bpm/beat_resolution/gap</text>
+  <text x="720" y="194" font-size="12" fill="#334155">note lines → type (: / *), start+duration beats, pitch, text</text>
+  <text x="720" y="216" font-size="12" fill="#334155">ms_of(beat) = beat × 60000/bpm/4 + GAP  → seconds</text>
+  <line x1="560" y1="173" x2="698" y2="173" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <line x1="940" y1="228" x2="940" y2="262" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- step2 verses -->
+  <rect x="60" y="264" width="1120" height="110" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="280" width="330" height="26" rx="13" fill="#0f172a"/>
+  <text x="241" y="298" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">2 · regroup notes into verses</text>
+  <text x="90" y="330" font-size="12.5" fill="#334155">split into a new verse when the gap to the next note is &gt; 2000 ms — silence in the timing = new verse</text>
+  <text x="90" y="352" font-size="12.5" fill="#334155">chorus notes become a separate <tspan font-family="Consolas, monospace" fill="#1d4ed8">chorus_lyrics</tspan> section (shown as a "Chorus" lyric block)</text>
+  <text x="90" y="372" font-size="11.5" fill="#64748b">every verse carries first_time_ms / last_time_ms / has_notes for the layout math</text>
+
+  <line x1="620" y1="374" x2="620" y2="408" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- step3 render -->
+  <rect x="60" y="410" width="1120" height="430" rx="12" fill="#1e1e2e"/>
+  <rect x="76" y="426" width="380" height="26" rx="13" fill="#f59e0b"/>
+  <text x="266" y="444" font-size="13" fill="#111827" text-anchor="middle" font-weight="bold">3 · render (HTML + inline CSS, no JS)</text>
+
+  <!-- lyric -->
+  <text x="100" y="486" font-size="17" fill="#fde68a">He  llo  wo  rld,</text>
+  <text x="100" y="520" font-size="11.5" fill="#94a3b8">verse lyric (rejoined syllables)</text>
+
+  <!-- timeline axis -->
+  <line x1="100" y1="548" x2="1140" y2="548" stroke="#45475a" stroke-width="1.5"/>
+  <text x="100"  y="568" font-size="10.5" fill="#6c7086" font-family="Consolas, monospace">0.0s</text>
+  <text x="355" y="568" font-size="10.5" fill="#6c7086" font-family="Consolas, monospace">0.5s</text>
+  <text x="610" y="568" font-size="10.5" fill="#6c7086" font-family="Consolas, monospace">1.0s</text>
+  <text x="865" y="568" font-size="10.5" fill="#6c7086" font-family="Consolas, monospace">1.5s</text>
+  <text x="1110" y="568" font-size="10.5" fill="#6c7086" font-family="Consolas, monospace">2.0s</text>
+  <!-- pitch scale 84..40 on right: map midi m to y = 84 - (m-40)*(520-596)/(84-40)... keep simple labels -->
+  <text x="1196" y="560" font-size="10.5" fill="#6c7086" text-anchor="end">C4</text>
+  <text x="1196" y="530" font-size="10.5" fill="#6c7086" text-anchor="end">C5</text>
+  <line x1="1150" y1="526" x2="1140" y2="526" stroke="#45475a" stroke-dasharray="3 3"/>
+  <line x1="1150" y1="556" x2="1140" y2="556" stroke="#45475a" stroke-dasharray="3 3"/>
+
+  <!-- note bars: x = (ms - first)/(last-first) * 1000 + 100, y by midi -->
+  <!-- He 0.42-0.78 C4(60): x 385->520? computed: first=380 last=2400 range 2020; He: (420-380)/2020*1000+100=119 -> (780-380)/2020*1000+100=297 ; but keep bars within line area y ~ 545 -->
+  <g font-family="Consolas, monospace" font-size="11" fill="#cdd6f4">
+    <rect x="119"  y="548" width="110" height="16" rx="3" fill="#f38ba8"/><text x="174"  y="608" text-anchor="middle">He</text>
+    <rect x="230"  y="552" width="95"  height="16" rx="3" fill="#fab387"/><text x="277"  y="608" text-anchor="middle">llo</text>
+    <rect x="325"  y="558" width="95"  height="16" rx="3" fill="#f9e2af"/><text x="372"  y="608" text-anchor="middle">wo</text>
+    <rect x="420"  y="552" width="46"  height="16" rx="3" fill="#f38ba8"/><text x="443"  y="608" text-anchor="middle">rd</text>
+    <rect x="607"  y="558" width="110" height="16" rx="3" fill="#f38ba8"/><text x="662"  y="608" text-anchor="middle">This</text>
+    <rect x="718"  y="564" width="95"  height="16" rx="3" fill="#f5c2e7"/><text x="765"  y="608" text-anchor="middle">is</text>
+    <rect x="813"  y="558" width="142" height="16" rx="3" fill="#a6e3a1"/><text x="884"  y="608" text-anchor="middle">a test</text>
+    <rect x="955"  y="552" width="110" height="16" rx="3" fill="#89b4fa"/><text x="1010" y="608" text-anchor="middle">song</text>
+  </g>
+  <text x="100" y="640" font-size="11.5" fill="#94a3b8">bar: x = start time · width = duration · color = syllable hash  (pitch mode: y = MIDI pitch, height constant)</text>
+
+  <!-- pitch mode illustration -->
+  <rect x="100" y="664" width="560" height="150" rx="10" fill="#2a2a3d"/>
+  <text x="120" y="690" font-size="13" font-weight="bold" fill="#a6e3a1">pitch mode (when pitch JSON given)</text>
+  <line x1="130" y1="782" x2="620" y2="782" stroke="#45475a" stroke-width="1.5"/>
+  <g>
+    <rect x="130" y="766" width="9" height="16" rx="2" fill="#ff5555"/>
+    <rect x="141" y="760" width="9" height="22" rx="2" fill="#ff9944"/>
+    <rect x="152" y="752" width="9" height="30" rx="2" fill="#ffdd33"/>
+    <rect x="163" y="756" width="9" height="26" rx="2" fill="#ffcc11"/>
+    <rect x="174" y="758" width="9" height="24" rx="2" fill="#eedd22"/>
+    <rect x="185" y="764" width="9" height="18" rx="2" fill="#aadd44"/>
+    <rect x="196" y="762" width="9" height="20" rx="2" fill="#66ee88"/>
+    <rect x="207" y="768" width="9" height="14" rx="2" fill="#ff3355"/>
+    <rect x="218" y="774" width="9" height="8"  rx="2" fill="#88bb44"/>
+    <rect x="229" y="758" width="9" height="24" rx="2" fill="#88cc33"/>
+    <rect x="240" y="750" width="9" height="32" rx="2" fill="#33dd66"/>
+    <rect x="251" y="754" width="9" height="28" rx="2" fill="#33cc99"/>
+    <rect x="262" y="760" width="9" height="22" rx="2" fill="#44ddaa"/>
+    <rect x="273" y="766" width="9" height="16" rx="2" fill="#44bbaa"/>
+    <rect x="284" y="772" width="9" height="10" rx="2" fill="#33774d"/>
+    <rect x="295" y="770" width="9" height="12" rx="2" fill="#77cc55"/>
+  </g>
+  <text x="130" y="800" font-size="11" fill="#94a3b8">one bar per CREPE frame: height = amplitude (green→red as it gets loud)</text>
+  <text x="330" y="800" font-size="11" fill="#94a3b8">    fill = CREPE confidence (red = low, green = sure pitch)</text>
+
+  <rect x="680" y="664" width="480" height="150" rx="10" fill="#2a2a3d"/>
+  <text x="700" y="690" font-size="13" font-weight="bold" fill="#89b4fa">page layout</text>
+  <text x="700" y="716" font-size="11.5" fill="#cdd6f4">• header: title, artist, BPM + beat-resolution badge, GAP</text>
+  <text x="700" y="738" font-size="11.5" fill="#cdd6f4">• one &lt;section class="verse"&gt; per verse: lyric on top,</text>
+  <text x="750" y="758" font-size="11.5" fill="#cdd6f4">note lane below, time axis 0.1 ms-precise</text>
+  <text x="700" y="780" font-size="11.5" fill="#cdd6f4">• chorus lyrics in their own amber "Chorus" block</text>
+  <text x="700" y="802" font-size="11.5" fill="#cdd6f4">• single self-contained file — open it in any browser</text>
+
+  <line x1="620" y1="840" x2="620" y2="874" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- outputs -->
+  <rect x="60" y="876" width="1120" height="64" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="80" y="902" font-size="13.5" font-weight="bold" fill="#166534">output/Test Song.html</text>
+  <text x="420" y="902" font-size="12.5" fill="#14532d">  ·  mid-pipeline, the same engine renders tmp/song_whisper_pitch.html (Whisper words vs. CREPE pitch) during Stage 2</text>
+  <text x="80" y="924" font-size="12" fill="#14532d">run with:  python -m cli preview --txt output/Test\ Song.txt --pitch tmp/song_pitch.json</text>
+</svg></div>
+    <div class="pager-row"><a class="pager" href="#stage-6">&larr; Package</a></div>
+  </section>
+  </main>
+  <footer>Generated from M:\ultrasongs\docs\pipeline\stage*.svg &mdash; open this file in any browser.</footer>
+</body>
+</html>

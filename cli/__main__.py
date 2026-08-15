@@ -158,10 +158,16 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
 
     # Stage: align
     if args.stage in ("align", "generate", "all"):
-        logger.info("Step 3/5: Detecting BPM…")
-        bpm_input = Path(result.accompaniment_path) if config.bpm_use_accompaniment else audio_out
-        bpm = detect_bpm(bpm_input, config)
-        logger.info(f"Step 3/5: BPM detected: {bpm}")
+        if result.bpm_result is None:
+            logger.info("Step 3/5: Detecting BPM…")
+            bpm_input = Path(result.accompaniment_path) if config.bpm_use_accompaniment else audio_out
+            result.bpm_result = detect_bpm(bpm_input, config)
+        bpm_result = result.bpm_result
+        logger.info(
+            f"Step 3/5: BPM {bpm_result.bpm:.1f} "
+            f"(first beat at {bpm_result.first_beat_ms:.0f} ms, "
+            f"stable={bpm_result.stable})"
+        )
 
         logger.info("Step 4/5: Aligning lyrics…")
         aligned = align_lyrics(
@@ -179,7 +185,8 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
         logger.info("Step 5/5: Generating Ultrastar file…")
         txt_content = generate_ultrastar(
             aligned_syllables=aligned,
-            bpm=bpm,
+            bpm=bpm_result.bpm,
+            first_beat_ms=bpm_result.first_beat_ms,
             gap_ms=config.gap_lead_in_ms,
             title=args.title,
             artist=args.artist,

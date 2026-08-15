@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1100" viewBox="0 0 1200 1100" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="1100" fill="#f8fafc"/>
+
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 5 — Generate</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/generate.py · generate_ultrastar()  +  cli/ultrastar.py · build_ultrastar_txt()</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Aligned syllables + BpmResult → a complete Ultrastar Deluxe .txt string (seconds → fine beat grid, anchored to the downbeat)</text>
+
+  <!-- inputs -->
+  <rect x="60" y="118" width="520" height="100" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="80" y="146" font-size="14" font-weight="bold" fill="#166534">AlignedSyllable[]  (Stage 4)</text>
+  <g font-size="11.5" fill="#14532d">
+    <rect x="80" y="158" width="120" height="30" rx="8" fill="#dcfce7" stroke="#86efac"/><text x="140" y="178" text-anchor="middle">"He" 0.42–0.78 · C4</text>
+    <rect x="208" y="158" width="120" height="30" rx="8" fill="#dcfce7" stroke="#86efac"/><text x="268" y="178" text-anchor="middle">"llo" 0.78–1.10 · E4</text>
+    <rect x="336" y="158" width="110" height="30" rx="8" fill="#fef9c3" stroke="#fde047"/><text x="391" y="178" text-anchor="middle">LINE BREAK</text>
+    <rect x="454" y="158" width="110" height="30" rx="8" fill="#dcfce7" stroke="#86efac"/><text x="509" y="178" text-anchor="middle">"This" 1.9–2.3 · C4</text>
+  </g>
+  <text x="80" y="208" font-size="11.5" fill="#166534">each note: syllable text · start/end in seconds · MIDI pitch</text>
+
+  <rect x="700" y="118" width="440" height="100" rx="10" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+  <text x="720" y="146" font-size="14" font-weight="bold" fill="#155e75">BpmResult  (Stage 3)</text>
+  <text x="720" y="172" font-size="12.5" fill="#155e75" font-family="Consolas, monospace">bpm = 148.2</text>
+  <text x="720" y="192" font-size="12.5" fill="#155e75" font-family="Consolas, monospace">first_beat_ms = 483</text>
+  <text x="920" y="172" font-size="12.5" fill="#155e75">stable = true</text>
+  <text x="920" y="192" font-size="12" fill="#64748b">chunk_bpms: [148.2, 147.9, 148.6]</text>
+
+  <line x1="320" y1="218" x2="320" y2="256" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="920" y1="218" x2="920" y2="256" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- step 1 -->
+  <rect x="60" y="258" width="520" height="140" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="274" width="300" height="26" rx="13" fill="#0e7490"/>
+  <text x="226" y="292" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">1 · anchor the grid — #GAP</text>
+  <text x="90" y="326" font-size="12.5" fill="#334155">preferred: #GAP = round(first_beat_ms) = 483 ms</text>
+  <text x="110" y="348" font-size="12.5" fill="#334155">→ file beat 0 is exactly the song's downbeat, so a note sung ON the</text>
+  <text x="110" y="368" font-size="12.5" fill="#334155">beat lands on an integer beat. Without it: first note start − gap_lead_in_ms (500).</text>
+  <text x="90" y="390" font-size="11.5" fill="#0e7490">GAP shifts the whole grid without touching the timing of the audio</text>
+
+  <!-- step 2 -->
+  <rect x="700" y="258" width="440" height="140" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="716" y="274" width="330" height="26" rx="13" fill="#0e7490"/>
+  <text x="881" y="292" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">2 · multiply BPM for a fine beat grid</text>
+  <text x="726" y="326" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">export BPM = 148.2 × 2 = 296.40</text>
+  <text x="726" y="350" font-size="11.5" fill="#334155">beat(ms) = round((ms − GAP)/1000 × bpm/60 × 4)</text>
+  <text x="726" y="372" font-size="11.5" fill="#334155">doubled BPM → each file beat = 60000/(2·bpm)/4 ms: a 4× finer</text>
+  <text x="726" y="390" font-size="11.5" fill="#334155">grid, so note edges can sit between quarter notes cleanly</text>
+
+  <line x1="320" y1="398" x2="320" y2="436" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="920" y1="398" x2="920" y2="436" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- step 3 -->
+  <rect x="60" y="438" width="520" height="140" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="76" y="454" width="350" height="26" rx="13" fill="#0f172a"/>
+  <text x="251" y="472" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">3 · quantize every note start onto the grid</text>
+  <text x="90" y="504" font-size="12.5" fill="#334155">each syllable → start_beat = beat(syl.start)</text>
+  <text x="90" y="528" font-size="12.5" fill="#334155">onsets must be distinct: start_beat ≥ previous_start + 1</text>
+  <text x="90" y="550" font-size="12.5" fill="#334155">(Ultrastar needs a duration of at least 1 beat per note)</text>
+  <text x="90" y="572" font-size="11.5" fill="#64748b">line-break entries are skipped here (handled next)</text>
+
+  <!-- step 4 -->
+  <rect x="700" y="438" width="440" height="140" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <rect x="716" y="454" width="290" height="26" rx="13" fill="#0f172a"/>
+  <text x="861" y="472" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">4 · durations (never overlap)</text>
+  <text x="726" y="504" font-size="12.5" fill="#334155">end_beat = beat(syl.end)</text>
+  <text x="726" y="528" font-size="12.5" fill="#334155">duration = end_beat − start_beat, but minimum 1 beat</text>
+  <text x="726" y="550" font-size="12.5" fill="#334155">and capped at the next note's start: duration ≤ next_start − start,</text>
+  <text x="726" y="570" font-size="12.5" fill="#334155">so two syllables can never occupy the same beat</text>
+
+  <line x1="320" y1="578" x2="320" y2="616" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="920" y1="578" x2="920" y2="616" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- step 5 -->
+  <rect x="60" y="618" width="520" height="130" rx="10" fill="#fdf2f8" stroke="#ec4899" stroke-width="2"/>
+  <rect x="76" y="634" width="330" height="26" rx="13" fill="#be185d"/>
+  <text x="241" y="652" font-size="13" fill="#fff" text-anchor="middle" font-weight="bold">5 · place line breaks ("-" notes)</text>
+  <text x="90" y="684" font-size="12.5" fill="#9d174d">for each is_line_break syllable: a duration-0 "-" note at</text>
+  <text x="90" y="706" font-size="12.5" fill="#9d174d">max(0, next_note_start − 4 × 2), clamped to ≥ previous note's end</text>
+  <text x="90" y="728" font-size="12.5" fill="#9d174d">→ the next line's word gets 8 file beats of lead-in (linebreak_beat_offset)</text>
+
+  <line x1="320" y1="748" x2="320" y2="786" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="920" y1="748" x2="920" y2="786" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- output txt example -->
+  <rect x="60" y="788" width="1080" height="250" rx="10" fill="#1e293b"/>
+  <text x="84" y="816" font-size="14" font-weight="bold" fill="#22c55e">build_ultrastar_txt() → the .txt string (Stage 6 writes it to disk)</text>
+  <text x="84" y="848" font-size="13.5" fill="#e2e8f0" font-family="Consolas, monospace">#TITLE:Test Song</text>
+  <text x="84" y="868" font-size="13.5" fill="#e2e8f0" font-family="Consolas, monospace">#ARTIST:Someone</text>
+  <text x="84" y="888" font-size="13.5" fill="#e2e8f0" font-family="Consolas, monospace">#MP3:Test Song.mp3</text>
+  <text x="84" y="908" font-size="13.5" fill="#e2e8f0" font-family="Consolas, monospace">#BPM:296.40</text>
+  <text x="84" y="928" font-size="13.5" fill="#e2e8f0" font-family="Consolas, monospace">#GAP:483</text>
+  <text x="84" y="964" font-size="13.5" fill="#a5f3fc" font-family="Consolas, monospace">:   0   8  60  He</text>
+  <text x="84" y="984" font-size="13.5" fill="#a5f3fc" font-family="Consolas, monospace">:   8  12  62  llo</text>
+  <text x="84" y="1004" font-size="13.5" fill="#fcd34d" font-family="Consolas, monospace">-  39</text>
+  <text x="84" y="1024" font-size="13.5" fill="#a5f3fc" font-family="Consolas, monospace">:  47   8  60  This   …          E</text>
+
+  <text x="400" y="852" font-size="12.5" fill="#94a3b8">:  singing note (verse)</text>
+  <text x="400" y="874" font-size="12.5" fill="#94a3b8">*  singing note (chorus)</text>
+  <text x="400" y="896" font-size="12.5" fill="#94a3b8">-  line break / hold (duration 0)</text>
+  <text x="400" y="918" font-size="12.5" fill="#94a3b8">E  end-of-file marker</text>
+  <text x="400" y="948" font-size="12" fill="#64748b">note line =  type  start_beat  duration  midi  syllable</text>
+  <text x="400" y="970" font-size="12" fill="#64748b">#VIDEO is inserted when a --video file is given</text>
+  <text x="400" y="992" font-size="12" fill="#64748b">#BPM and #GAP come from the beat grid above; a note sung</text>
+  <text x="400" y="1012" font-size="12" fill="#64748b">exactly on the downbeat ends up at start_beat 0</text>
+
+  <text x="60" y="1072" font-size="12.5" fill="#64748b">Full song: ~40 lines of lyrics → hundreds of syllable notes (pitch per note from CREPE) + one "-" per lyric line.</text>
+</svg>

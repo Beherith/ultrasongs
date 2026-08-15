@@ -96,6 +96,7 @@ Edit `cli/config.jsonc` (supports `//` and `/* */` comments):
 | Key | Default | Description |
 |---|---|---|
 | `whisper_model` | `"medium"` | Whisper size: `tiny`, `base`, `small`, `medium`, `large` |
+| `transcribe_runs` | `3` | Demucs + Whisper passes to run, then consolidate via Smith-Waterman majority vote |
 | `demucs_model` | `"htdemucs"` | Demucs model name |
 | `sample_rate` | `44100` | Audio sample rate |
 | `pitch_min_hz` | `65.41` | Pitch floor (C2) |

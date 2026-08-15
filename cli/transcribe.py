@@ -65,12 +65,9 @@ def to_mp3_bytes(audio, sr: int, bitrate: int = 128) -> bytes:
 
 # ── Demucs separation ────────────────────────────────────────────────────────
 
-def separate_all(audio, sr: int, demucs_model: str = "htdemucs"):
-    """Demucs separation -> (vocals_mono, accompaniment_mono, out_sr)."""
-    import numpy as np
+def load_demucs_model(demucs_model: str = "htdemucs"):
+    """Load a Demucs model once and keep it on the active device."""
     import torch
-    import torchaudio
-    from demucs.apply import apply_model
     from demucs.pretrained import get_model
 
     logger.info(f"Loading Demucs model: {demucs_model}")
@@ -79,29 +76,57 @@ def separate_all(audio, sr: int, demucs_model: str = "htdemucs"):
     model.eval()
     if DEVICE == "cuda":
         model = model.cuda()
+    return model
 
-    try:
-        mono = torch.from_numpy(audio.astype(np.float32))
-        if sr != DEMUCS_SR:
-            mono = torchaudio.functional.resample(mono.unsqueeze(0), sr, DEMUCS_SR).squeeze(0)
-        wav = mono.unsqueeze(0).expand(2, -1).unsqueeze(0)
-        if DEVICE == "cuda":
-            wav = wav.cuda()
-        with torch.no_grad():
-            sources = apply_model(model, wav, device=DEVICE)
-        n_sources = sources.shape[1]
-        vocals = sources[0, DEMUCS_VOCALS_IDX].mean(0).cpu().numpy()
-        acc_stems = [sources[0, i] for i in range(n_sources) if i != DEMUCS_VOCALS_IDX]
-        accompaniment = torch.stack(acc_stems).sum(0).mean(0).cpu().numpy()
-        del sources, wav, mono
-    finally:
-        del model
-        gc.collect()
-        if DEVICE == "cuda":
-            torch.cuda.empty_cache()
-            logger.info(f"VRAM after Demucs unload: {torch.cuda.memory_allocated()//1024**2} MB")
 
+def release_demucs_model() -> None:
+    """Reclaim memory after the caller has dropped its reference to the model."""
+    gc.collect()
+    if DEVICE == "cuda":
+        import torch
+        torch.cuda.empty_cache()
+        logger.info(f"VRAM after Demucs unload: {torch.cuda.memory_allocated()//1024**2} MB")
+
+
+def apply_demucs(model, audio, sr: int):
+    """Run one Demucs pass over the audio.
+
+    Demucs is not fully deterministic, so repeated passes over the same input can
+    yield slightly different vocal/instrumental splits. Returns
+    (vocals_mono, accompaniment_mono, out_sr).
+    """
+    import numpy as np
+    import torch
+    import torchaudio
+    from demucs.apply import apply_model
+
+    mono = torch.from_numpy(audio.astype(np.float32))
+    if sr != DEMUCS_SR:
+        mono = torchaudio.functional.resample(mono.unsqueeze(0), sr, DEMUCS_SR).squeeze(0)
+    wav = mono.unsqueeze(0).expand(2, -1).unsqueeze(0)
+    if DEVICE == "cuda":
+        wav = wav.cuda()
+    with torch.no_grad():
+        sources = apply_model(model, wav, device=DEVICE)
+    n_sources = sources.shape[1]
+    vocals = sources[0, DEMUCS_VOCALS_IDX].mean(0).cpu().numpy()
+    acc_stems = [sources[0, i] for i in range(n_sources) if i != DEMUCS_VOCALS_IDX]
+    accompaniment = torch.stack(acc_stems).sum(0).mean(0).cpu().numpy()
+    del sources, wav, mono
     return vocals, accompaniment, DEMUCS_SR
+
+
+def separate_all(audio, sr: int, demucs_model: str = "htdemucs"):
+    """Demucs separation -> (vocals_mono, accompaniment_mono, out_sr).
+
+    Convenience wrapper: loads the model, runs a single pass, then unloads it.
+    """
+    model = load_demucs_model(demucs_model)
+    try:
+        return apply_demucs(model, audio, sr)
+    finally:
+        model = None
+        release_demucs_model()
 
 
 # ── Pitch analysis ──────────────────────────────────────────────────────────
@@ -347,6 +372,32 @@ def _transcribe_with_whisperx(vocals_wav_path: str, prompt: str = "", whisperx_m
 
 # ── Main transcription function ─────────────────────────────────────────────
 
+def _dump_whisper_passes(
+    config: Config,
+    base_name: str,
+    mp3_path: Path,
+    n_runs: int,
+    pass_records: list[dict[str, Any]],
+) -> None:
+    """Write each pass's Whisper transcription to a JSON file in the temp dir."""
+    temp_path = config.temp_path
+    dump_path = temp_path / f"{base_name}_whisper_passes.json"
+    payload = {
+        "source": str(mp3_path),
+        "num_runs": n_runs,
+        "runs": pass_records,
+    }
+    try:
+        temp_path.mkdir(parents=True, exist_ok=True)
+        dump_path.write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        logger.info(f"Saved per-pass Whisper transcription to {dump_path}")
+    except OSError as exc:
+        logger.warning(f"Could not write Whisper passes dump {dump_path}: {exc}")
+
+
 def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> TranscribeResult:
     """Run the full transcription pipeline."""
     import torch
@@ -364,37 +415,127 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     vocals_wav = base.with_name(base.name + "_vocals.wav")
 
     # Step 1: Load audio
-    logger.info("Step 1/7: Loading audio…")
+    logger.info("Step 1/6: Loading audio…")
     audio, sr = sf.read(str(mp3_path))
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
 
-    # Step 2: Demucs separation
-    logger.info("Step 2/7: Separating vocals with Demucs…")
-    vocals, accompaniment, out_sr = separate_all(audio, sr, config.demucs_model)
+    n_runs = max(1, int(config.transcribe_runs))
 
-    if DEVICE == "cuda":
-        torch.cuda.empty_cache()
+    # Step 2: Separate + transcribe, repeated.
+    # Demucs is not fully deterministic, so each pass yields a slightly different
+    # vocal/instrumental split; the per-pass Whisper outputs are consolidated.
+    logger.info(
+        f"Step 2/6: Separating + transcribing "
+        f"({'single run' if n_runs == 1 else f'{n_runs} runs + consolidation'})…"
+    )
+    from cli.consensus import consolidate_whisper_runs
 
+    # Models are loaded once and reused across every pass — Demucs first, then
+    # Whisper, matching the per-pass processing order.
+    demucs_model = load_demucs_model(config.demucs_model)
+    from faster_whisper import WhisperModel
+    compute_type = "int8" if "large" in config.whisper_model and DEVICE == "cuda" else "auto"
+    print(f"[whisper] Running on {DEVICE} (compute_type={compute_type})")
+    whisper = WhisperModel(config.whisper_model, device=DEVICE, compute_type=compute_type)
+
+    primary_vocals: Any = None
+    primary_accomp: Any = None
+    primary_sr: int | None = None
+    raw_runs: list[list[dict[str, Any]]] = []
+    pass_records: list[dict[str, Any]] = []
+    detected_language: str | None = None
+    try:
+        for run_index in range(n_runs):
+            label = f"{run_index + 1}/{n_runs}"
+            keep_primary = run_index == 0
+
+            logger.info(f"Demucs separation {label}…")
+            vocals, accompaniment, out_sr = apply_demucs(demucs_model, audio, sr)
+            if keep_primary:
+                primary_vocals, primary_accomp, primary_sr = vocals, accompaniment, out_sr
+
+            sf.write(str(vocals_wav), vocals, out_sr)
+
+            logger.info(f"Whisper transcription {label}…")
+            segs, info = whisper.transcribe(
+                str(vocals_wav),
+                word_timestamps=True,
+                initial_prompt=lyrics_prompt,
+                language=config.whisper_language if config.whisper_language else None,
+            )
+            vocals_wav.unlink(missing_ok=True)
+
+            run_words: list[dict[str, Any]] = []
+            for seg in segs:
+                for w in seg.words:
+                    run_words.append({
+                        "word": w.word.strip(),
+                        "start": w.start,
+                        "end": w.end,
+                    })
+
+            run_language = info.language or None
+            pass_records.append({
+                "run": run_index + 1,
+                "language": run_language,
+                "word_count": len(run_words),
+                "text": " ".join(w["word"] for w in run_words),
+                "words": run_words,
+            })
+
+            if not run_words:
+                logger.warning(f"Whisper pass {label} returned no words; skipping")
+            else:
+                if detected_language is None:
+                    detected_language = run_language
+                logger.info(
+                    f"Whisper pass {label}: {len(run_words)} words "
+                    f"(language={run_language})"
+                )
+                raw_runs.append(run_words)
+
+            if not keep_primary:
+                del vocals, accompaniment
+                gc.collect()
+                if DEVICE == "cuda":
+                    torch.cuda.empty_cache()
+    finally:
+        demucs_model = None
+        release_demucs_model()
+
+    _dump_whisper_passes(config, base.name, mp3_path, n_runs, pass_records)
+
+    if not raw_runs:
+        raise RuntimeError("Whisper returned empty transcription on all passes")
+
+    if len(raw_runs) > 1:
+        raw_words = consolidate_whisper_runs(raw_runs)
+        logger.info(f"Consolidated {len(raw_runs)} runs into {len(raw_words)} words")
+    else:
+        raw_words = raw_runs[0]
+
+    if detected_language is None:
+        detected_language = config.whisper_language or "en"
+
+    # Stems, pitch, and pauses come from the first pass's vocal track.
     # Step 3: Save stems
-    logger.info("Step 3/7: Saving vocal stems…")
+    logger.info("Step 3/6: Saving vocal stems…")
     with open(vocals_mp3, "wb") as f:
-        f.write(to_mp3_bytes(vocals, out_sr))
+        f.write(to_mp3_bytes(primary_vocals, primary_sr))
     with open(acc_mp3, "wb") as f:
-        f.write(to_mp3_bytes(accompaniment, out_sr))
-    sf.write(str(vocals_wav), vocals, out_sr)
+        f.write(to_mp3_bytes(primary_accomp, primary_sr))
 
     # Step 4: BPM detection
-    logger.info("Step 4/7: Detecting BPM…")
+    logger.info("Step 4/6: Detecting BPM…")
     from cli.bpm_detect import detect_bpm
     bpm_input = acc_mp3 if config.bpm_use_accompaniment else mp3_path
-    bpm = detect_bpm(bpm_input, config)
-    logger.info(f"BPM detected: {bpm:.1f}")
+    bpm_result = detect_bpm(bpm_input, config)
 
     # Step 5: Pitch analysis
-    logger.info("Step 5/7: Analyzing pitch with torchcrepe…")
+    logger.info("Step 5/6: Analyzing pitch with torchcrepe…")
     times, freqs, confs, energies = analyze_pitch(
-        vocals, out_sr,
+        primary_vocals, primary_sr,
         fmin=config.pitch_min_hz,
         fmax=config.pitch_max_hz,
         hop_ms=config.crepe_hop_ms,
@@ -406,52 +547,24 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
 
     # Step 6: Pause detection
     pauses = detect_pauses(
-        vocals, out_sr,
+        primary_vocals, primary_sr,
         min_silence_ms=config.pause_min_silence_ms,
         threshold_ratio=config.pause_threshold_pct / 100.0,
     )
     logger.info(f"Detected {len(pauses)} pause regions")
 
-    # Step 7: Whisper transcription
-    logger.info("Step 7/7: Transcribing with Whisper…")
-    from faster_whisper import WhisperModel
-    compute_type = "int8" if "large" in config.whisper_model and DEVICE == "cuda" else "auto"
-    print(f"[whisper] Running on {DEVICE} (compute_type={compute_type})")
-    whisper = WhisperModel(config.whisper_model, device=DEVICE, compute_type=compute_type)
-
-    segs, info = whisper.transcribe(
-        str(vocals_wav),
-        word_timestamps=True,
-        initial_prompt=lyrics_prompt,
-        language=config.whisper_language if config.whisper_language else None,
-    )
-
-    raw_words = []
-    for seg in segs:
-        for w in seg.words:
-            raw_words.append({
-                "word": w.word.strip(),
-                "start": w.start,
-                "end": w.end,
-            })
-
-    if not raw_words:
-        raise RuntimeError("Whisper returned empty transcription")
-
     words = add_pitch_to_words(raw_words, times, freqs, confs, energies)
     pitch_frames = build_pitch_frames(times, freqs, confs, energies)
 
-    # Cleanup temporary WAV
-    if vocals_wav.exists():
-        vocals_wav.unlink()
-
-    logger.info(f"Transcription complete: {len(words)} words, language={info.language}")
+    logger.info(f"Transcription complete: {len(words)} words, language={detected_language}")
 
     return TranscribeResult(
         words=words,
-        language=info.language,
+        language=detected_language,
         vocals_path=str(vocals_mp3),
         accompaniment_path=str(acc_mp3),
         pauses=pauses,
         pitch_frames=pitch_frames,
+        bpm=bpm_result.bpm,
+        bpm_result=bpm_result,
     )

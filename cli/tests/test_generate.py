@@ -126,6 +126,35 @@ class TestGenerateUltrastar:
         assert singing[1].pitch == 62
         assert singing[2].syllable == "lo"
 
+    def test_first_beat_ms_used_as_gap(self):
+        syls = self._make_syllables([("hi", 1.5, 2.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            first_beat_ms=735.0,
+            config=Config(),
+        )
+        meta, _ = parse_ultrastar_txt(txt)
+        assert meta.gap == 735
+
+    def test_gap_falls_back_to_first_note_without_first_beat(self):
+        syls = self._make_syllables([("hi", 1.5, 2.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            config=Config(),
+        )
+        meta, _ = parse_ultrastar_txt(txt)
+        assert meta.gap == 1000
+
     def test_video_filename(self):
         syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
         txt = generate_ultrastar(
