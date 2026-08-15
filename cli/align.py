@@ -22,8 +22,8 @@ logger = get_logger("cli.align")
 # ── Constants ────────────────────────────────────────────────────────────────
 
 MATCH_SCORE = 4
-GAP_OPEN = 9
-GAP_EXTEND = 2
+GAP_OPEN = 4
+GAP_EXTEND = 0.5
 
 
 # ── Character normalization ──────────────────────────────────────────────────
@@ -376,14 +376,16 @@ def _percentile(values: list[float], fraction: float) -> float:
     return ordered[round((len(ordered) - 1) * fraction)]
 
 
-def _activity_threshold(frames: list[PitchFrame]) -> float:
+def _activity_threshold(frames: list[PitchFrame], config: Config) -> float:
     """Estimate a song-relative energy threshold from quiet and voiced frames."""
     amplitudes = [f.amplitude for f in frames]
-    quiet = [f.amplitude for f in frames if f.confidence < 0.2]
-    voiced = [f.amplitude for f in frames if f.confidence >= 0.5]
-    noise = _percentile(quiet, 0.9) if quiet else _percentile(amplitudes, 0.1)
-    signal = _percentile(voiced, 0.5) if voiced else _percentile(amplitudes, 0.75)
-    return noise + max(0.0, signal - noise) * 0.2
+    quiet = [f.amplitude for f in frames if f.confidence < config.activity_quiet_confidence]
+    voiced = [f.amplitude for f in frames if f.confidence >= config.activity_voiced_confidence]
+    noise = _percentile(quiet, config.activity_noise_percentile) \
+        if quiet else _percentile(amplitudes, config.activity_noise_fallback_percentile)
+    signal = _percentile(voiced, config.activity_signal_percentile) \
+        if voiced else _percentile(amplitudes, config.activity_signal_fallback_percentile)
+    return noise + max(0.0, signal - noise) * config.activity_threshold_ratio
 
 
 def _note_segments(
@@ -392,23 +394,26 @@ def _note_segments(
     end: float,
     fallback_midi: int,
     amplitude_threshold: float,
+    config: Config,
 ) -> list[tuple[float, float, int]]:
     """Trim a syllable to vocal activity and split sustained pitch changes."""
+    dropout_gap = config.note_dropout_gap_ms / 1000
+    min_duration = config.note_min_duration_ms / 1000
     window = [f for f in frames if start <= f.time <= end and f.midi > 0]
     active = [
         f for f in window
-        if f.confidence >= 0.3 and f.amplitude >= amplitude_threshold
+        if f.confidence >= config.note_min_confidence and f.amplitude >= amplitude_threshold
     ]
     if not active:
-        active = [f for f in window if f.confidence >= 0.5]
+        active = [f for f in window if f.confidence >= config.note_fallback_confidence]
     if not active:
         return [(start, end, fallback_midi)]
 
     # Keep the strongest contiguous vocal island. Short confidence/energy
-    # dropouts up to 50 ms are treated as part of the same sung sound.
+    # dropouts up to note_dropout_gap_ms are treated as part of the same sung sound.
     islands: list[list[PitchFrame]] = []
     for frame in active:
-        if not islands or frame.time - islands[-1][-1].time > 0.05:
+        if not islands or frame.time - islands[-1][-1].time > dropout_gap:
             islands.append([frame])
         else:
             islands[-1].append(frame)
@@ -417,10 +422,11 @@ def _note_segments(
         key=lambda island: sum(f.amplitude * f.confidence for f in island),
     )
 
-    # A five-frame median removes vibrato/jitter before finding pitch changes.
+    # A median window removes vibrato/jitter before finding pitch changes.
+    half = config.note_smooth_window // 2
     smoothed: list[tuple[PitchFrame, int]] = []
     for i, frame in enumerate(active):
-        nearby = active[max(0, i - 2):i + 3]
+        nearby = active[max(0, i - half):i + half + 1]
         midi = _median([f.midi for f in nearby]) or fallback_midi
         smoothed.append((frame, midi))
 
@@ -431,7 +437,7 @@ def _note_segments(
             continue
         run_midi = _median([midi for _, midi in runs[-1]]) or fallback_midi
         gap = item[0].time - runs[-1][-1][0].time
-        if gap <= 0.05 and abs(item[1] - run_midi) <= 1:
+        if gap <= dropout_gap and abs(item[1] - run_midi) <= config.note_pitch_tolerance:
             runs[-1].append(item)
         else:
             runs.append([item])
@@ -440,15 +446,15 @@ def _note_segments(
     merged: list[list[tuple[PitchFrame, int]]] = []
     for run in runs:
         duration = run[-1][0].time - run[0][0].time
-        if duration < 0.06 and merged:
+        if duration < min_duration and merged:
             merged[-1].extend(run)
         else:
             merged.append(run)
-    if len(merged) > 1 and merged[0][-1][0].time - merged[0][0][0].time < 0.06:
+    if len(merged) > 1 and merged[0][-1][0].time - merged[0][0][0].time < min_duration:
         merged[1] = merged[0] + merged[1]
         merged.pop(0)
 
-    frame_step = 0.01
+    frame_step = config.note_frame_step_ms / 1000
     if len(active) > 1:
         frame_step = max(0.001, active[1].time - active[0].time)
 
@@ -755,7 +761,7 @@ def align_lyrics(
     # ── Syllabification + output ──────────────────────────────────────────
 
     final_output: list[AlignedSyllable] = []
-    amplitude_threshold = _activity_threshold(pitch_frames) if pitch_frames else 0.0
+    amplitude_threshold = _activity_threshold(pitch_frames, config) if pitch_frames else 0.0
     previous_line: int | None = None
     # pitch_frames is already sorted by time; precompute keys so per-word
     # frame lookup is a slice of a bisect range instead of a linear filter.
@@ -799,6 +805,7 @@ def align_lyrics(
                 syl_end,
                 midi,
                 amplitude_threshold,
+                config,
             )
             for segment_index, (note_start, note_end, note_midi) in enumerate(segments):
                 word_output.append(AlignedSyllable(

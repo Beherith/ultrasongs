@@ -112,7 +112,7 @@ def generate_ultrastar(
             start_beat=start_beat,
             duration=duration,
             pitch=syl.midi,
-            syllable=syl.syllable,
+            syllable=syl.syllable or "~",
         ))
 
     meta = UltrastarMeta(

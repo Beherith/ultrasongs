@@ -36,6 +36,20 @@ class Config:
     gap_lead_in_ms: int = 500
     linebreak_beat_offset: int = 4
     beat_resolution_multiplier: int = 2
+    activity_quiet_confidence: float = 0.2
+    activity_voiced_confidence: float = 0.5
+    activity_noise_percentile: float = 0.9
+    activity_noise_fallback_percentile: float = 0.1
+    activity_signal_percentile: float = 0.5
+    activity_signal_fallback_percentile: float = 0.75
+    activity_threshold_ratio: float = 0.2
+    note_min_confidence: float = 0.3
+    note_fallback_confidence: float = 0.5
+    note_dropout_gap_ms: int = 50
+    note_smooth_window: int = 5
+    note_pitch_tolerance: int = 1
+    note_min_duration_ms: int = 60
+    note_frame_step_ms: int = 10
     ffmpeg_audio_bitrate: str = "128k"
     output_dir: str = "./output"
     temp_dir: str = "./tmp"
@@ -83,6 +97,20 @@ def load_config(config_path: str | None = None) -> Config:
         "gap_lead_in_ms": int,
         "linebreak_beat_offset": int,
         "beat_resolution_multiplier": int,
+        "activity_quiet_confidence": float,
+        "activity_voiced_confidence": float,
+        "activity_noise_percentile": float,
+        "activity_noise_fallback_percentile": float,
+        "activity_signal_percentile": float,
+        "activity_signal_fallback_percentile": float,
+        "activity_threshold_ratio": float,
+        "note_min_confidence": float,
+        "note_fallback_confidence": float,
+        "note_dropout_gap_ms": int,
+        "note_smooth_window": int,
+        "note_pitch_tolerance": int,
+        "note_min_duration_ms": int,
+        "note_frame_step_ms": int,
         "ffmpeg_audio_bitrate": str,
         "output_dir": str,
         "temp_dir": str,

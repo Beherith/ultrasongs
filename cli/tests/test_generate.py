@@ -103,6 +103,29 @@ class TestGenerateUltrastar:
             if current.note_type != "-" and following.note_type != "-"
         )
 
+    def test_glissando_continuation_uses_tilde(self):
+        syls = self._make_syllables([
+            ("ba", 0.5, 0.8, 60),
+            ("", 0.8, 1.0, 62),
+            ("lo", 1.2, 1.7, 64),
+        ])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            config=Config(),
+        )
+        _, notes = parse_ultrastar_txt(txt)
+        singing = [note for note in notes if note.note_type != "-"]
+        assert singing[0].syllable == "ba"
+        assert singing[0].pitch == 60
+        assert singing[1].syllable == "~"
+        assert singing[1].pitch == 62
+        assert singing[2].syllable == "lo"
+
     def test_video_filename(self):
         syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
         txt = generate_ultrastar(

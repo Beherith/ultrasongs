@@ -106,6 +106,20 @@ Edit `cli/config.jsonc` (supports `//` and `/* */` comments):
 | `gap_lead_in_ms` | `500` | Milliseconds before first note for `#GAP` |
 | `linebreak_beat_offset` | `4` | Beats before next note for line breaks |
 | `beat_resolution_multiplier` | `2` | Scales exported BPM for a finer Ultrastar beat grid |
+| `activity_quiet_confidence` | `0.2` | Min CREPE confidence for "quiet" frames in activity threshold |
+| `activity_voiced_confidence` | `0.5` | Min CREPE confidence for "voiced" frames in activity threshold |
+| `activity_noise_percentile` | `0.9` | Percentile of quiet frames for noise floor |
+| `activity_noise_fallback_percentile` | `0.1` | Percentile of all frames for noise floor fallback |
+| `activity_signal_percentile` | `0.5` | Percentile of voiced frames for signal level |
+| `activity_signal_fallback_percentile` | `0.75` | Percentile of all frames for signal fallback |
+| `activity_threshold_ratio` | `0.2` | Fraction of (signal - noise) added to noise floor |
+| `note_min_confidence` | `0.3` | Min CREPE confidence for vocal activity in note segmentation |
+| `note_fallback_confidence` | `0.5` | Fallback confidence when no frame meets `note_min_confidence` |
+| `note_dropout_gap_ms` | `50` | Max gap (ms) between active frames in one continuous note |
+| `note_smooth_window` | `5` | Median filter window (frames) for pitch smoothing |
+| `note_pitch_tolerance` | `1` | Max semitone drift kept within a single note |
+| `note_min_duration_ms` | `60` | Min duration (ms) for a pitch-change segment |
+| `note_frame_step_ms` | `10` | Fallback frame spacing (ms) for note end times |
 | `ffmpeg_audio_bitrate` | `"128k"` | Output MP3 bitrate |
 | `output_dir` | `"./output"` | Output directory |
 | `temp_dir` | `"./tmp"` | Intermediate files directory |

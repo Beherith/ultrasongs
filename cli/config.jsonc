@@ -83,6 +83,66 @@
   // give finer note placement but larger beat counts and file sizes.
   "beat_resolution_multiplier": 2,
 
+  // Vocal activity threshold: minimum CREPE confidence for a frame to count as
+  // "quiet" when estimating the song's noise floor.
+  "activity_quiet_confidence": 0.2,
+
+  // Vocal activity threshold: minimum CREPE confidence for a frame to count as
+  // "voiced" when estimating the song's signal level.
+  "activity_voiced_confidence": 0.5,
+
+  // Percentile of quiet frames used as the noise floor level (0.9 = 90th percentile).
+  // Only used when some frames fall below activity_quiet_confidence.
+  "activity_noise_percentile": 0.9,
+
+  // Percentile of all frames used as the noise floor when no quiet frames exist.
+  "activity_noise_fallback_percentile": 0.1,
+
+  // Percentile of voiced frames used as the signal level (0.5 = median).
+  // Only used when some frames reach activity_voiced_confidence.
+  "activity_signal_percentile": 0.5,
+
+  // Percentile of all frames used as the signal level when no voiced frames exist.
+  "activity_signal_fallback_percentile": 0.75,
+
+  // Fraction of the (signal - noise) range added to the noise floor to form the
+  // amplitude activity threshold. 0.2 keeps the threshold close to the noise
+  // floor, so soft singing is still detected. Increase (e.g., 0.4) to trim more
+  // instrumental bleed out of notes; decrease (e.g., 0.1) to keep softer onsets.
+  "activity_threshold_ratio": 0.2,
+
+  // Minimum CREPE confidence for a frame to count as vocal activity when
+  // trimming/splitting notes within a syllable.
+  "note_min_confidence": 0.3,
+
+  // Minimum CREPE confidence used as a fallback when no frame meets
+  // note_min_confidence and the activity amplitude threshold.
+  "note_fallback_confidence": 0.5,
+
+  // Maximum gap in milliseconds between active frames that is still treated as
+  // one continuous sung sound. Short confidence/energy dropouts up to this
+  // length do not split a note.
+  "note_dropout_gap_ms": 50,
+
+  // Median filter window size (in frames) used to smooth pitch before detecting
+  // sustained pitch changes. 5 frames removes vibrato/jitter while preserving
+  // real note transitions.
+  "note_smooth_window": 5,
+
+  // Maximum pitch difference in semitones that is kept within a single note.
+  // Larger values merge more gradual pitch drift; smaller values split notes
+  // more aggressively.
+  "note_pitch_tolerance": 1,
+
+  // Minimum duration in milliseconds for a pitch-change segment. Shorter
+  // segments are detection noise and are merged into the neighboring note.
+  "note_min_duration_ms": 60,
+
+  // Assumed frame spacing in milliseconds as a fallback when computing note end
+  // times from fewer than two active frames. Normally the actual spacing of the
+  // CREPE frames (crepe_hop_ms) is used.
+  "note_frame_step_ms": 10,
+
   // FFmpeg audio bitrate for the extracted MP3.
   // 128kbps is sufficient for pitch detection, BPM analysis, and transcription
   // without wasting disk space on intermediate files. Using a higher bitrate
