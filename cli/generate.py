@@ -80,20 +80,17 @@ def generate_ultrastar(
         if starts[i] is not None:
             next_start = starts[i]
 
+    offset = config.linebreak_beat_offset * config.beat_resolution_multiplier
+
     for i, syl in enumerate(aligned_syllables):
         if syl.is_line_break:
             next_note_beat = next_starts[i]
             if next_note_beat is None:
                 continue
 
-            offset = config.linebreak_beat_offset * config.beat_resolution_multiplier
-            target = max(0, next_note_beat - offset)
             last = ultra_notes[-1] if ultra_notes else None
-            previous_end = (
-                last.start_beat + last.duration
-                if last and last.note_type != "-"
-                else 0
-            )
+            previous_end = last.start_beat + last.duration if last and last.note_type == ":" else 0
+            target = max(0, next_note_beat - offset)
             line_break_beat = min(next_note_beat, max(target, previous_end))
 
             ultra_notes.append(UltrastarNote(
