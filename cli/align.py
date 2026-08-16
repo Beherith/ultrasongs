@@ -5,12 +5,11 @@ Ported from app/lib/align.ts (704 lines).
 
 import bisect
 import json
-import logging
 import re
 import unicodedata
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import IO, Any, Callable
 
 from cli.config import Config
 from cli.logging_setup import get_logger
@@ -18,20 +17,6 @@ from cli.syllabify import split_word
 from cli.pipeline_types import AlignedSyllable, Pause, PitchFrame, WordTimestamp
 
 logger = get_logger("cli.align")
-
-
-class _NoteSegmentsHandler(logging.Handler):
-    """Collect [note_segments] log lines into an in-memory buffer."""
-
-    def __init__(self, lines: list[str]) -> None:
-        super().__init__(level=logging.INFO)
-        self.lines = lines
-
-    def emit(self, record: logging.LogRecord) -> None:
-        message = record.getMessage()
-        if "[note_segments]" in message:
-            self.lines.append(message)
-
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -422,8 +407,12 @@ def _note_segments(
     fallback_midi: int,
     amplitude_threshold: float,
     config: Config,
+    note_log: IO[str],
 ) -> list[tuple[float, float, int]]:
     """Trim a syllable to vocal activity and split sustained pitch changes."""
+    def log(msg: str) -> None:
+        note_log.write(msg + "\n")
+
     dropout_gap = config.note_dropout_gap_ms / 1000
     min_duration = config.note_min_duration_ms / 1000
     window = [f for f in frames if start <= f.time <= end and f.midi > 0]
@@ -433,7 +422,7 @@ def _note_segments(
     ]
     max_conf = max((f.confidence for f in window), default=0.0)
     max_amp = max((f.amplitude for f in window), default=0.0)
-    logger.info(
+    log(
         f"[note_segments] syllable {start:.3f}-{end:.3f}s fallback_midi={fallback_midi}: "
         f"window={len(window)}/{len(frames)} frames, "
         f"window max_conf={max_conf:.3f} max_amp={max_amp:.4f}, "
@@ -442,7 +431,7 @@ def _note_segments(
     )
     if not active:
         active = [f for f in window if f.confidence >= config.note_fallback_confidence]
-        logger.info(
+        log(
             f"[note_segments] reason=below primary threshold "
             f"(max_conf={max_conf:.3f}, max_amp={max_amp:.4f} vs "
             f"min_conf={config.note_min_confidence}, amp_thresh={amplitude_threshold:.4f}); "
@@ -450,7 +439,7 @@ def _note_segments(
             f"{len(active)} frames qualify"
         )
     if not active:
-        logger.info(
+        log(
             f"[note_segments] reason=no active frames in window; "
             f"decision=return untrimmed fallback note "
             f"({start:.3f}-{end:.3f}s, midi={fallback_midi})"
@@ -471,7 +460,7 @@ def _note_segments(
             f"energy={sum(f.amplitude * f.confidence for f in isl):.4f}"
             for i, isl in enumerate(islands)
         ]
-        logger.info(
+        log(
             f"[note_segments] reason={len(islands)} vocal islands found "
             f"(dropout_gap={dropout_gap * 1000:.0f}ms); {', '.join(island_stats)}"
         )
@@ -479,7 +468,7 @@ def _note_segments(
         islands,
         key=lambda island: sum(f.amplitude * f.confidence for f in island),
     )
-    logger.info(
+    log(
         f"[note_segments] decision=keep strongest island: "
         f"{len(selected)} frames {selected[0].time:.3f}-{selected[-1].time:.3f}s "
         f"energy={sum(f.amplitude * f.confidence for f in selected):.4f}"
@@ -505,7 +494,7 @@ def _note_segments(
             runs[-1].append(item)
         else:
             if runs[-1][-1][0].time > runs[-1][0][0].time:
-                logger.info(
+                log(
                     f"[note_segments] pitch-change split after "
                     f"{runs[-1][0][0].time:.3f}-{runs[-1][-1][0].time:.3f}s "
                     f"(run_midi={run_midi}): next midi={item[1]} at {item[0].time:.3f}s, "
@@ -513,7 +502,7 @@ def _note_segments(
                     f"drift={abs(item[1] - run_midi)} (tolerance={config.note_pitch_tolerance})"
                 )
             runs.append([item])
-    logger.info(
+    log(
         f"[note_segments] pitch runs before merge: "
         + ", ".join(
             f"[{run[0][0].time:.3f}-{run[-1][0].time:.3f}s "
@@ -527,7 +516,7 @@ def _note_segments(
     for run in runs:
         duration = run[-1][0].time - run[0][0].time
         if duration < min_duration and merged:
-            logger.info(
+            log(
                 f"[note_segments] reason=run {run[0][0].time:.3f}-{run[-1][0].time:.3f}s "
                 f"is {duration * 1000:.0f}ms < min_duration {min_duration * 1000:.0f}ms; "
                 f"decision=merge into previous note"
@@ -537,16 +526,14 @@ def _note_segments(
             merged.append(run)
     if len(merged) > 1 and merged[0][-1][0].time - merged[0][0][0].time < min_duration:
         first_dur = merged[0][-1][0].time - merged[0][0][0].time
-        logger.info(
+        log(
             f"[note_segments] reason=first merged note is only {first_dur * 1000:.0f}ms "
             f"< min_duration {min_duration * 1000:.0f}ms; "
             f"decision=merge it into the second note"
         )
         merged[1] = merged[0] + merged[1]
         merged.pop(0)
-    logger.info(
-        f"[note_segments] merged note count: {len(runs)} runs -> {len(merged)} notes"
-    )
+    log(f"[note_segments] merged note count: {len(runs)} runs -> {len(merged)} notes")
 
     frame_step = config.note_frame_step_ms / 1000
     if len(active) > 1:
@@ -559,7 +546,7 @@ def _note_segments(
         run_start = max(start, run[0][0].time)
         run_end = min(end, run[-1][0].time + frame_step)
         if run_end > run_start:
-            logger.info(
+            log(
                 f"[note_segments] note {idx + 1}/{len(merged)}: "
                 f"{run_start:.3f}-{run_end:.3f}s midi={midi} "
                 f"({len(run)} frames, raw span {run[0][0].time:.3f}-{run[-1][0].time:.3f}s, "
@@ -567,19 +554,19 @@ def _note_segments(
             )
             result.append((run_start, run_end, midi))
         else:
-            logger.info(
+            log(
                 f"[note_segments] dropping merged run {idx}: "
                 f"run_start={run_start:.3f} >= run_end={run_end:.3f} "
                 f"(raw span {run[0][0].time:.3f}-{run[-1][0].time:.3f}s)"
             )
 
     if not result:
-        logger.info(
+        log(
             f"[note_segments] all merged runs clamped empty; "
             f"decision=return fallback note ({start:.3f}-{end:.3f}s, midi={fallback_midi})"
         )
         return [(start, end, fallback_midi)]
-    logger.info(
+    log(
         f"[note_segments] decision=return {len(result)} note(s) for "
         f"syllable {start:.3f}-{end:.3f}s"
     )
@@ -884,11 +871,9 @@ def align_lyrics(
     pitch_times = [f.time for f in pitch_frames] if pitch_frames else []
 
     # Route [note_segments] diagnostics to a text file instead of the console.
-    note_lines: list[str] = []
-    note_handler = _NoteSegmentsHandler(note_lines)
-    prev_level = logger.level
-    logger.setLevel(logging.INFO)
-    logger.addHandler(note_handler)
+    config.temp_path.mkdir(parents=True, exist_ok=True)
+    note_log_path = config.temp_path / "note_segments.txt"
+    note_log = note_log_path.open("w", encoding="utf-8")
     try:
         for wr in word_results:
             syllables = split_word(wr["word"], language)
@@ -929,6 +914,7 @@ def align_lyrics(
                     midi,
                     amplitude_threshold,
                     config,
+                    note_log,
                 )
                 for segment_index, (note_start, note_end, note_midi) in enumerate(segments):
                     word_output.append(AlignedSyllable(
@@ -951,14 +937,8 @@ def align_lyrics(
             final_output.extend(word_output)
             previous_line = wr["lineIdx"]
     finally:
-        logger.removeHandler(note_handler)
-        logger.setLevel(prev_level)
-
-    if note_lines:
-        config.temp_path.mkdir(parents=True, exist_ok=True)
-        notes_path = config.temp_path / "note_segments.txt"
-        notes_path.write_text("\n".join(note_lines) + "\n", encoding="utf-8")
-        logger.info(f"Note segment diagnostics written to {notes_path}")
+        note_log.close()
+    logger.info(f"Note segment diagnostics written to {note_log_path}")
 
     # ── Insert line breaks ────────────────────────────────────────────────
 
