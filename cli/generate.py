@@ -3,13 +3,9 @@
 from cli.config import Config
 from cli.logging_setup import get_logger
 from cli.pipeline_types import AlignedSyllable, UltrastarMeta, UltrastarNote
-from cli.ultrastar import build_ultrastar_txt
+from cli.ultrastar import build_ultrastar_txt, ms_to_beats
 
 logger = get_logger("cli.generate")
-
-def _ms_to_beats(ms: float, bpm: float, gap: int) -> int:
-    """Convert milliseconds to the nearest Ultrastar beat."""
-    return round(((ms - gap) / 1000) * (bpm / 60) * 4)
 
 
 def generate_ultrastar(
@@ -70,7 +66,7 @@ def generate_ultrastar(
         if syl.is_line_break:
             starts.append(None)
             continue
-        start = _ms_to_beats(syl.start * 1000, output_bpm, gap)
+        start = ms_to_beats(syl.start * 1000, output_bpm, gap)
         if previous_start is not None:
             start = max(start, previous_start + 1)
         starts.append(start)
@@ -111,7 +107,7 @@ def generate_ultrastar(
 
         start_beat = starts[i]
         assert start_beat is not None
-        end_beat = max(start_beat + 1, _ms_to_beats(syl.end * 1000, output_bpm, gap))
+        end_beat = max(start_beat + 1, ms_to_beats(syl.end * 1000, output_bpm, gap))
         if next_starts[i] is not None:
             end_beat = min(end_beat, next_starts[i])
         duration = end_beat - start_beat

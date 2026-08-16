@@ -408,11 +408,15 @@ def _note_segments(
     amplitude_threshold: float,
     config: Config,
     note_log: IO[str],
+    syllable: str | None = None,
+    word: str | None = None
 ) -> list[tuple[float, float, int]]:
     """Trim a syllable to vocal activity and split sustained pitch changes."""
     def log(msg: str) -> None:
         note_log.write(msg + "\n")
-
+    log(
+        f"Processing syllable [{syllable}] of word [{word}]"
+    )
     dropout_gap = config.note_dropout_gap_ms / 1000
     min_duration = config.note_min_duration_ms / 1000
     window = [f for f in frames if start <= f.time <= end and f.midi > 0]
@@ -877,7 +881,7 @@ def align_lyrics(
     try:
         for wr in word_results:
             syllables = split_word(wr["word"], language)
-            print(f"Word '{wr['word']}' split into syllables: {syllables}")
+            # print(f"Word '{wr['word']}' split into syllables: {syllables}")
             syl_duration = max(0.01, (wr["end"] - wr["start"]) / len(syllables))
             if pitch_frames:
                 lo = bisect.bisect_left(pitch_times, wr["start"])
@@ -915,6 +919,8 @@ def align_lyrics(
                     amplitude_threshold,
                     config,
                     note_log,
+                    syllable=lyric_syllable,
+                    word = wr["word"]
                 )
                 for segment_index, (note_start, note_end, note_midi) in enumerate(segments):
                     word_output.append(AlignedSyllable(

@@ -1,14 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1150" height="1000" viewBox="0 0 1150 1000" font-family="Segoe UI, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1150" height="1120" viewBox="0 0 1150 1120" font-family="Segoe UI, Arial, sans-serif">
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
     </marker>
   </defs>
-  <rect width="1150" height="1000" fill="#f8fafc"/>
+  <rect width="1150" height="1120" fill="#f8fafc"/>
 
   <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 3 — BPM Detect</text>
   <text x="40" y="74" font-size="15" fill="#475569">cli/bpm_detect.py · detect_bpm()  (also run inline inside Stage 2; re-run here only if the resume file has no BpmResult)</text>
-  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Tempo + first-beat time via librosa, with a 30 s chunk stability check → BpmResult</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Tempo + first-beat time via librosa, with 30 s chunk + beat-grid phase stability checks → BpmResult</text>
 
   <!-- Input -->
   <rect x="60" y="120" width="360" height="100" rx="10" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 4"/>
@@ -68,47 +68,57 @@
   <!-- stability -->
   <line x1="700" y1="450" x2="700" y2="494" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
   <rect x="600" y="496" width="490" height="100" rx="10" fill="#fff7ed" stroke="#f59e0b" stroke-width="2"/>
-  <text x="620" y="526" font-size="14" font-weight="bold" fill="#9a3412">stable = every chunk within ± max(2 BPM, 5% of median)</text>
-  <text x="620" y="552" font-size="12.5" fill="#9a3412">90.1 is outside → stable = false → WARNING logged:</text>
+  <text x="620" y="526" font-size="14" font-weight="bold" fill="#9a3412">bpm_stable = every chunk within ± max(2 BPM, 5% of median)</text>
+  <text x="620" y="552" font-size="12.5" fill="#9a3412">90.1 is outside → bpm_stable = false → WARNING logged:</text>
   <text x="620" y="574" font-size="12.5" fill="#9a3412">"fixed Ultrastar beat grid may drift on this song"</text>
 
+  <!-- phase stability -->
+  <line x1="700" y1="596" x2="700" y2="614" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="60" y="616" width="1030" height="148" rx="10" fill="#fff7ed" stroke="#f59e0b" stroke-width="2"/>
+  <text x="80" y="646" font-size="15" font-weight="bold" fill="#9a3412">phase_stable — does the beat grid survive pauses? (_phases_stable + _onset_times + _beat_interval)</text>
+  <text x="80" y="672" font-size="12.5" fill="#334155">1. onsets = librosa.onset.onset_detect (hop 512) · true beat length = median of onset intervals in [0.6×, 1.1×] of 60/BPM</text>
+  <text x="100" y="694" font-size="12.5" fill="#334155">(intervals outside that range — rests, double beats — are excluded, so a slightly-off BPM stays unbiased)</text>
+  <text x="80" y="718" font-size="12.5" fill="#334155">2. any onset gap &gt; 2 beats is a pause; the time spanning it must be a whole number of beats (± 0.2 beat tolerance)</text>
+  <text x="80" y="742" font-size="12.5" fill="#334155">3. same BPM but the beat resumes at a different phase → sub-beat remainder → phase_stable = false, WARNING logged:</text>
+  <text x="100" y="760" font-size="11.5" fill="#9a3412">"beat stops and resumes with a different offset at the same BPM" — per-chunk BPM checks can't see a phase jump</text>
+
   <!-- first beat -->
-  <line x1="575" y1="596" x2="575" y2="638" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
-  <rect x="60" y="640" width="1030" height="180" rx="10" fill="#ffffff" stroke="#06b6d4" stroke-width="2"/>
-  <text x="80" y="668" font-size="15" font-weight="bold" fill="#155e75">First beat — where does the grid start? (becomes #GAP)</text>
-  <text x="80" y="694" font-size="12.5" fill="#334155">1. librosa.onset.onset_strength(y, hop 512) — onset envelope from energy increases</text>
-  <text x="80" y="716" font-size="12.5" fill="#334155">2. librosa.beat.beat_track(start_bpm=bpm) — beat tracker seeded with the estimated tempo → grid + phase</text>
-  <text x="80" y="738" font-size="12.5" fill="#334155">3. walk the locked grid back toward t = 0 in beat_size steps; the earliest grid position with a strong</text>
-  <text x="100" y="758" font-size="12.5" fill="#334155">onset (≥ 50% of max envelope, ± 2 frames tolerance) wins → first_beat_ms = 483</text>
-  <text x="80" y="784" font-size="12.5" fill="#334155">4. edge case: attack exactly at t = 0 (envelope only sees increases, can't see it) — if the grid phase is near 0 and the</text>
-  <text x="100" y="802" font-size="12.5" fill="#334155">raw RMS at t = 0 is ≥ 50% of the median onset RMS, count the downbeat as t ≈ 0</text>
+  <line x1="575" y1="764" x2="575" y2="802" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <rect x="60" y="804" width="1030" height="180" rx="10" fill="#ffffff" stroke="#06b6d4" stroke-width="2"/>
+  <text x="80" y="832" font-size="15" font-weight="bold" fill="#155e75">First beat — where does the grid start? (becomes #GAP)</text>
+  <text x="80" y="858" font-size="12.5" fill="#334155">1. librosa.onset.onset_strength(y, hop 512) — onset envelope from energy increases</text>
+  <text x="80" y="880" font-size="12.5" fill="#334155">2. librosa.beat.beat_track(start_bpm=bpm) — beat tracker seeded with the estimated tempo → grid + phase</text>
+  <text x="80" y="902" font-size="12.5" fill="#334155">3. walk the locked grid back toward t = 0 in beat_size steps; the earliest grid position with a strong</text>
+  <text x="100" y="922" font-size="12.5" fill="#334155">onset (≥ 50% of max envelope, ± 2 frames tolerance) wins → first_beat_ms = 483</text>
+  <text x="80" y="948" font-size="12.5" fill="#334155">4. edge case: attack exactly at t = 0 (envelope only sees increases, can't see it) — if the grid phase is near 0 and the</text>
+  <text x="100" y="966" font-size="12.5" fill="#334155">raw RMS at t = 0 is ≥ 50% of the median onset RMS, count the downbeat as t ≈ 0</text>
   <!-- mini grid -->
   <g>
-    <line x1="640" y1="745" x2="1060" y2="745" stroke="#94a3b8" stroke-width="2"/>
-    <line x1="640" y1="735" x2="640" y2="755" stroke="#64748b" stroke-width="1.5"/>
-    <line x1="745" y1="735" x2="745" y2="755" stroke="#64748b" stroke-width="1.5"/>
-    <line x1="850" y1="735" x2="850" y2="755" stroke="#64748b" stroke-width="1.5"/>
-    <line x1="955" y1="735" x2="955" y2="755" stroke="#64748b" stroke-width="1.5"/>
-    <line x1="1060" y1="735" x2="1060" y2="755" stroke="#64748b" stroke-width="1.5"/>
-    <circle cx="672" cy="745" r="6" fill="#06b6d4"/>
-    <text x="672" y="724" font-size="11" fill="#155e75" text-anchor="middle">beat 0 @ 483 ms = #GAP</text>
-    <text x="745" y="775" font-size="11" fill="#64748b" text-anchor="middle">b1</text>
-    <text x="850" y="775" font-size="11" fill="#64748b" text-anchor="middle">b2</text>
-    <text x="955" y="775" font-size="11" fill="#64748b" text-anchor="middle">b3</text>
-    <text x="1060" y="775" font-size="11" fill="#64748b" text-anchor="middle">b4</text>
-    <line x1="612" y1="745" x2="640" y2="745" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="3 3"/>
-    <text x="620" y="795" font-size="10.5" fill="#94a3b6" text-anchor="middle">t=0</text>
+    <line x1="640" y1="909" x2="1060" y2="909" stroke="#94a3b8" stroke-width="2"/>
+    <line x1="640" y1="899" x2="640" y2="919" stroke="#64748b" stroke-width="1.5"/>
+    <line x1="745" y1="899" x2="745" y2="919" stroke="#64748b" stroke-width="1.5"/>
+    <line x1="850" y1="899" x2="850" y2="919" stroke="#64748b" stroke-width="1.5"/>
+    <line x1="955" y1="899" x2="955" y2="919" stroke="#64748b" stroke-width="1.5"/>
+    <line x1="1060" y1="899" x2="1060" y2="919" stroke="#64748b" stroke-width="1.5"/>
+    <circle cx="672" cy="909" r="6" fill="#06b6d4"/>
+    <text x="672" y="888" font-size="11" fill="#155e75" text-anchor="middle">beat 0 @ 483 ms = #GAP</text>
+    <text x="745" y="939" font-size="11" fill="#64748b" text-anchor="middle">b1</text>
+    <text x="850" y="939" font-size="11" fill="#64748b" text-anchor="middle">b2</text>
+    <text x="955" y="939" font-size="11" fill="#64748b" text-anchor="middle">b3</text>
+    <text x="1060" y="939" font-size="11" fill="#64748b" text-anchor="middle">b4</text>
+    <line x1="612" y1="909" x2="640" y2="909" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="3 3"/>
+    <text x="620" y="959" font-size="10.5" fill="#94a3b6" text-anchor="middle">t=0</text>
   </g>
 
   <!-- fallback + output -->
-  <rect x="60" y="850" width="560" height="54" rx="10" fill="#fef2f2" stroke="#fca5a5"/>
-  <text x="80" y="874" font-size="13" font-weight="bold" fill="#b91c1c">Any exception  →  fallback</text>
-  <text x="80" y="894" font-size="12.5" fill="#b91c1c">BpmResult(bpm=120.0, first_beat_ms=0, stable=true)  (pipeline never dies on tempo)</text>
+  <rect x="60" y="1016" width="560" height="54" rx="10" fill="#fef2f2" stroke="#fca5a5"/>
+  <text x="80" y="1040" font-size="13" font-weight="bold" fill="#b91c1c">Any exception  →  fallback</text>
+  <text x="80" y="1060" font-size="12.5" fill="#b91c1c">BpmResult(bpm=120.0, first_beat_ms=0, stable=true)  (pipeline never dies on tempo)</text>
 
-  <rect x="650" y="850" width="440" height="54" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
-  <text x="670" y="874" font-size="13" font-weight="bold" fill="#166534">BpmResult</text>
-  <text x="670" y="894" font-size="12" fill="#14532d" font-family="Consolas, monospace">{bpm, first_beat_ms, stable, chunk_bpms}</text>
-  <line x1="340" y1="828" x2="340" y2="848" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
-  <line x1="870" y1="828" x2="870" y2="848" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
-  <text x="60" y="952" font-size="12.5" fill="#64748b">Used by Stage 5: bpm → export rate (×2), first_beat_ms → #GAP so notes land on the song's actual groove.</text>
+  <rect x="650" y="1016" width="440" height="54" rx="10" fill="#f0fdf4" stroke="#22c55e" stroke-width="2"/>
+  <text x="670" y="1040" font-size="13" font-weight="bold" fill="#166534">BpmResult</text>
+  <text x="670" y="1060" font-size="12" fill="#14532d" font-family="Consolas, monospace">{bpm, first_beat_ms, stable, chunk_bpms}</text>
+  <line x1="340" y1="984" x2="340" y2="1014" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="870" y1="984" x2="870" y2="1014" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="60" y="1108" font-size="12.5" fill="#64748b">Used by Stage 5: bpm → export rate (×2), first_beat_ms → #GAP so notes land on the song's actual groove.  stable = bpm_stable AND phase_stable.</text>
 </svg>

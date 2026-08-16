@@ -164,7 +164,7 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
             result.bpm_result = detect_bpm(bpm_input, config)
         bpm_result = result.bpm_result
         logger.info(
-            f"Step 3/5: BPM {bpm_result.bpm:.1f} "
+            f"Step 3/5: BPM {bpm_result.bpm:.5f} "
             f"(first beat at {bpm_result.first_beat_ms:.0f} ms, "
             f"stable={bpm_result.stable})"
         )
