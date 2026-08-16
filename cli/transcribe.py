@@ -144,33 +144,40 @@ def _compute_band_energy(audio, sr: int, hop_length: int, fmin: float = 60.0, fm
     """Compute per-frame RMS energy in the given frequency band via FFT.
 
     Uses a Hann-windowed frame of 1024 samples for good frequency resolution
-    (~15.6 Hz at 16 kHz sample rate).  Frames are aligned to crepe's hop grid.
+    (~15.6 Hz at 16 kHz sample rate).  Frame i covers samples
+    [i*hop - 512, i*hop + 512), i.e. it is centered on i*hop exactly like
+    torchcrepe's padded frame (it zero-pads WINDOW_SIZE // 2 = 512 samples on
+    both sides of its 1024-sample window); out-of-range positions are treated
+    as zero.  The raw frame count equals torchcrepe's (pad=True):
+    1 + len(audio) // hop_length.
 
     If ``n_frames`` is given, the result is truncated or zero-padded to match
     the caller's expected frame count (e.g. crepe's padded frame count).
     """
     import numpy as np
     frame_length = 1024
-    n = (len(audio) - frame_length) // hop_length + 1
-    if n <= 0:
-        result = np.zeros(n_frames or 0, dtype=np.float32)
-        return result
+    n = 1 + len(audio) // hop_length
 
-    window = np.hanning(frame_length)
-    idx = np.arange(n)[:, None] * hop_length + np.arange(frame_length)
-    frames = audio[idx] * window
+    if len(audio) == 0:
+        energies = np.zeros(n, dtype=np.float32)
+    else:
+        window = np.hanning(frame_length)
+        base = np.arange(n, dtype=np.int64) * hop_length - frame_length // 2
+        idx = base[:, None] + np.arange(frame_length, dtype=np.int64)[None, :]
+        valid = (idx >= 0) & (idx < len(audio))
+        frames = np.where(valid, audio[np.clip(idx, 0, len(audio) - 1)] * window[None, :], 0.0)
 
-    fft_results = np.fft.rfft(frames, axis=1)
-    fft_mags = np.abs(fft_results)
+        fft_results = np.fft.rfft(frames, axis=1)
+        fft_mags = np.abs(fft_results)
 
-    freq_res = sr / frame_length
-    bin_min = max(0, int(fmin / freq_res))
-    bin_max = int(fmax / freq_res) + 1
-    bin_max = min(bin_max, fft_mags.shape[1])
+        freq_res = sr / frame_length
+        bin_min = max(0, int(fmin / freq_res))
+        bin_max = int(fmax / freq_res) + 1
+        bin_max = min(bin_max, fft_mags.shape[1])
 
-    band_power = np.sum(fft_mags[:, bin_min:bin_max] ** 2, axis=1)
-    n_bins = max(bin_max - bin_min, 1)
-    energies = np.sqrt(band_power / n_bins).astype(np.float32)
+        band_power = np.sum(fft_mags[:, bin_min:bin_max] ** 2, axis=1)
+        n_bins = max(bin_max - bin_min, 1)
+        energies = np.sqrt(band_power / n_bins).astype(np.float32)
 
     # Truncate or zero-pad to match crepe's frame count
     if n_frames is not None:

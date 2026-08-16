@@ -4,7 +4,14 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from cli.bpm_detect import CHUNK_DURATION_S, _chunk_bpms, detect_bpm
+from cli.bpm_detect import (
+    CHUNK_DURATION_S,
+    _beat_interval,
+    _chunk_bpms,
+    _onset_times,
+    _phases_stable,
+    detect_bpm,
+)
 from cli.config import Config
 from cli.pipeline_types import BpmResult
 
@@ -113,6 +120,71 @@ class TestChunkBpms:
 
     def test_empty_audio(self):
         assert _chunk_bpms(np.zeros(0, dtype=np.float32), _SR) == []
+
+
+class TestPhaseStability:
+    def test_stop_and_resume_with_offset_is_not_stable(self, tmp_path):
+        # 120 BPM clicks for 30 s, a 2 s gap, then the same BPM resumes with
+        # a half-beat offset at t=32.25 s
+        y = np.zeros(int(80 * _SR), dtype=np.float32)
+        y[: 30 * _SR] += _click_track(30, 120, first_beat_s=0.5)
+        y[32 * _SR:] += _click_track(48, 120, first_beat_s=0.25)
+        result = detect_bpm(_write_wav(tmp_path, y, "offset.wav"), Config())
+
+        assert abs(result.bpm - 120) <= 5
+        # BPM check passes (both parts are 120 BPM), phase check must not
+        assert all(abs(c - 120) <= 5 for c in result.chunk_bpms)
+        assert result.stable is False
+
+    def test_stop_and_resume_same_phase_is_stable(self, tmp_path):
+        # Same as above, but the resumed beat lands on the original grid
+        y = np.zeros(int(80 * _SR), dtype=np.float32)
+        y[: 30 * _SR] += _click_track(30, 120, first_beat_s=0.5)
+        y[32 * _SR:] += _click_track(48, 120, first_beat_s=0.5)
+        result = detect_bpm(_write_wav(tmp_path, y, "same_phase.wav"), Config())
+
+        assert abs(result.bpm - 120) <= 5
+        assert result.stable is True
+
+    def test_onset_times(self):
+        y = _click_track(10, 120, first_beat_s=0.5)
+        times = _onset_times(y, _SR)
+
+        assert len(times) >= 15
+        # Clicks at 0.5, 1.0, ... all lie on the phase-0 grid
+        for t in times:
+            assert min(t % 0.5, 0.5 - t % 0.5) <= 0.05
+
+    def test_beat_interval_robust_to_bpm_error(self):
+        # Offsets are measured in onsets' own spacing, not the BPM estimate
+        times = np.arange(0.5, 20.0, 0.5)
+        assert abs(_beat_interval(times, 117.45) - 0.5) <= 1e-6
+
+    def test_phase_stable_no_pause(self):
+        times = np.arange(0.5, 20.0, 0.5)
+        assert _phases_stable(times, 120.0) is True
+
+    def test_phase_stable_resume_on_grid(self):
+        times = np.concatenate(
+            [np.arange(0.5, 15.0, 0.5), np.arange(18.5, 30.0, 0.5)]
+        )
+        assert _phases_stable(times, 120.0) is True
+
+    def test_phase_unstable_resume_off_grid(self):
+        times = np.concatenate(
+            [np.arange(0.5, 15.0, 0.5), np.arange(18.25, 30.0, 0.5)]
+        )
+        assert _phases_stable(times, 120.0) is False
+
+    def test_phase_ignores_short_breaks(self):
+        # A one-beat break is a rest, not a pause
+        times = np.concatenate(
+            [np.arange(0.5, 14.5, 0.5), np.arange(15.0, 20.0, 0.5)]
+        )
+        assert _phases_stable(times, 120.0) is True
+
+    def test_phase_no_onsets(self):
+        assert _phases_stable(np.array([]), 120.0) is True
 
 
 class TestBpmResult:
