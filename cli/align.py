@@ -29,6 +29,15 @@ GAP_EXTEND = 0.5
 # Monotonic counter so every _note_segments() invocation writes a unique plot file.
 _NOTE_PLOT_COUNTER = itertools.count()
 
+# Spectrogram analysis window in samples (bigger window -> finer frequency
+# resolution at the cost of time resolution). 2048 samples ~= 46 ms @ 44.1 kHz,
+# giving ~22 Hz frequency bins. Tunable if a shorter/longer slice is preferred.
+_FFT_WINDOW = 2048
+_FFT_HOP = 512
+# How much extra audio (seconds) to show on each side of the word range so the
+# spectrogram carries context beyond the word timestamps.
+_FFT_CONTEXT_SEC = 0.3
+
 
 # ── Character normalization ──────────────────────────────────────────────────
 
@@ -421,15 +430,18 @@ def _audio_spectrogram(
         return None
     import numpy as np
 
-    n_fft = 1024
-    hop = 256
     i0 = max(0, int(t0 * sample_rate))
     i1 = min(len(audio), int(t1 * sample_rate))
-    if i1 - i0 < n_fft:
+    available = i1 - i0
+    n_fft = _FFT_WINDOW
+    while n_fft > available and n_fft > 1024:
+        n_fft //= 2
+    hop = min(_FFT_HOP, n_fft)
+    if available < n_fft:
         return None
 
     seg = np.asarray(audio[i0:i1], dtype=np.float64)
-    n_frames = 1 + (len(seg) - n_fft) // hop
+    n_frames = 1 + max(0, len(seg) - n_fft) // hop
     idx = np.arange(n_fft)[None, :] + np.arange(n_frames)[:, None] * hop
     frames = seg[idx] * np.hanning(n_fft)
     spec = np.abs(np.fft.rfft(frames, axis=1))
@@ -438,7 +450,7 @@ def _audio_spectrogram(
 
     band = (freqs >= 50.0) & (freqs <= 5000.0)
     spec_db = 20.0 * np.log10(spec[:, band] + 1e-7)
-    return spec_db, times
+    return spec_db.T, times
 
 
 def _note_segments(
@@ -453,6 +465,8 @@ def _note_segments(
     word: str | None = None,
     audio: Any | None = None,
     sample_rate: int = 44100,
+    word_start: float | None = None,
+    word_end: float | None = None,
 ) -> list[tuple[float, float, int]]:
     """Trim a syllable to vocal activity and split sustained pitch changes.
 
@@ -503,7 +517,9 @@ def _note_segments(
 
             fig.suptitle(
                 f"_note_segments #{plot_index}   syllable={syllable!r}  word={word!r}   "
-                f"range={start:.3f}-{end:.3f}s   fallback_midi={fallback_midi}   "
+                f"syll={start:.3f}-{end:.3f}s  word={word_start if word_start is not None else start:.3f}-"
+                f"{word_end if word_end is not None else end:.3f}s   "
+                f"fallback_midi={fallback_midi}   "
                 f"decision={decision}",
                 fontsize=11,
             )
@@ -514,8 +530,21 @@ def _note_segments(
             else:
                 x0, x1 = start, end
 
-            pad = max(0.02, (x1 - x0) * 0.02)
-            ax_midi.set_xlim(x0 - pad, x1 + pad)
+            # The spectrogram (and shared x-range) covers the FULL word plus a
+            # context margin on each side, not just the syllable under analysis.
+            ws = word_start if word_start is not None else start
+            we = word_end if word_end is not None else end
+            if ws >= we:
+                ws, we = start, end
+            plot_t0 = ws - _FFT_CONTEXT_SEC
+            plot_t1 = we + _FFT_CONTEXT_SEC
+            ax_midi.set_xlim(plot_t0, plot_t1)
+
+            # Context guides: faint red = syllable being trimmed; dotted = word bounds.
+            for _axc in (ax_midi, ax_conf, ax_amp):
+                _axc.axvspan(start, end, color="red", alpha=0.06, zorder=0)
+                _axc.axvline(ws, color="0.45", ls=":", lw=0.8, zorder=0)
+                _axc.axvline(we, color="0.45", ls=":", lw=0.8, zorder=0)
 
             # ── MIDI panel ──
             if window:
@@ -619,7 +648,7 @@ def _note_segments(
             ax_conf.grid(True, alpha=0.25)
 
             # ── Amplitude panel (FFT spectrogram background) ──
-            spec = _audio_spectrogram(audio, sample_rate, x0, x1)
+            spec = _audio_spectrogram(audio, sample_rate, plot_t0, plot_t1)
             if spec is not None:
                 spec_db, spec_times = spec
                 ax_amp.imshow(
@@ -628,10 +657,13 @@ def _note_segments(
                     aspect="auto", origin="lower", cmap="magma",
                     interpolation="nearest", alpha=0.9, zorder=0,
                 )
-                ax_amp.set_ylim(0, 5000)
-                ax_amp.set_ylabel("frequency (Hz)")
+                ax_amp.set_yscale("log", base=2)
+                ax_amp.set_ylim(50, 5000)
+                ax_amp.set_yticks([64, 128, 256, 512, 1024, 2048, 4096])
+                ax_amp.set_yticklabels(["64", "128", "256", "512", "1k", "2k", "4k"])
+                ax_amp.set_ylabel("frequency (Hz, log2)")
                 ax_amp.set_title(
-                    "FFT spectrogram 50-5000 Hz (magma, dB) + amplitude overlay",
+                    f"FFT spectrogram 50-5000 Hz (win={_FFT_WINDOW} samples, log2 freq) + amplitude",
                     fontsize=9,
                 )
                 amps = [f.amplitude for f in window]
@@ -1213,6 +1245,8 @@ def align_lyrics(
                     word=wr["word"],
                     audio=audio,
                     sample_rate=config.sample_rate,
+                    word_start=wr["start"],
+                    word_end=wr["end"],
                 )
                 for segment_index, (note_start, note_end, note_midi) in enumerate(segments):
                     word_output.append(AlignedSyllable(
