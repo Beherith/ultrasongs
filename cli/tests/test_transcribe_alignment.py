@@ -15,7 +15,7 @@ from cli.transcribe import CREPE_SR, _compute_band_energy
 
 HOP = 160  # 10 ms hop at 16 kHz (crepe_hop_ms=10)
 FRAME = 1024  # torchcrepe WINDOW_SIZE
-FMIN, FMAX = 60.0, 1000.0
+FMIN, FMAX = 60.0, 4000.0
 
 
 def _crepe_frame_count(length: int) -> int:
@@ -45,7 +45,7 @@ def _reference_energy(audio: np.ndarray, i: int) -> float:
 
 
 def _burst_audio(burst_start: int = 16000, duration: int = 640, total: int = 160000) -> np.ndarray:
-    """Silence with a 220 Hz windowed burst, entirely inside the 60-1000 Hz band."""
+    """Silence with a 220 Hz windowed burst, entirely inside the 60-4000 Hz band."""
     audio = np.zeros(total, dtype=np.float32)
     t = np.arange(duration)
     audio[burst_start:burst_start + duration] = (

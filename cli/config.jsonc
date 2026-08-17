@@ -60,6 +60,21 @@
   // are faster but may miss short pitch transitions and syllable boundaries.
   "crepe_hop_ms": 10,
 
+  // Frequency band (in Hz) used to compute the per-frame vocal loudness /
+  // amplitude proxy during pitch analysis. The band-limited RMS energy is
+  // derived from an FFT of each frame and restricted to this range, then
+  // normalized to [0, 1] across the song.
+  //
+  // The band should cover the fundamental and the upper harmonics/formants of
+  // a sung voice. The lower bound (60 Hz) sits just below the lowest expected
+  // pitch. The upper bound (4000 Hz) is what matters: the harmonics of a sung
+  // note and the formants that carry perceived loudness extend well past
+  // 1 kHz, so a lower ceiling systematically under-measures higher (e.g.
+  // female) voices. Lower the upper bound (e.g. 1000) only if you want to
+  // emphasize low energy and ignore brightness.
+  "band_energy_min_hz": 60.0,
+  "band_energy_max_hz": 4000.0,
+
   // Pause detection: minimum silence duration in milliseconds.
   // 400ms is long enough to skip inter-word gaps (typically 50-200ms) while still
   // catching meaningful pauses between phrases. Increase this if the pipeline is
@@ -153,9 +168,20 @@
   // Assumed frame spacing in milliseconds as a fallback when computing note end
   // times from fewer than two active frames. Normally the actual spacing of the
   // CREPE frames (crepe_hop_ms) is used.
-  "note_frame_step_ms": 10,
+   "note_frame_step_ms": 10,
 
-  // FFmpeg audio bitrate for the extracted MP3.
+   // Enable per-syllable diagnostic plots during alignment. When true, every
+   // invocation of the note-segmentation step writes a detailed matplotlib
+   // figure to <temp>/note_segments_plots/. Each figure shows the raw pitch
+   // frames, confidence/amplitude against their thresholds, the vocal islands,
+   // the smoothed median pitch, the pitch-change splits, the final notes, and a
+   // full decision/reasoning log. It also renders an FFT spectrogram (50-5000
+   // Hz) as the background of the amplitude panel. This is for debugging only:
+   // it can be slow and produces many PNG files, so keep it false during normal
+   // use.
+   "note_segment_plots": true,
+
+   // FFmpeg audio bitrate for the extracted MP3.
   // 128kbps is sufficient for pitch detection, BPM analysis, and transcription
   // without wasting disk space on intermediate files. Using a higher bitrate
   // (e.g., "192k" or "256k") won't improve results meaningfully but will increase

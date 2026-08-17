@@ -19,6 +19,8 @@ class TestConfigDefaults:
         assert cfg.pitch_min_hz == 65.41
         assert cfg.pitch_max_hz == 1046.5
         assert cfg.crepe_hop_ms == 10
+        assert cfg.band_energy_min_hz == 60.0
+        assert cfg.band_energy_max_hz == 4000.0
         assert cfg.pause_min_silence_ms == 400
         assert cfg.pause_threshold_pct == 5.0
         assert cfg.gap_lead_in_ms == 500

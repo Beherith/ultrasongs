@@ -177,6 +177,7 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
             result.pauses,
             config,
             pitch_frames=result.pitch_frames,
+            audio_path=Path(result.vocals_path),
         )
         logger.info("Step 4/5: Alignment complete")
 

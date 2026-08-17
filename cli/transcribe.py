@@ -140,7 +140,7 @@ def separate_all(audio, sr: int, demucs_model: str = "htdemucs"):
 
 # ── Pitch analysis ──────────────────────────────────────────────────────────
 
-def _compute_band_energy(audio, sr: int, hop_length: int, fmin: float = 60.0, fmax: float = 1000.0, n_frames: int | None = None):
+def _compute_band_energy(audio, sr: int, hop_length: int, fmin: float = 60.0, fmax: float = 4000.0, n_frames: int | None = None):
     """Compute per-frame RMS energy in the given frequency band via FFT.
 
     Uses a Hann-windowed frame of 1024 samples for good frequency resolution
@@ -195,7 +195,7 @@ def _compute_band_energy(audio, sr: int, hop_length: int, fmin: float = 60.0, fm
     return energies
 
 
-def analyze_pitch(vocals, sr: int, fmin: float = 65.41, fmax: float = 1046.5, hop_ms: int = 10):
+def analyze_pitch(vocals, sr: int, fmin: float = 65.41, fmax: float = 1046.5, hop_ms: int = 10, band_min_hz: float = 60.0, band_max_hz: float = 4000.0):
     """Run torchcrepe on the entire vocals track."""
     import numpy as np
     import torch
@@ -230,8 +230,10 @@ def analyze_pitch(vocals, sr: int, fmin: float = 65.41, fmax: float = 1046.5, ho
     pct = 100 * (periodicity[0].cpu().numpy() > 0.5).sum() / max(n, 1)
     logger.info(f"Pitch analysis: {n} frames, {pct:.0f}% confident")
 
-    # Compute per-frame band-limited energy (60-1000 Hz) as amplitude proxy
-    energies = _compute_band_energy(audio_t.numpy(), CREPE_SR, hop_length, n_frames=n)
+    # Compute per-frame band-limited energy as a loudness/amplitude proxy.
+    # The band spans the fundamental plus the upper harmonics/formants of a
+    # sung voice so higher voices are not systematically under-measured.
+    energies = _compute_band_energy(audio_t.numpy(), CREPE_SR, hop_length, fmin=band_min_hz, fmax=band_max_hz, n_frames=n)
 
     # Normalize to [0, 1] for uniformity across files
     e_max = energies.max()
@@ -554,6 +556,8 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
         fmin=config.pitch_min_hz,
         fmax=config.pitch_max_hz,
         hop_ms=config.crepe_hop_ms,
+        band_min_hz=config.band_energy_min_hz,
+        band_max_hz=config.band_energy_max_hz,
     )
 
     gc.collect()

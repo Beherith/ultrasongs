@@ -32,6 +32,8 @@ class Config:
     pitch_min_hz: float = 65.41
     pitch_max_hz: float = 1046.5
     crepe_hop_ms: int = 10
+    band_energy_min_hz: float = 60.0
+    band_energy_max_hz: float = 4000.0
     pause_min_silence_ms: int = 400
     pause_threshold_pct: float = 5.0
     gap_lead_in_ms: int = 500
@@ -51,6 +53,7 @@ class Config:
     note_pitch_tolerance: int = 1
     note_min_duration_ms: int = 60
     note_frame_step_ms: int = 10
+    note_segment_plots: bool = False
     ffmpeg_audio_bitrate: str = "128k"
     output_dir: str = "./output"
     temp_dir: str = "./tmp"
@@ -94,6 +97,8 @@ def load_config(config_path: str | None = None) -> Config:
         "pitch_min_hz": float,
         "pitch_max_hz": float,
         "crepe_hop_ms": int,
+        "band_energy_min_hz": float,
+        "band_energy_max_hz": float,
         "pause_min_silence_ms": int,
         "pause_threshold_pct": float,
         "gap_lead_in_ms": int,
@@ -113,6 +118,7 @@ def load_config(config_path: str | None = None) -> Config:
         "note_pitch_tolerance": int,
         "note_min_duration_ms": int,
         "note_frame_step_ms": int,
+        "note_segment_plots": bool,
         "ffmpeg_audio_bitrate": str,
         "output_dir": str,
         "temp_dir": str,

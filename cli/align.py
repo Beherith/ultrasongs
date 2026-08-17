@@ -4,6 +4,7 @@ Ported from app/lib/align.ts (704 lines).
 """
 
 import bisect
+import itertools
 import json
 import re
 import unicodedata
@@ -15,6 +16,7 @@ from cli.config import Config
 from cli.logging_setup import get_logger
 from cli.syllabify import split_word
 from cli.pipeline_types import AlignedSyllable, Pause, PitchFrame, WordTimestamp
+from matplotlib import pyplot as plt
 
 logger = get_logger("cli.align")
 
@@ -23,6 +25,9 @@ logger = get_logger("cli.align")
 MATCH_SCORE = 4
 GAP_OPEN = 4
 GAP_EXTEND = 0.5
+
+# Monotonic counter so every _note_segments() invocation writes a unique plot file.
+_NOTE_PLOT_COUNTER = itertools.count()
 
 
 # ── Character normalization ──────────────────────────────────────────────────
@@ -400,6 +405,42 @@ def _activity_threshold(frames: list[PitchFrame], config: Config) -> float:
     return noise + max(0.0, signal - noise) * config.activity_threshold_ratio
 
 
+def _audio_spectrogram(
+    audio: Any,
+    sample_rate: int,
+    t0: float,
+    t1: float,
+) -> tuple[Any, Any] | None:
+    """Compute a dB-scaled FFT spectrogram (50-5000 Hz) over the time window.
+
+    Returns ``(spec_db, times)`` where ``spec_db`` has the 50-5000 Hz bands
+    along the first axis and ``times`` are the absolute frame times in seconds.
+    Returns ``None`` when no usable audio is available.
+    """
+    if audio is None or sample_rate <= 0 or t1 <= t0:
+        return None
+    import numpy as np
+
+    n_fft = 1024
+    hop = 256
+    i0 = max(0, int(t0 * sample_rate))
+    i1 = min(len(audio), int(t1 * sample_rate))
+    if i1 - i0 < n_fft:
+        return None
+
+    seg = np.asarray(audio[i0:i1], dtype=np.float64)
+    n_frames = 1 + (len(seg) - n_fft) // hop
+    idx = np.arange(n_fft)[None, :] + np.arange(n_frames)[:, None] * hop
+    frames = seg[idx] * np.hanning(n_fft)
+    spec = np.abs(np.fft.rfft(frames, axis=1))
+    freqs = np.fft.rfftfreq(n_fft, 1.0 / sample_rate)
+    times = t0 + (np.arange(n_frames) * hop) / sample_rate
+
+    band = (freqs >= 50.0) & (freqs <= 5000.0)
+    spec_db = 20.0 * np.log10(spec[:, band] + 1e-7)
+    return spec_db, times
+
+
 def _note_segments(
     frames: list[PitchFrame],
     start: float,
@@ -409,14 +450,231 @@ def _note_segments(
     config: Config,
     note_log: IO[str],
     syllable: str | None = None,
-    word: str | None = None
+    word: str | None = None,
+    audio: Any | None = None,
+    sample_rate: int = 44100,
 ) -> list[tuple[float, float, int]]:
-    """Trim a syllable to vocal activity and split sustained pitch changes."""
+    """Trim a syllable to vocal activity and split sustained pitch changes.
+
+    On every invocation a detailed diagnostic figure is rendered and saved to
+    ``<temp>/note_segments_plots/``. The figure overlays every input frame,
+    each threshold, the active/selected frames, islands, the smoothed median
+    pitch, pre-merge pitch runs, the pitch-change split points, the merged
+    notes, the final returned notes, and a full decision/reasoning log.
+    """
+    messages: list[str] = []
+
     def log(msg: str) -> None:
+        messages.append(msg)
         note_log.write(msg + "\n")
-    log(
-        f"Processing syllable [{syllable}] of word [{word}]"
-    )
+
+    # Plot state accumulators. Populated as the algorithm progresses so any
+    # early-return still renders a complete picture of everything decided so far.
+    window: list[PitchFrame] = []
+    active: list[PitchFrame] = []
+    islands: list[list[PitchFrame]] = []
+    selected: list[PitchFrame] = []
+    smoothed: list[tuple[PitchFrame, int]] = []
+    runs: list[list[tuple[PitchFrame, int]]] = []
+    merged: list[list[tuple[PitchFrame, int]]] = []
+    result: list[tuple[float, float, int]] = []
+    split_points: list[dict[str, Any]] = []
+    decision = "in progress"
+
+    def _draw() -> None:
+        if not config.note_segment_plots:
+            return
+        try:
+            plot_dir = config.temp_path / "note_segments_plots"
+            plot_dir.mkdir(parents=True, exist_ok=True)
+            plot_index = next(_NOTE_PLOT_COUNTER)
+
+            fig = plt.figure(figsize=(16, 10))
+            gs = fig.add_gridspec(
+                4, 1,
+                height_ratios=[3.0, 1.6, 1.6, 2.0],
+                hspace=0.4,
+                left=0.06, right=0.98, top=0.92, bottom=0.05,
+            )
+            ax_midi = fig.add_subplot(gs[0])
+            ax_conf = fig.add_subplot(gs[1], sharex=ax_midi)
+            ax_amp = fig.add_subplot(gs[2], sharex=ax_midi)
+            ax_txt = fig.add_subplot(gs[3])
+
+            fig.suptitle(
+                f"_note_segments #{plot_index}   syllable={syllable!r}  word={word!r}   "
+                f"range={start:.3f}-{end:.3f}s   fallback_midi={fallback_midi}   "
+                f"decision={decision}",
+                fontsize=11,
+            )
+
+            if window:
+                wt = [f.time for f in window]
+                x0, x1 = min(wt), max(wt)
+            else:
+                x0, x1 = start, end
+
+            pad = max(0.02, (x1 - x0) * 0.02)
+            ax_midi.set_xlim(x0 - pad, x1 + pad)
+
+            # ── MIDI panel ──
+            if window:
+                sc = ax_midi.scatter(
+                    [f.time for f in window],
+                    [f.midi for f in window],
+                    c=[f.confidence for f in window],
+                    cmap="viridis", s=18, alpha=0.85, edgecolors="k", linewidths=0.3,
+                    label="window frames (color=confidence)", zorder=2,
+                )
+                fig.colorbar(sc, ax=ax_midi, pad=0.01, label="crepe confidence")
+                sel_times = {f.time for f in active}
+                ax_midi.scatter(
+                    [f.time for f in active],
+                    [f.midi for f in active],
+                    c="red", marker="x", s=45, zorder=4,
+                    label="selected (active) frames",
+                )
+            else:
+                sel_times = set()
+                ax_midi.text(x0, 4, "no pitch frames in window",
+                             ha="left", va="center", fontsize=9, color="red")
+
+            if smoothed:
+                ax_midi.step(
+                    [f.time for f, _ in smoothed],
+                    [m for _, m in smoothed],
+                    where="mid", color="blue", lw=1.6, zorder=3,
+                    label=f"smoothed median midi (win={config.note_smooth_window})",
+                )
+
+            if islands:
+                island_colors = ["tab:blue", "tab:orange", "tab:gray", "tab:purple", "tab:brown"]
+                for i, isl in enumerate(islands):
+                    mid_t = (isl[0].time + isl[-1].time) / 2
+                    energy = sum(f.amplitude * f.confidence for f in isl)
+                    is_sel = set(map(id, isl)) == set(map(id, active))
+                    ax_midi.axvspan(
+                        isl[0].time, isl[-1].time,
+                        color=island_colors[i % len(island_colors)], alpha=0.12, zorder=0,
+                    )
+                    ax_midi.annotate(
+                        f"I{i} n={len(isl)} e={energy:.3f}" + (" (SEL)" if is_sel else ""),
+                        xy=(mid_t, ax_midi.get_ylim()[1]),
+                        ha="center", va="bottom", fontsize=6.5,
+                        color="white",
+                        bbox=dict(boxstyle="round,pad=0.2",
+                                  fc=island_colors[i % len(island_colors)], ec="k"),
+                    )
+
+            for sp in split_points:
+                ax_midi.axvline(sp["time"], color="crimson", ls="--", lw=0.9,
+                                alpha=0.85, zorder=1)
+                ax_midi.annotate(
+                    f"SPLIT\n{sp['text']}",
+                    xy=(sp["time"], ax_midi.get_ylim()[1]),
+                    xytext=(sp["time"], ax_midi.get_ylim()[1] + 0.2),
+                    ha="center", va="bottom", fontsize=6, color="crimson",
+                )
+
+            if result:
+                note_colors = ["#2ecc71", "#e67e22", "#9b59b6", "#1abc9c", "#3498db"]
+                for i, (ns, ne, nm) in enumerate(result):
+                    col = note_colors[i % len(note_colors)]
+                    ax_midi.add_patch(plt.Rectangle(
+                        (ns, nm - 0.5), ne - ns, 1.0,
+                        facecolor=col, alpha=0.35, edgecolor=col, lw=1.8, zorder=1,
+                    ))
+                    ax_midi.text((ns + ne) / 2, nm, f"N{i + 1}", ha="center", va="center",
+                                 fontsize=8, fontweight="bold", zorder=5,
+                                 bbox=dict(boxstyle="round,pad=0.1", fc="white", ec=col))
+
+            ax_midi.axhline(fallback_midi, color="green", ls=":", lw=1.2,
+                            label=f"fallback_midi={fallback_midi}")
+            all_midi = [f.midi for f in window] + [m for _, m in smoothed] + [r[2] for r in result] + [fallback_midi]
+            ax_midi.set_ylim(min(all_midi) - 1, max(all_midi) + 1.5)
+            ax_midi.set_ylabel("midi note")
+            ax_midi.set_title("MIDI pitch: raw frames, smoothed median, islands, splits, final notes",
+                              fontsize=9)
+            ax_midi.grid(True, alpha=0.25)
+            ax_midi.legend(loc="upper right", fontsize=7, framealpha=0.9)
+
+            # ── Confidence panel ──
+            if window:
+                ax_conf.scatter(
+                    [f.time for f in window],
+                    [f.confidence for f in window],
+                    c=["red" if f.time in sel_times else "gray" for f in window],
+                    s=12, alpha=0.7, zorder=2,
+                    label="frame confidence (red=selected)",
+                )
+                ax_conf.axhline(config.note_min_confidence, color="orange", ls="-", lw=1.3,
+                                label=f"note_min_confidence={config.note_min_confidence}")
+                ax_conf.axhline(config.note_fallback_confidence, color="purple", ls="--", lw=1.3,
+                                label=f"note_fallback_confidence={config.note_fallback_confidence}")
+                ax_conf.set_ylim(0, 1.05)
+                ax_conf.legend(loc="upper right", fontsize=7, framealpha=0.9)
+            else:
+                ax_conf.text(x0, 0.5, "no frames", ha="left", fontsize=8, color="red")
+            ax_conf.set_ylabel("confidence")
+            ax_conf.grid(True, alpha=0.25)
+
+            # ── Amplitude panel (FFT spectrogram background) ──
+            spec = _audio_spectrogram(audio, sample_rate, x0, x1)
+            if spec is not None:
+                spec_db, spec_times = spec
+                ax_amp.imshow(
+                    spec_db,
+                    extent=[spec_times[0], spec_times[-1], 50.0, 5000.0],
+                    aspect="auto", origin="lower", cmap="magma",
+                    interpolation="nearest", alpha=0.9, zorder=0,
+                )
+                ax_amp.set_ylim(0, 5000)
+                ax_amp.set_ylabel("frequency (Hz)")
+                ax_amp.set_title(
+                    "FFT spectrogram 50-5000 Hz (magma, dB) + amplitude overlay",
+                    fontsize=9,
+                )
+                amps = [f.amplitude for f in window]
+                amps_max = max(amps) if amps else 0.0
+                ax_amp2 = ax_amp.twinx()
+                ax_amp2.plot([f.time for f in window], amps, color="cyan", lw=1.3,
+                             zorder=3, label="amplitude envelope")
+                ax_amp2.axhline(amplitude_threshold, color="lime", ls="--", lw=1.4,
+                                zorder=3, label=f"amplitude_threshold={amplitude_threshold:.4f}")
+                ax_amp2.set_ylabel("amplitude", color="cyan")
+                ax_amp2.set_ylim(0, max(1e-3, amps_max * 1.25))
+                ax_amp2.legend(loc="upper right", fontsize=6, framealpha=0.9)
+            else:
+                if window:
+                    ax_amp.step([f.time for f in window], [f.amplitude for f in window],
+                                where="mid", color="teal", lw=1.0, zorder=2,
+                                label="frame amplitude")
+                    ax_amp.fill_between([f.time for f in window], 0,
+                                        [f.amplitude for f in window],
+                                        color="teal", alpha=0.15, zorder=1)
+                ax_amp.axhline(amplitude_threshold, color="green", ls="--", lw=1.3,
+                               label=f"amplitude_threshold={amplitude_threshold:.4f}")
+                ax_amp.set_ylabel("amplitude")
+                ax_amp.legend(loc="upper right", fontsize=7, framealpha=0.9)
+            ax_amp.set_xlabel("time (s)")
+            ax_amp.grid(True, alpha=0.25)
+
+            # ── Decision log panel ──
+            ax_txt.axis("off")
+            ax_txt.set_title(f"Decision log & reasoning  ({len(messages)} messages)",
+                             fontsize=9, loc="left")
+            log_text = "\n".join(messages) if messages else "(no decisions recorded)"
+            ax_txt.text(0.01, 0.99, log_text, fontsize=7.5, family="monospace",
+                        va="top", ha="left")
+
+            safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in f"{word or 'w'}/{syllable or 's'}")
+            fname = f"{plot_index:04d}_{safe}_{start:.3f}_{end:.3f}.png"
+            fig.savefig(plot_dir / fname, dpi=140)
+            plt.close(fig)
+        except Exception as exc:  # pragma: no cover - plotting must never break the pipeline
+            logger.error("[note_segments] plot render failed: %s", exc)
+
+    log(f"Processing syllable [{syllable}] of word [{word}]")
     dropout_gap = config.note_dropout_gap_ms / 1000
     min_duration = config.note_min_duration_ms / 1000
     window = [f for f in frames if start <= f.time <= end and f.midi > 0]
@@ -443,16 +701,18 @@ def _note_segments(
             f"{len(active)} frames qualify"
         )
     if not active:
+        decision = "no active frames -> untrimmed fallback note"
         log(
             f"[note_segments] reason=no active frames in window; "
             f"decision=return untrimmed fallback note "
             f"({start:.3f}-{end:.3f}s, midi={fallback_midi})"
         )
+        _draw()
         return [(start, end, fallback_midi)]
 
     # Keep the strongest contiguous vocal island. Short confidence/energy
     # dropouts up to note_dropout_gap_ms are treated as part of the same sung sound.
-    islands: list[list[PitchFrame]] = []
+    islands = []
     for frame in active:
         if not islands or frame.time - islands[-1][-1].time > dropout_gap:
             islands.append([frame])
@@ -472,6 +732,7 @@ def _note_segments(
         islands,
         key=lambda island: sum(f.amplitude * f.confidence for f in island),
     )
+    decision = f"keep strongest of {len(islands)} island(s)"
     log(
         f"[note_segments] decision=keep strongest island: "
         f"{len(selected)} frames {selected[0].time:.3f}-{selected[-1].time:.3f}s "
@@ -481,13 +742,13 @@ def _note_segments(
 
     # A median window removes vibrato/jitter before finding pitch changes.
     half = config.note_smooth_window // 2
-    smoothed: list[tuple[PitchFrame, int]] = []
+    smoothed = []
     for i, frame in enumerate(active):
         nearby = active[max(0, i - half):i + half + 1]
         midi = _median([f.midi for f in nearby]) or fallback_midi
         smoothed.append((frame, midi))
 
-    runs: list[list[tuple[PitchFrame, int]]] = []
+    runs = []
     for item in smoothed:
         if not runs:
             runs.append([item])
@@ -505,6 +766,11 @@ def _note_segments(
                     f"gap={gap * 1000:.0f}ms (dropout_allowed={dropout_gap * 1000:.0f}ms), "
                     f"drift={abs(item[1] - run_midi)} (tolerance={config.note_pitch_tolerance})"
                 )
+                split_points.append({
+                    "time": item[0].time,
+                    "text": f"drift={abs(item[1] - run_midi)} tol={config.note_pitch_tolerance} "
+                            f"gap={gap * 1000:.0f}ms",
+                })
             runs.append([item])
     log(
         f"[note_segments] pitch runs before merge: "
@@ -537,13 +803,14 @@ def _note_segments(
         )
         merged[1] = merged[0] + merged[1]
         merged.pop(0)
+    decision = f"{len(runs)} runs merged into {len(merged)} notes"
     log(f"[note_segments] merged note count: {len(runs)} runs -> {len(merged)} notes")
 
     frame_step = config.note_frame_step_ms / 1000
     if len(active) > 1:
         frame_step = max(0.001, active[1].time - active[0].time)
 
-    result: list[tuple[float, float, int]] = []
+    result = []
     for idx, run in enumerate(merged):
         weights = [max(0.001, frame.amplitude * frame.confidence) for frame, _ in run]
         midi = round(sum(value * weight for (_, value), weight in zip(run, weights)) / sum(weights))
@@ -565,15 +832,19 @@ def _note_segments(
             )
 
     if not result:
+        decision = "all runs clamped empty -> fallback note"
         log(
             f"[note_segments] all merged runs clamped empty; "
             f"decision=return fallback note ({start:.3f}-{end:.3f}s, midi={fallback_midi})"
         )
+        _draw()
         return [(start, end, fallback_midi)]
+    decision = f"return {len(result)} note(s)"
     log(
         f"[note_segments] decision=return {len(result)} note(s) for "
         f"syllable {start:.3f}-{end:.3f}s"
     )
+    _draw()
     return result
 
 
@@ -586,6 +857,7 @@ def align_lyrics(
     pauses: list[Pause] | None = None,
     config: Config | None = None,
     pitch_frames: list[PitchFrame] | None = None,
+    audio_path: Path | None = None,
 ) -> list[AlignedSyllable]:
     """Align lyric text to Whisper word timestamps using Smith-Waterman.
 
@@ -605,6 +877,10 @@ def align_lyrics(
         pauses: Detected silence regions.
         config: Pipeline configuration.
         pitch_frames: Complete CREPE pitch, confidence, and amplitude timeline.
+        audio_path: Optional vocal-stem path (the htdemucs-separated vocals).
+            When ``config.note_segment_plots`` is enabled, this signal is
+            decoded once so each note-segment plot can render an FFT
+            spectrogram (of the vocals only) as its amplitude-panel background.
 
     Returns:
         List of aligned syllables with timestamps and MIDI notes.
@@ -874,6 +1150,20 @@ def align_lyrics(
     # frame lookup is a slice of a bisect range instead of a linear filter.
     pitch_times = [f.time for f in pitch_frames] if pitch_frames else []
 
+    # Decode the raw audio once (only when plots are enabled) so the
+    # note-segment figures can render an FFT spectrogram background.
+    audio: Any | None = None
+    if config.note_segment_plots and audio_path is not None:
+        try:
+            import numpy as np
+            from cli.ffmpeg_pcm import extract_pcm
+
+            pcm = extract_pcm(audio_path, config.sample_rate)
+            audio = np.frombuffer(pcm, dtype=np.float32)
+        except Exception as exc:
+            logger.warning("Note-segment spectrogram unavailable (%s)", exc)
+            audio = None
+
     # Route [note_segments] diagnostics to a text file instead of the console.
     config.temp_path.mkdir(parents=True, exist_ok=True)
     note_log_path = config.temp_path / "note_segments.txt"
@@ -920,7 +1210,9 @@ def align_lyrics(
                     config,
                     note_log,
                     syllable=lyric_syllable,
-                    word = wr["word"]
+                    word=wr["word"],
+                    audio=audio,
+                    sample_rate=config.sample_rate,
                 )
                 for segment_index, (note_start, note_end, note_midi) in enumerate(segments):
                     word_output.append(AlignedSyllable(
