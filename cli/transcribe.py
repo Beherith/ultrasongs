@@ -1,4 +1,4 @@
-"""Transcription pipeline: Demucs separation, torchcrepe pitch, Whisper transcription.
+"""Transcription pipeline: Demucs, WhisperX forced alignment, and torchcrepe.
 
 Refactored from python/transcribe_service.py into importable CLI modules.
 Heavy dependencies are lazy-loaded to allow import without GPU packages.
@@ -6,14 +6,12 @@ Heavy dependencies are lazy-loaded to allow import without GPU packages.
 
 import gc
 import json
-import os
-import subprocess
 from pathlib import Path
 from typing import Any
 
 from cli.config import Config
 from cli.logging_setup import get_logger
-from cli.pipeline_types import Pause, PitchFrame, TranscribeResult, WordTimestamp
+from cli.pipeline_types import CharacterTimestamp, Pause, PitchFrame, TranscribeResult, WordTimestamp
 
 logger = get_logger("cli.transcribe")
 
@@ -283,7 +281,7 @@ def build_pitch_frames(times, freqs, confs, energies) -> list[PitchFrame]:
 
 
 def add_pitch_to_words(raw_words: list[dict[str, Any]], times, freqs, confs, energies) -> list[WordTimestamp]:
-    """Attach pitch data to raw Whisper word results."""
+    """Attach pitch data to forced-aligned WhisperX words."""
     words = []
     for w in raw_words:
         start = float(w["start"])
@@ -294,6 +292,7 @@ def add_pitch_to_words(raw_words: list[dict[str, Any]], times, freqs, confs, ene
             end=end,
             midi=get_midi_for_word(times, freqs, confs, start, end),
             pitch_frames=get_pitch_frames_for_word(times, freqs, confs, energies, start, end),
+            characters=[CharacterTimestamp.from_dict(char) for char in w.get("characters", [])],
         ))
     return words
 
@@ -345,61 +344,18 @@ def detect_pauses(
     return pauses
 
 
-# ── Whisper transcription ───────────────────────────────────────────────────
-
-def _transcribe_with_whisperx(vocals_wav_path: str, prompt: str = "", whisperx_model: str = "small") -> tuple[list[dict[str, Any]], str]:
-    """Transcribe using WhisperX via subprocess (same as web service)."""
-    here = Path(__file__).parent
-    worker = here.parent / "python" / "whisperx_worker.py"
-    default_python = here.parent / ".venv" / "Scripts" / "python.exe"
-    python_exe = Path(os.environ.get("WHISPERX_PYTHON", str(default_python)))
-
-    if not python_exe.exists():
-        raise RuntimeError(f"WhisperX Python not found: {python_exe}")
-    if not worker.exists():
-        raise RuntimeError(f"WhisperX worker not found: {worker}")
-
-    env = os.environ.copy()
-    env.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
-
-    cmd = [
-        str(python_exe), str(worker),
-        "--audio", vocals_wav_path,
-        "--model", whisperx_model,
-    ]
-    language = os.environ.get("WHISPERX_LANGUAGE", "")
-    if language:
-        cmd.extend(["--language", language])
-    if prompt:
-        cmd.extend(["--prompt", prompt])
-
-    proc = subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    if proc.stderr:
-        logger.warning(proc.stderr.strip())
-    if proc.returncode != 0:
-        raise RuntimeError(f"WhisperX failed (exit {proc.returncode}): {proc.stderr.strip()}")
-
-    payload = json.loads(proc.stdout)
-    return payload.get("words", []), payload.get("language") or language or "en"
-
-
 # ── Main transcription function ─────────────────────────────────────────────
 
-def _dump_whisper_passes(
+def _dump_whisperx_passes(
     config: Config,
     base_name: str,
     mp3_path: Path,
     n_runs: int,
     pass_records: list[dict[str, Any]],
 ) -> None:
-    """Write each pass's Whisper transcription to a JSON file in the temp dir."""
+    """Write each pass's WhisperX alignment to a JSON file in the temp dir."""
     temp_path = config.temp_path
-    dump_path = temp_path / f"{base_name}_whisper_passes.json"
+    dump_path = temp_path / f"{base_name}_whisperx_passes.json"
     payload = {
         "source": str(mp3_path),
         "num_runs": n_runs,
@@ -411,9 +367,9 @@ def _dump_whisper_passes(
             json.dumps(payload, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        logger.info(f"Saved per-pass Whisper transcription to {dump_path}")
+        logger.info(f"Saved per-pass WhisperX alignment to {dump_path}")
     except OSError as exc:
-        logger.warning(f"Could not write Whisper passes dump {dump_path}: {exc}")
+        logger.warning(f"Could not write WhisperX passes dump {dump_path}: {exc}")
 
 
 def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> TranscribeResult:
@@ -425,7 +381,7 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     DEVICE = _get_device(config.device)
 
     logger.info(f"Starting transcription: {mp3_path}")
-    logger.info(f"Device: {DEVICE}, Whisper model: {config.whisper_model}")
+    logger.info(f"Device: {DEVICE}, WhisperX model: {config.whisperx_model}")
 
     base = mp3_path.with_suffix("")
     vocals_mp3 = base.with_name(base.name + "_vocals.mp3")
@@ -441,20 +397,31 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
 
     # Step 2: Separate + transcribe, repeated.
     # Demucs is not fully deterministic, so each pass yields a slightly different
-    # vocal/instrumental split; the per-pass Whisper outputs are consolidated.
+    # vocal/instrumental split; the per-pass WhisperX outputs are consolidated.
     logger.info(
         f"Step 2/6: Separating + transcribing "
         f"({'single run' if n_runs == 1 else f'{n_runs} runs + consolidation'})…"
     )
-    from cli.consensus import consolidate_whisper_runs
+    from cli.consensus import consolidate_whisperx_runs
+    from cli.whisperx_transcribe import load_asr_model, load_audio, transcribe_and_align
 
-    # Models are loaded once and reused across every pass — Demucs first, then
-    # Whisper, matching the per-pass processing order.
+    # Models are loaded once and reused across every pass.
     demucs_model = load_demucs_model(config.demucs_model)
-    from faster_whisper import WhisperModel
-    compute_type = "int8" if "large" in config.whisper_model and DEVICE == "cuda" else "auto"
-    print(f"[whisper] Running on {DEVICE} (compute_type={compute_type})")
-    whisper = WhisperModel(config.whisper_model, device=DEVICE, compute_type=compute_type)
+    language_hint = config.whisperx_language or None
+    print(f"[whisperx] Running on {DEVICE} (compute_type={config.whisperx_compute_type})")
+    try:
+        whisperx_model = load_asr_model(
+            config.whisperx_model,
+            DEVICE,
+            config.whisperx_compute_type,
+            language_hint,
+            lyrics_prompt,
+        )
+    except Exception:
+        demucs_model = None
+        release_demucs_model()
+        raise
+    align_model_cache: dict[str, tuple[Any, dict[str, Any]]] = {}
 
     primary_vocals: Any = None
     primary_accomp: Any = None
@@ -474,25 +441,22 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
 
             sf.write(str(vocals_wav), vocals, out_sr)
 
-            logger.info(f"Whisper transcription {label}…")
-            segs, info = whisper.transcribe(
-                str(vocals_wav),
-                word_timestamps=True,
-                initial_prompt=lyrics_prompt,
-                language=config.whisper_language if config.whisper_language else None,
-            )
-            vocals_wav.unlink(missing_ok=True)
+            logger.info(f"WhisperX transcription + forced alignment {label}…")
+            try:
+                whisperx_audio = load_audio(str(vocals_wav))
+                run_words, run_language = transcribe_and_align(
+                    whisperx_model,
+                    whisperx_audio,
+                    DEVICE,
+                    config.whisperx_batch_size,
+                    language_hint,
+                    config.whisperx_align_model or None,
+                    config.whisperx_interpolate_method,
+                    align_model_cache,
+                )
+            finally:
+                vocals_wav.unlink(missing_ok=True)
 
-            run_words: list[dict[str, Any]] = []
-            for seg in segs:
-                for w in seg.words:
-                    run_words.append({
-                        "word": w.word.strip(),
-                        "start": w.start,
-                        "end": w.end,
-                    })
-
-            run_language = info.language or None
             pass_records.append({
                 "run": run_index + 1,
                 "language": run_language,
@@ -502,12 +466,12 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
             })
 
             if not run_words:
-                logger.warning(f"Whisper pass {label} returned no words; skipping")
+                logger.warning(f"WhisperX pass {label} returned no aligned words; skipping")
             else:
                 if detected_language is None:
                     detected_language = run_language
                 logger.info(
-                    f"Whisper pass {label}: {len(run_words)} words "
+                    f"WhisperX pass {label}: {len(run_words)} aligned words "
                     f"(language={run_language})"
                 )
                 raw_runs.append(run_words)
@@ -519,21 +483,23 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
                     torch.cuda.empty_cache()
     finally:
         demucs_model = None
+        whisperx_model = None
+        align_model_cache.clear()
         release_demucs_model()
 
-    _dump_whisper_passes(config, base.name, mp3_path, n_runs, pass_records)
+    _dump_whisperx_passes(config, base.name, mp3_path, n_runs, pass_records)
 
     if not raw_runs:
-        raise RuntimeError("Whisper returned empty transcription on all passes")
+        raise RuntimeError("WhisperX returned empty forced alignment on all passes")
 
     if len(raw_runs) > 1:
-        raw_words = consolidate_whisper_runs(raw_runs)
+        raw_words = consolidate_whisperx_runs(raw_runs)
         logger.info(f"Consolidated {len(raw_runs)} runs into {len(raw_words)} words")
     else:
         raw_words = raw_runs[0]
 
     if detected_language is None:
-        detected_language = config.whisper_language or "en"
+        detected_language = config.whisperx_language or "en"
 
     # Stems, pitch, and pauses come from the first pass's vocal track.
     # Step 3: Save stems

@@ -5,7 +5,7 @@ Pure Python CLI tool to generate [Ultrastar Deluxe](https://ultrastar-deluxe.org
 ## Pipeline
 
 ```
-Input media → FFmpeg extract → Demucs separation → torchcrepe pitch → Whisper transcription → Lyric alignment → Ultrastar .txt + ZIP
+Input media → FFmpeg extract → Demucs separation → WhisperX ASR + wav2vec2 character alignment → torchcrepe pitch → Lyric alignment → Ultrastar .txt + ZIP
 ```
 
 ## Installation
@@ -18,9 +18,14 @@ ffmpeg -version
 pip install -r cli/requirements.txt
 ```
 
-**Required Python packages:** `faster-whisper`, `demucs`, `torchcrepe`, `torchaudio`, `soundfile`, `numpy`, `lameenc`, `librosa`, `pyphen`.
+**Required Python packages:** `whisperx`, `demucs`, `torchcrepe`, `torchaudio`, `soundfile`, `numpy`, `lameenc`, `librosa`, `pyphen`.
 
-**Optional (GPU):** CUDA-enabled PyTorch for faster Demucs/Whisper inference.
+**Optional (GPU):** CUDA 12.8 with the matching PyTorch 2.8 packages for faster
+Demucs/WhisperX inference. The exact install command is documented at the top
+of `cli/requirements.txt`.
+
+WhisperX downloads its ASR and language-specific wav2vec2 alignment models on
+first use. Once those model files are cached, processing remains fully local.
 
 ## Usage
 
@@ -57,7 +62,7 @@ python -m cli process \
 | Stage | What it does |
 |---|---|
 | `extract` | Normalize input to mono 128kbps MP3 |
-| `transcribe` | Demucs separation + torchcrepe pitch + Whisper transcription |
+| `transcribe` | Demucs separation + WhisperX word/character alignment + torchcrepe pitch |
 | `align` | BPM detection + Smith-Waterman lyric alignment |
 | `generate` | Build `.txt` + package output ZIP |
 | `all` | Everything (default) |
@@ -95,8 +100,13 @@ Edit `cli/config.jsonc` (supports `//` and `/* */` comments):
 
 | Key | Default | Description |
 |---|---|---|
-| `whisper_model` | `"medium"` | Whisper size: `tiny`, `base`, `small`, `medium`, `large` |
-| `transcribe_runs` | `3` | Demucs + Whisper passes to run, then consolidate via Smith-Waterman majority vote |
+| `whisperx_model` | `"medium"` | WhisperX ASR model size: `tiny`, `base`, `small`, `medium`, `large` |
+| `whisperx_language` | `"en"` | Language hint; empty enables detection |
+| `whisperx_batch_size` | `8` | Number of ASR chunks processed per inference batch |
+| `whisperx_compute_type` | `"default"` | CTranslate2 compute type (`default`, `float16`, `float32`, `int8`) |
+| `whisperx_align_model` | `""` | Optional wav2vec2 alignment model override |
+| `whisperx_interpolate_method` | `"nearest"` | Missing-character timing policy (`nearest`, `linear`, `ignore`) |
+| `transcribe_runs` | `3` | Demucs + WhisperX passes consolidated via Smith-Waterman majority vote |
 | `demucs_model` | `"htdemucs"` | Demucs model name |
 | `sample_rate` | `44100` | Audio sample rate |
 | `pitch_min_hz` | `65.41` | Pitch floor (C2) |

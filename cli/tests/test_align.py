@@ -8,7 +8,7 @@ from cli.align import (
     smith_waterman,
 )
 from cli.config import Config
-from cli.pipeline_types import AlignedSyllable, Pause, PitchFrame, WordTimestamp
+from cli.pipeline_types import AlignedSyllable, CharacterTimestamp, Pause, PitchFrame, WordTimestamp
 
 
 class TestNormalizeChar:
@@ -20,6 +20,9 @@ class TestNormalizeChar:
         assert normalize_char("é") == "e"
         assert normalize_char("ü") == "u"
         assert normalize_char("ñ") == "n"
+
+    def test_non_latin_characters_are_preserved(self):
+        assert normalize_char("Привет") == "привет"
 
 
 class TestPhoneticScore:
@@ -186,6 +189,25 @@ class TestAlignLyrics:
         assert singing[0].start == 1.0
         assert singing[0].end == singing[1].start
         assert singing[1].end == 2.0
+
+    def test_whisperx_characters_anchor_syllable_intervals(self):
+        characters = [
+            CharacterTimestamp("h", 1.00, 1.10, 0.9),
+            CharacterTimestamp("e", 1.10, 1.20, 0.9),
+            CharacterTimestamp("l", 1.20, 1.30, 0.9),
+            CharacterTimestamp("l", 1.60, 1.70, 0.9),
+            CharacterTimestamp("o", 1.70, 1.80, 0.9),
+        ]
+        words = [WordTimestamp("hello", 1.0, 1.8, 60, characters=characters)]
+
+        result = align_lyrics("hello", words, "en", config=Config())
+        singing = [s for s in result if not s.is_line_break]
+
+        assert [s.syllable for s in singing] == ["hel", "lo"]
+        assert singing[0].start == 1.0
+        assert singing[0].end == 1.3
+        assert singing[1].start == 1.6
+        assert singing[1].end == 1.8
 
     def test_pause_separates_overlapping_word_timestamps(self):
         words = self._make_words([

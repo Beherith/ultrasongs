@@ -1,6 +1,6 @@
 """Tests for shared pipeline data serialization."""
 
-from cli.pipeline_types import BpmResult, PitchFrame, TranscribeResult, WordTimestamp
+from cli.pipeline_types import BpmResult, CharacterTimestamp, PitchFrame, TranscribeResult, WordTimestamp
 
 
 def test_transcribe_result_preserves_global_pitch_frames():
@@ -17,6 +17,15 @@ def test_transcribe_result_preserves_global_pitch_frames():
     restored = TranscribeResult.from_dict(result.to_dict())
 
     assert restored.pitch_frames == [frame]
+
+
+def test_word_timestamp_preserves_character_alignments():
+    character = CharacterTimestamp(char="h", start=0.1, end=0.2, score=0.95)
+    word = WordTimestamp("hello", 0.1, 0.5, 60, characters=[character])
+
+    restored = WordTimestamp.from_dict(word.to_dict())
+
+    assert restored.characters == [character]
 
 
 def test_old_transcribe_result_recovers_word_pitch_frames():

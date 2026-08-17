@@ -24,8 +24,12 @@ class Config:
     """Frozen pipeline configuration."""
 
     device: str = "auto"
-    whisper_model: str = "medium"
-    whisper_language: str = "en"
+    whisperx_model: str = "medium"
+    whisperx_language: str = "en"
+    whisperx_batch_size: int = 8
+    whisperx_compute_type: str = "default"
+    whisperx_align_model: str = ""
+    whisperx_interpolate_method: str = "nearest"
     transcribe_runs: int = 3
     demucs_model: str = "htdemucs"
     sample_rate: int = 44100
@@ -89,8 +93,12 @@ def load_config(config_path: str | None = None) -> Config:
     # Map JSONC keys to dataclass fields
     field_map = {
         "device": str,
-        "whisper_model": str,
-        "whisper_language": str,
+        "whisperx_model": str,
+        "whisperx_language": str,
+        "whisperx_batch_size": int,
+        "whisperx_compute_type": str,
+        "whisperx_align_model": str,
+        "whisperx_interpolate_method": str,
         "transcribe_runs": int,
         "demucs_model": str,
         "sample_rate": int,
@@ -133,5 +141,20 @@ def load_config(config_path: str | None = None) -> Config:
                 kwargs[key] = typ(data[key])
             except (TypeError, ValueError) as exc:
                 print(f"[config] Warning: invalid value for {key}: {data[key]!r} — using default", file=sys.stderr)
+
+    defaults = Config()
+    if kwargs.get("whisperx_batch_size", defaults.whisperx_batch_size) < 1:
+        print("[config] Warning: whisperx_batch_size must be at least 1 — using default", file=sys.stderr)
+        kwargs.pop("whisperx_batch_size", None)
+    if kwargs.get("whisperx_compute_type", defaults.whisperx_compute_type) not in {
+        "default", "float16", "float32", "int8",
+    }:
+        print("[config] Warning: invalid whisperx_compute_type — using default", file=sys.stderr)
+        kwargs.pop("whisperx_compute_type", None)
+    if kwargs.get("whisperx_interpolate_method", defaults.whisperx_interpolate_method) not in {
+        "nearest", "linear", "ignore",
+    }:
+        print("[config] Warning: invalid whisperx_interpolate_method — using default", file=sys.stderr)
+        kwargs.pop("whisperx_interpolate_method", None)
 
     return Config(**kwargs)

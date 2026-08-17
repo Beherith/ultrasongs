@@ -1,6 +1,6 @@
 import json
 
-with open('tmp/whisper_pitch.json', encoding='utf-8') as f:
+with open('tmp/whisperx_pitch.json', encoding='utf-8') as f:
     wp = json.load(f)
 
 # Check: do pitch frames extend beyond whisper word ends?

@@ -20,12 +20,33 @@ class PitchFrame:
 
 
 @dataclass
+class CharacterTimestamp:
+    char: str
+    start: float | None = None
+    end: float | None = None
+    score: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "CharacterTimestamp":
+        return cls(
+            char=d["char"],
+            start=d.get("start"),
+            end=d.get("end"),
+            score=d.get("score"),
+        )
+
+
+@dataclass
 class WordTimestamp:
     word: str
     start: float
     end: float
     midi: int
     pitch_frames: list[PitchFrame] = field(default_factory=list)
+    characters: list[CharacterTimestamp] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -34,6 +55,7 @@ class WordTimestamp:
             "end": self.end,
             "midi": self.midi,
             "pitch_frames": [pf.to_dict() for pf in self.pitch_frames],
+            "characters": [char.to_dict() for char in self.characters],
         }
 
     @classmethod
@@ -44,6 +66,7 @@ class WordTimestamp:
             end=d["end"],
             midi=d["midi"],
             pitch_frames=[PitchFrame.from_dict(pf) for pf in d.get("pitch_frames", [])],
+            characters=[CharacterTimestamp.from_dict(char) for char in d.get("characters", [])],
         )
 
 

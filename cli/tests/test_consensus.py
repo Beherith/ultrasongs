@@ -1,6 +1,6 @@
-"""Tests for multi-run Whisper transcription consolidation."""
+"""Tests for multi-run WhisperX forced-alignment consolidation."""
 
-from cli.consensus import consolidate_whisper_runs, word_similarity
+from cli.consensus import consolidate_whisperx_runs, word_similarity
 
 
 def _words(pairs: list[tuple[str, float, float]]) -> list[dict]:
@@ -28,12 +28,12 @@ class TestWordSimilarity:
 
 class TestConsolidate:
     def test_empty_input(self):
-        assert consolidate_whisper_runs([]) == []
-        assert consolidate_whisper_runs([[], []]) == []
+        assert consolidate_whisperx_runs([]) == []
+        assert consolidate_whisperx_runs([[], []]) == []
 
     def test_single_run_returned_unchanged(self):
         words = _words([("hello", 0.1, 0.5), ("world", 0.6, 1.0)])
-        result = consolidate_whisper_runs([words])
+        result = consolidate_whisperx_runs([words])
         assert [w["word"] for w in result] == ["hello", "world"]
         assert result[0]["start"] == 0.1
         assert result[0]["end"] == 0.5
@@ -44,17 +44,31 @@ class TestConsolidate:
             _words([("hallo", 0.12, 0.51), ("world", 0.61, 1.00)]),
             _words([("hello", 0.09, 0.49), ("world", 0.60, 1.01)]),
         ]
-        result = consolidate_whisper_runs(runs)
+        result = consolidate_whisperx_runs(runs)
         assert [w["word"] for w in result] == ["hello", "world"]
 
-    def test_timing_is_averaged_across_runs(self):
+    def test_timing_comes_from_one_coherent_candidate(self):
         runs = [
             _words([("hello", 0.0, 1.0)]),
             _words([("hello", 0.2, 1.2)]),
         ]
-        result = consolidate_whisper_runs(runs)
+        result = consolidate_whisperx_runs(runs)
+        assert (result[0]["start"], result[0]["end"]) in {(0.0, 1.0), (0.2, 1.2)}
+
+    def test_prefers_candidate_with_stronger_character_alignment(self):
+        runs = [
+            [{
+                "word": "hello", "start": 0.0, "end": 1.0,
+                "characters": [{"char": "h", "start": 0.0, "end": 0.1, "score": 0.2}],
+            }],
+            [{
+                "word": "hello", "start": 0.1, "end": 0.9,
+                "characters": [{"char": "h", "start": 0.1, "end": 0.2, "score": 0.95}],
+            }],
+        ]
+        result = consolidate_whisperx_runs(runs)
         assert result[0]["start"] == 0.1
-        assert result[0]["end"] == 1.1
+        assert result[0]["characters"][0]["score"] == 0.95
 
     def test_uses_longest_run_as_reference(self):
         runs = [
@@ -62,7 +76,7 @@ class TestConsolidate:
             _words([("one", 0.0, 0.4), ("two", 0.45, 0.75), ("three", 0.8, 1.2)]),
             _words([("one", 0.0, 0.4), ("two", 0.46, 0.74), ("three", 0.8, 1.2)]),
         ]
-        result = consolidate_whisper_runs(runs)
+        result = consolidate_whisperx_runs(runs)
         assert [w["word"] for w in result] == ["one", "two", "three"]
 
     def test_reference_word_wins_ties(self):
@@ -70,7 +84,7 @@ class TestConsolidate:
             _words([("sunny", 0.0, 0.5)]),
             _words([("money", 0.0, 0.5)]),
         ]
-        result = consolidate_whisper_runs(runs)
+        result = consolidate_whisperx_runs(runs)
         assert result[0]["word"] == "sunny"
 
     def test_preserves_reference_boundaries(self):
@@ -78,5 +92,5 @@ class TestConsolidate:
             _words([("hello", 0.1, 0.5), ("world", 0.6, 1.0)]),
             _words([("hellowo", 0.1, 1.0)]),
         ]
-        result = consolidate_whisper_runs(runs)
+        result = consolidate_whisperx_runs(runs)
         assert len(result) == 2

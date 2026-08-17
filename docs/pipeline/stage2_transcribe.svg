@@ -54,13 +54,13 @@
   <text x="110" y="564" font-size="12.5" fill="#475569" font-family="Consolas, monospace">sf.write(tmp/song_vocals.wav)</text>
   <text x="110" y="586" font-size="12.5" fill="#64748b">only pass 1 stems are kept; later passes freed (gc + cuda empty_cache)</text>
 
-  <!-- Whisper box -->
+  <!-- WhisperX box -->
   <rect x="710" y="262" width="640" height="372" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
-  <text x="730" y="290" font-size="15" font-weight="bold" fill="#1d4ed8">faster-whisper — WhisperModel(config.whisper_model, default "medium")</text>
+  <text x="730" y="290" font-size="15" font-weight="bold" fill="#1d4ed8">WhisperX — load_model(config.whisperx_model, default "medium")</text>
   <text x="730" y="314" font-size="12.5" fill="#475569">input: tmp/song_vocals.wav (vocals only, so recognition ignores instruments)</text>
-  <text x="730" y="342" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">whisper.transcribe(path, word_timestamps=True,</text>
-  <text x="730" y="362" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">    initial_prompt=lyrics_text,   # --lyrics steers pronunciation</text>
-  <text x="730" y="382" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">    language=config.whisper_language)</text>
+  <text x="730" y="342" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">result = model.transcribe(audio, batch_size=config.whisperx_batch_size)</text>
+  <text x="730" y="362" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">aligned = whisperx.align(result["segments"], model_a, metadata, audio,</text>
+  <text x="730" y="382" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">    device, return_char_alignments=True)</text>
 
   <rect x="730" y="400" width="120" height="44" rx="8" fill="#bfdbfe" stroke="#3b82f6"/>
   <text x="790" y="420" font-size="13" fill="#1e3a8a" text-anchor="middle">hello</text>
@@ -73,10 +73,10 @@
   <text x="1054" y="437" font-size="10.5" fill="#1e3a8a" text-anchor="middle">1.88 – 2.05 s</text>
   <text x="1150" y="428" font-size="16" fill="#64748b">…</text>
 
-  <text x="730" y="486" font-size="12.5" fill="#475569">raw words per pass: [{word, start, end}]  (compute_type "int8" only for large + CUDA)</text>
-  <text x="730" y="510" font-size="12.5" fill="#475569">language auto-detected, fallback config.whisper_language</text>
+  <text x="730" y="486" font-size="12.5" fill="#475569">aligned words per pass: [{word, start, end, score, characters}]</text>
+  <text x="730" y="510" font-size="12.5" fill="#475569">language hint: config.whisperx_language; aligner chosen per language</text>
   <rect x="730" y="528" width="600" height="58" rx="8" fill="#ffffff" stroke="#93c5fd"/>
-  <text x="744" y="552" font-size="12" fill="#1d4ed8">Debug dump: tmp/song_whisper_passes.json (all runs, full word lists).</text>
+  <text x="744" y="552" font-size="12" fill="#1d4ed8">Debug dump: tmp/song_whisperx_passes.json (words + character alignments).</text>
   <text x="744" y="570" font-size="12" fill="#1d4ed8">Empty runs skipped; all runs empty → RuntimeError.</text>
 
   <line x1="670" y1="446" x2="708" y2="446" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
@@ -90,7 +90,7 @@
   <text x="90" y="716" font-size="13" fill="#0f172a">1. Longest run = structural reference (its word boundaries define the consensus).</text>
   <text x="90" y="740" font-size="13" fill="#0f172a">2. Every other run aligned to the reference with Smith–Waterman on whole words (score = word_similarity:</text>
   <text x="110" y="760" font-size="13" fill="#0f172a">symmetric average of best phonetic char matches — near-homophones align, unrelated words don't).</text>
-  <text x="90" y="786" font-size="13" fill="#0f172a">3. Column-wise: majority vote picks the word (reference wins ties) · start/end = average of aligned words.</text>
+  <text x="90" y="786" font-size="13" fill="#0f172a">3. Majority vote picks the word; timing + characters come from the highest-quality matching candidate.</text>
   <text x="90" y="838" font-size="12.5" fill="#7f1d1d" font-family="Consolas, monospace">run 1:    hello   world   this   is   a   test</text>
   <text x="90" y="858" font-size="12.5" fill="#7f1d1d" font-family="Consolas, monospace">run 2:    hallo   wordl   this   is   a   test   →   consensus:  hello  world  this  is  a  test</text>
 

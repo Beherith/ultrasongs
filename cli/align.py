@@ -42,8 +42,9 @@ _FFT_CONTEXT_SEC = 0.3
 # ── Character normalization ──────────────────────────────────────────────────
 
 def normalize_char(c: str) -> str:
-    """Lowercase, NFD decompose, strip diacritics."""
-    return unicodedata.normalize("NFD", c.lower()).encode("ascii", "ignore").decode("ascii")
+    """Lowercase and strip diacritics without discarding non-Latin scripts."""
+    decomposed = unicodedata.normalize("NFD", c.lower())
+    return "".join(char for char in decomposed if not unicodedata.combining(char))
 
 
 # ── Phonetic character matching ──────────────────────────────────────────────
@@ -360,6 +361,75 @@ def _log_unmatched_word(wi: int, wr: dict[str, Any], whisper_words: list[WordTim
         f"normalized='{norm}', length={len(word)}; "
         f"best whisper candidates: {top or '(no whisper words)'}"
     )
+
+
+def _syllable_intervals(
+    syllables: list[str],
+    char_alignments: list[dict[str, Any]],
+    word_start: float,
+    word_end: float,
+) -> list[tuple[float, float]]:
+    """Derive syllable intervals from matched WhisperX character anchors."""
+    if not syllables:
+        return []
+
+    ranges: list[tuple[int, int]] = []
+    cursor = 0
+    for syllable in syllables:
+        ranges.append((cursor, cursor + len(syllable)))
+        cursor += len(syllable)
+
+    intervals: list[tuple[float, float] | None] = []
+    for char_start, char_end in ranges:
+        timed = [
+            alignment
+            for alignment in char_alignments
+            if char_start <= alignment.get("lyricCharIdx", -1) < char_end
+            and alignment.get("start") is not None
+            and alignment.get("end") is not None
+        ]
+        if timed:
+            intervals.append((
+                max(word_start, min(float(item["start"]) for item in timed)),
+                min(word_end, max(float(item["end"]) for item in timed)),
+            ))
+        else:
+            intervals.append(None)
+
+    if all(interval is None for interval in intervals):
+        duration = max(0.01, (word_end - word_start) / len(syllables))
+        return [
+            (word_start + index * duration, word_start + (index + 1) * duration)
+            for index in range(len(syllables))
+        ]
+
+    index = 0
+    while index < len(intervals):
+        if intervals[index] is not None:
+            index += 1
+            continue
+        missing_start = index
+        while index < len(intervals) and intervals[index] is None:
+            index += 1
+        missing_end = index
+        previous = intervals[missing_start - 1] if missing_start > 0 else None
+        following = intervals[missing_end] if missing_end < len(intervals) else None
+        left = previous[1] if previous is not None else word_start
+        right = following[0] if following is not None else word_end
+        slot = max(0.0, right - left) / (missing_end - missing_start)
+        for position in range(missing_start, missing_end):
+            offset = position - missing_start
+            intervals[position] = (left + offset * slot, left + (offset + 1) * slot)
+
+    resolved = [interval for interval in intervals if interval is not None]
+    for index in range(len(resolved) - 1):
+        current_start, current_end = resolved[index]
+        next_start, next_end = resolved[index + 1]
+        if current_end > next_start:
+            boundary = (current_end + next_start) / 2
+            resolved[index] = (current_start, max(current_start, boundary))
+            resolved[index + 1] = (min(next_end, boundary), next_end)
+    return resolved
 
 
 # ── MIDI extraction ──────────────────────────────────────────────────────────
@@ -891,7 +961,7 @@ def align_lyrics(
     pitch_frames: list[PitchFrame] | None = None,
     audio_path: Path | None = None,
 ) -> list[AlignedSyllable]:
-    """Align lyric text to Whisper word timestamps using Smith-Waterman.
+    """Align lyric text to WhisperX word/character timestamps using Smith-Waterman.
 
     Steps:
         1. Character normalization
@@ -904,7 +974,7 @@ def align_lyrics(
 
     Args:
         lyrics: Raw lyric text with line breaks.
-        whisper_words: Word timestamps from transcription.
+        whisper_words: Forced-aligned word and character timestamps.
         language: ISO 639-1 language code.
         pauses: Detected silence regions.
         config: Pipeline configuration.
@@ -929,7 +999,7 @@ def align_lyrics(
     logger.info(f"Alignment started")
     logger.info(f"Language: {language}")
     logger.info(f"Lyric lines: {len(raw_lines)}")
-    logger.info(f"Whisper words: {len(whisper_words)}")
+    logger.info(f"WhisperX words: {len(whisper_words)}")
 
     # ── Build lyric character sequence ────────────────────────────────────
 
@@ -940,11 +1010,12 @@ def align_lyrics(
 
     lyric_chars: list[dict[str, Any]] = []
     for wi, lw in enumerate(lyric_words):
-        for ch in lw["word"]:
+        for char_idx, ch in enumerate(lw["word"]):
             lyric_chars.append({
                 "orig": ch,
                 "norm": normalize_char(ch),
                 "wordIdx": wi,
+                "charIdx": char_idx,
                 "lineIdx": lw["lineIdx"],
             })
         if wi < len(lyric_words) - 1:
@@ -955,26 +1026,45 @@ def align_lyrics(
                 "lineIdx": lw["lineIdx"],
             })
 
-    # ── Build whisper character sequence ──────────────────────────────────
+    # ── Build WhisperX character sequence ─────────────────────────────────
 
     whisper_chars: list[dict[str, Any]] = []
     for wi, ww in enumerate(whisper_words):
-        cleaned = normalize_char(ww.word)
-        for ch in cleaned:
-            whisper_chars.append({
-                "orig": ch,
-                "norm": normalize_char(ch),
-                "wordIdx": wi,
-            })
+        timed_chars_added = 0
+        for aligned_char in ww.characters:
+            normalized = normalize_char(aligned_char.char)
+            for ch in normalized:
+                whisper_chars.append({
+                    "orig": aligned_char.char,
+                    "norm": ch,
+                    "wordIdx": wi,
+                    "start": aligned_char.start,
+                    "end": aligned_char.end,
+                    "score": aligned_char.score,
+                })
+                timed_chars_added += 1
+        if timed_chars_added == 0:
+            for ch in normalize_char(ww.word):
+                whisper_chars.append({
+                    "orig": ch,
+                    "norm": ch,
+                    "wordIdx": wi,
+                    "start": None,
+                    "end": None,
+                    "score": None,
+                })
         if wi < len(whisper_words) - 1:
             whisper_chars.append({
                 "orig": " ",
                 "norm": " ",
                 "wordIdx": wi,
+                "start": None,
+                "end": None,
+                "score": None,
             })
 
     logger.info(f"Lyric chars: {len(lyric_chars)} ({len(lyric_words)} words)")
-    logger.info(f"Whisper chars: {len(whisper_chars)} ({len(whisper_words)} words)")
+    logger.info(f"WhisperX chars: {len(whisper_chars)} ({len(whisper_words)} words)")
 
     # ── Smith-Waterman alignment ──────────────────────────────────────────
 
@@ -1010,9 +1100,13 @@ def align_lyrics(
                     lyric_word_whisper_idxs[lc["wordIdx"]].append(wc["wordIdx"])
                 lyric_word_char_alignments[lc["wordIdx"]].append({
                     "lyricChar": lc["orig"],
+                    "lyricCharIdx": lc["charIdx"],
                     "whisperChar": wc["orig"],
                     "whisperWordIdx": wc["wordIdx"],
                     "score": step["score"],
+                    "alignmentScore": wc.get("score"),
+                    "start": wc.get("start"),
+                    "end": wc.get("end"),
                 })
 
     # ── Compute timestamps for matched lyric words ────────────────────────
@@ -1028,6 +1122,7 @@ def align_lyrics(
             "source": "sw_aligned",
             "whisperIdxs": lyric_word_whisper_idxs[wi],
             "charAlignments": lyric_word_char_alignments[wi],
+            "hasCharTiming": False,
             "pitchFrames": [],
         })
 
@@ -1036,10 +1131,20 @@ def align_lyrics(
             _log_unmatched_word(wi, word_results[wi], whisper_words)
             continue
         idxs = sorted(word_results[wi]["whisperIdxs"])
-        starts = [whisper_words[idx].start for idx in idxs]
-        ends = [whisper_words[idx].end for idx in idxs]
-        word_results[wi]["start"] = min(starts)
-        word_results[wi]["end"] = max(ends)
+        timed_chars = [
+            char
+            for char in word_results[wi]["charAlignments"]
+            if char.get("start") is not None and char.get("end") is not None
+        ]
+        if timed_chars:
+            word_results[wi]["start"] = min(float(char["start"]) for char in timed_chars)
+            word_results[wi]["end"] = max(float(char["end"]) for char in timed_chars)
+            word_results[wi]["hasCharTiming"] = True
+        else:
+            starts = [whisper_words[idx].start for idx in idxs]
+            ends = [whisper_words[idx].end for idx in idxs]
+            word_results[wi]["start"] = min(starts)
+            word_results[wi]["end"] = max(ends)
 
         all_frames: list[Any] = []
         for idx in idxs:
@@ -1056,8 +1161,8 @@ def align_lyrics(
         else:
             word_results[wi]["midi"] = whisper_words[idxs[0]].midi if idxs else 60
 
-    # Whisper can merge several lyric words into one token. Divide that token's
-    # interval instead of assigning the full interval to every lyric word.
+    # If forced character timestamps are unavailable, divide a WhisperX token
+    # shared by several lyric words instead of assigning its full interval to all.
     wi = 0
     while wi < len(word_results):
         idxs = tuple(sorted(word_results[wi]["whisperIdxs"]))
@@ -1068,7 +1173,7 @@ def align_lyrics(
             and tuple(sorted(word_results[end_wi]["whisperIdxs"])) == idxs
         ):
             end_wi += 1
-        if end_wi - wi > 1:
+        if end_wi - wi > 1 and not any(wr["hasCharTiming"] for wr in word_results[wi:end_wi]):
             group = word_results[wi:end_wi]
             group_start = min(wr["start"] for wr in group)
             group_end = max(wr["end"] for wr in group)
@@ -1204,7 +1309,12 @@ def align_lyrics(
         for wr in word_results:
             syllables = split_word(wr["word"], language)
             # print(f"Word '{wr['word']}' split into syllables: {syllables}")
-            syl_duration = max(0.01, (wr["end"] - wr["start"]) / len(syllables))
+            syllable_intervals = _syllable_intervals(
+                syllables,
+                wr["charAlignments"],
+                wr["start"],
+                wr["end"],
+            )
             if pitch_frames:
                 lo = bisect.bisect_left(pitch_times, wr["start"])
                 hi = bisect.bisect_right(pitch_times, wr["end"])
@@ -1214,8 +1324,7 @@ def align_lyrics(
             word_output: list[AlignedSyllable] = []
 
             for si, syl in enumerate(syllables):
-                syl_start = wr["start"] + si * syl_duration
-                syl_end = wr["start"] + (si + 1) * syl_duration
+                syl_start, syl_end = syllable_intervals[si]
                 lyric_syllable = syl
                 if si == 0 and previous_line == wr["lineIdx"]:
                     lyric_syllable = " " + lyric_syllable
@@ -1296,8 +1405,8 @@ def align_lyrics(
         debug_data = {
             "language": language,
             "lyricCharCount": len(lyric_chars),
-            "whisperCharCount": len(whisper_chars),
-            "whisperWordCount": len(whisper_words),
+            "whisperxCharCount": len(whisper_chars),
+            "whisperxWordCount": len(whisper_words),
             "swMaxScore": sw_result["maxScore"],
             "swMaxPos": [sw_result["maxI"], sw_result["maxJ"]],
             "swBacktrackLength": len(sw_result["backtrack"]),
@@ -1319,14 +1428,15 @@ def align_lyrics(
         backtrace_path.write_text(sw_backtrace_text, encoding="utf-8")
         logger.info(f"Backtrace written to {backtrace_path}")
 
-        # Whisper words + pitch frames JSON
-        whisper_pitch_data = {
+        # WhisperX words, character alignments, and pitch frames JSON
+        whisperx_pitch_data = {
             "words": [
                 {
                     "word": ww.word,
                     "start": ww.start,
                     "end": ww.end,
                     "midi": ww.midi,
+                    "characters": [char.to_dict() for char in ww.characters],
                     "pitchFrames": [
                         {"time": pf.time, "midi": pf.midi, "confidence": pf.confidence, "amplitude": pf.amplitude  }
                         for pf in ww.pitch_frames
@@ -1336,15 +1446,15 @@ def align_lyrics(
             ],
             "done": True,
         }
-        whisper_json_path = config.temp_path / "whisper_pitch.json"
-        whisper_json_path.write_text(json.dumps(whisper_pitch_data, indent=2), encoding="utf-8")
-        logger.info(f"Whisper pitch data written to {whisper_json_path}")
+        whisperx_json_path = config.temp_path / "whisperx_pitch.json"
+        whisperx_json_path.write_text(json.dumps(whisperx_pitch_data, indent=2), encoding="utf-8")
+        logger.info(f"WhisperX pitch data written to {whisperx_json_path}")
 
         # Pitch visualization HTML
         from cli.html_preview import build_html
-        html_title = f"{lyric_words[0]['word'] if lyric_words else 'Pitch'} — Whisper"
-        html_content = build_html(whisper_pitch_data, html_title)
-        html_path = config.temp_path / "whisper_pitch.html"
+        html_title = f"{lyric_words[0]['word'] if lyric_words else 'Pitch'} — WhisperX"
+        html_content = build_html(whisperx_pitch_data, html_title)
+        html_path = config.temp_path / "whisperx_pitch.html"
         html_path.write_text(html_content, encoding="utf-8")
         logger.info(f"Pitch visualization written to {html_path}")
 

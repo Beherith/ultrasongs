@@ -1,15 +1,16 @@
-"""Consolidate multiple Whisper transcription runs into one consensus.
+"""Consolidate multiple WhisperX forced-alignment runs into one consensus.
 
-Whisper (and the Demucs vocal separation it transcribes) is not fully
+WhisperX ASR (and the Demucs vocal separation it transcribes) is not fully
 deterministic, so independent runs of the same audio can recognize slightly
 different words. Running the transcription several times and voting on the
 result — with Smith-Waterman used to align the word sequences before voting —
 produces a more robust consensus than any single run.
 
-This module is intentionally free of heavy (torch/whisper) imports so it can
+This module is intentionally free of heavy model imports so it can
 be unit-tested without GPU dependencies.
 """
 
+from statistics import median
 from typing import Any
 
 from cli.align import normalize_char, phonetic_score, smith_waterman
@@ -61,16 +62,17 @@ def _align_to_reference(
     return alignment
 
 
-def consolidate_whisper_runs(
+def consolidate_whisperx_runs(
     runs: list[list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
-    """Consolidate several Whisper word lists into one consensus list.
+    """Consolidate several forced-aligned WhisperX word lists.
 
     Each ``runs`` entry is a full transcription as a list of word dicts with at
     least ``word``, ``start`` and ``end`` keys. The longest run is used as the
     structural reference: its word boundaries define the consensus, and for
     every reference word the best (majority-vote) reading across all runs is
-    chosen, with timing averaged over the aligned words.
+    chosen. Timing and character alignment are copied together from the
+    highest-quality matching candidate so their intervals remain coherent.
 
     A single run is returned unchanged. Returns an empty list when there is no
     usable transcription.
@@ -137,13 +139,34 @@ def consolidate_whisper_runs(
             counts[norm] = counts.get(norm, 0) + 1
             first_index.setdefault(norm, pos)
         winner_norm = min(counts, key=lambda n: (-counts[n], first_index[n]))
-        winner_word = words[first_index[winner_norm]]
+        matching = [
+            (pos, word)
+            for pos, word in enumerate(column)
+            if normalize_char(word["word"]) == winner_norm
+        ]
+        median_midpoint = median(
+            (float(word["start"]) + float(word["end"])) / 2
+            for _, word in matching
+        )
 
-        consensus.append({
-            "word": winner_word,
-            "start": sum(starts) / len(starts),
-            "end": sum(ends) / len(ends),
-        })
+        def candidate_key(candidate: tuple[int, dict[str, Any]]) -> tuple[float, float, int]:
+            pos, word = candidate
+            scores = [
+                float(char["score"])
+                for char in word.get("characters", [])
+                if char.get("score") is not None
+            ]
+            alignment_score = (
+                sum(scores) / len(scores)
+                if scores
+                else float(word["score"]) if word.get("score") is not None else -1.0
+            )
+            midpoint = (float(word["start"]) + float(word["end"])) / 2
+            return (-alignment_score, abs(midpoint - median_midpoint), pos)
+
+        _, chosen = min(matching, key=candidate_key)
+        consensus.append(dict(chosen))
+        winner_word = str(chosen["word"])
 
         if len(counts) > 1:
             disagreements += 1
@@ -162,7 +185,7 @@ def consolidate_whisper_runs(
             )
 
     logger.info(
-        f"Consolidated {len(runs)} whisper runs "
+        f"Consolidated {len(runs)} WhisperX runs "
         f"(reference: run {reference_idx + 1}, {len(reference_words)} words; "
         f"{disagreements} words disagreed)"
     )

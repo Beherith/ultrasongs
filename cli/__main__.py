@@ -213,7 +213,7 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
         from cli.html_preview import generate_preview
 
         txt_path = output_dir / f"{args.title}.txt"
-        pitch_json = config.temp_path / "whisper_pitch.json"
+        pitch_json = config.temp_path / "whisperx_pitch.json"
         if pitch_json.exists():
             generate_preview(txt_path, pitch_json_path=pitch_json)
         else:

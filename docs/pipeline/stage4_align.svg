@@ -146,7 +146,7 @@
     <rect x="904" y="1494" width="80" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="944" y="1513" text-anchor="middle">midi</text>
     <rect x="992" y="1494" width="140" height="28" rx="14" fill="#dcfce7" stroke="#86efac"/><text x="1062" y="1513" text-anchor="middle">is_line_break</text>
   </g>
-  <text x="600" y="1548" font-size="12" fill="#166534">debug_alignment=true also writes: align_debug.json · align_backtrace.txt · whisper_pitch.json</text>
-  <text x="600" y="1570" font-size="12" fill="#166534">· whisper_pitch.html (pitch preview) · note_segments.txt (per-syllable [note_segments] decision log)</text>
+  <text x="600" y="1548" font-size="12" fill="#166534">debug_alignment=true also writes: align_debug.json · align_backtrace.txt · whisperx_pitch.json</text>
+  <text x="600" y="1570" font-size="12" fill="#166534">· whisperx_pitch.html (pitch preview) · note_segments.txt (per-syllable [note_segments] decision log)</text>
   <line x1="560" y1="1500" x2="578" y2="1500" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
 </svg>

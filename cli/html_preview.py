@@ -347,7 +347,7 @@ def build_verse_svg(
                 f'dominant-baseline="central">{lyric}</text>'
             )
 
-        # Whisper word label (green, below the note bar)
+        # WhisperX word label (green, below the note bar)
         if show_pitch_frames and n.get("_whisper_word"):
             ww = html_module.escape(n["_whisper_word"])
             ww_fs = max(6, min(9, bw / (len(ww) * 0.55)))
@@ -564,7 +564,7 @@ def _build_ultrastar_html(data: dict, title: str) -> str:
   <span><span class="dot" style="background:rgb(255,220,0)"></span> Medium amplitude</span>
   <span><span class="dot" style="background:rgb(230,40,40)"></span> Loud</span>
   <span>Opacity = confidence</span>
-  <span><span class="dot" style="background:#4caf50; font-style:italic; font-size:10px;">W</span> Whisper word</span>
+  <span><span class="dot" style="background:#4caf50; font-style:italic; font-size:10px;">W</span> WhisperX word</span>
 </div>
 """
 
@@ -617,7 +617,7 @@ def _build_ultrastar_html(data: dict, title: str) -> str:
 def _build_pitch_only_html(data: dict, title: str) -> str:
     """Handle legacy pitch-detection-only JSON (no Ultrastar data).
 
-    This keeps backward compatibility with align.py's call to build_html(whisper_pitch_data, title).
+    This keeps compatibility with align.py's call to build_html(pitch_data, title).
     """
     words = data["words"]
     done = data.get("done", False)

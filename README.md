@@ -4,14 +4,14 @@
 
 Generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` song files from any audio or video file + song lyrics. Pure Python CLI — runs fully local, no external AI APIs, no web server.
 
-**Pipeline:** FFmpeg extract → Demucs vocal separation → torchcrepe pitch detection → faster-whisper transcription → Smith-Waterman lyric alignment → BPM beat mapping → `.txt` + ZIP export.
+**Pipeline:** FFmpeg extract → Demucs vocal separation → WhisperX ASR + wav2vec2 character alignment → torchcrepe pitch detection → Smith-Waterman lyric alignment → BPM beat mapping → `.txt` + ZIP export.
 
 ## Features
 
 - Upload any audio or video format (MP4, MKV, MP3, FLAC, WAV, …)
 - Automatic vocal separation via [Demucs](https://github.com/facebookresearch/demucs) `htdemucs`
 - Per-word MIDI pitch via [torchcrepe](https://github.com/maxrmorrison/torchcrepe) — neural pitch estimation tuned for singing voices
-- Transcription via [faster-whisper](https://github.com/guillaumekynast/faster-whisper), biased by your provided lyrics
+- Word- and character-timed transcription via [WhisperX](https://github.com/m-bain/whisperX), biased by your provided lyrics
 - Smith-Waterman phonetic alignment of transcribed words → user lyrics
 - BPM detection via [librosa](https://librosa.org/) + beat-accurate note placement
 - Syllable splitting (20+ languages via [pyphen](https://github.com/karpathy/pyphen))
@@ -36,10 +36,10 @@ pip install -e cli/
 pip install -r cli/requirements.txt
 ```
 
-**Optional (GPU):** CUDA-enabled PyTorch for faster Demucs/Whisper inference.
+**Optional (GPU):** CUDA 12.8 with PyTorch 2.8 for faster Demucs/WhisperX inference.
 
 ```bash
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+pip install torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
 ```
 
 ## Usage
@@ -91,14 +91,16 @@ FFmpeg normalizes input media to mono 128 kbps MP3. Strips video, downmixes to m
 
 ### Stage 2 — Transcribe
 
-Four sub-steps run sequentially:
+The transcription stage performs:
 
 1. **Vocal separation** (Demucs `htdemucs`): splits audio into vocals + accompaniment stems.
-2. **Pitch analysis** (torchcrepe): runs the `full` model on vocals at 16 kHz, 10 ms hop, C2–C6 range, with Viterbi decoding.
-3. **Pause detection**: sliding-window RMS energy analysis; frames below 5% of the 95th percentile are silent; consecutive silence ≥400 ms is a pause.
-4. **Transcription** (faster-whisper): transcribes vocals WAV with word timestamps; lyrics passed as `initial_prompt` to bias the model.
+2. **ASR** (WhisperX): batched transcription of the vocal stem; lyrics are passed as `initial_prompt`.
+3. **Forced alignment** (WhisperX + language-specific wav2vec2): produces word and character timestamps with alignment scores.
+4. **Consensus**: multiple aligned passes are matched and voted; each winning word keeps one coherent character-timing result.
+5. **Pitch analysis** (torchcrepe): runs the `full` model on vocals at 16 kHz, 10 ms hop, C2–C6 range, with Viterbi decoding.
+6. **Pause detection**: sliding-window RMS energy analysis; frames below 5% of the 95th percentile are silent; consecutive silence ≥400 ms is a pause.
 
-Produces `{stem}_transcribe.json` with words, timestamps, MIDI, pitch frames, language, pauses, and stem paths.
+Produces `{stem}_transcribe.json` with words, character timestamps, MIDI, pitch frames, language, pauses, and stem paths.
 
 ### Stage 3 — BPM Detect
 
@@ -108,10 +110,10 @@ Produces `{stem}_transcribe.json` with words, timestamps, MIDI, pitch frames, la
 
 Smith-Waterman alignment with phonetic scoring:
 
-- Character normalization: lowercase, NFD decompose, strip diacritics
+- Character normalization: lowercase, NFD decompose, strip diacritics while preserving non-Latin scripts
 - Phonetic scoring: exact match, articulation groups (vowels, sibilants, stops), cross-group confusions
 - Affine-gap DP matrices with backtrack
-- Timestamp interpolation for unmatched words
+- Character-anchored word and syllable timing, with interpolation for unmatched text
 - Syllabification via pyphen (20+ languages)
 - Line break insertion at lyric boundaries
 
@@ -139,7 +141,8 @@ Generates HTML with SVG pitch visualization, beat grid, and confidence-colored d
   {stem}_vocals.mp3             ← separated vocals stem
   {stem}_accompaniment.mp3      ← separated instrumental stem
   {stem}_transcribe.json        ← words, timestamps, MIDI, pitch frames, pauses
-  {stem}_pitch.json             ← pitch data for preview
+  {stem}_whisperx_passes.json   ← per-pass word and character alignments
+  whisperx_pitch.json           ← aligned words and pitch data for preview
 
 ./output/
   {title}.txt                   ← Ultrastar song file
@@ -174,13 +177,8 @@ E
 pytest cli/tests/ -v
 ```
 
-Six test files covering alignment, config, diff, generation, syllabification, and Ultrastar format parsing.
-
-## Performance
-
-Tested on an NVIDIA GTX 1080 (8 GB VRAM). A 4-minute song takes roughly 40–60 s (Demucs + torchcrepe + Whisper running sequentially).
-
-Default Whisper model: `medium`. For tighter VRAM budgets, use `small` or `base` in `config.jsonc`.
+Tests cover WhisperX result conversion, character-aware alignment, consensus,
+configuration, BPM detection, pitch-frame alignment, generation, and Ultrastar parsing.
 
 ## Tech stack
 
@@ -190,7 +188,7 @@ Default Whisper model: `medium`. For tighter VRAM budgets, use `small` or `base`
 | Package | setuptools, pyproject.toml |
 | Audio separation | Demucs, torchaudio |
 | Pitch detection | torchcrepe |
-| Transcription | faster-whisper |
+| Transcription and forced alignment | WhisperX, wav2vec2 |
 | BPM detection | librosa |
 | Syllabification | pyphen |
 | Audio I/O | FFmpeg (subprocess), soundfile, lameenc |
@@ -203,7 +201,7 @@ Built by [Pablo Pramparo](https://github.com/pablopramparo).
 Powered by:
 
 - [Demucs](https://github.com/facebookresearch/demucs) — vocal separation (Meta Research)
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper) — speech transcription
+- [WhisperX](https://github.com/m-bain/whisperX) — speech transcription and forced alignment
 - [torchcrepe](https://github.com/maxrmorrison/torchcrepe) — pitch estimation
 
 ## License
