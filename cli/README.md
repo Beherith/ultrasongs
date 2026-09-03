@@ -5,7 +5,7 @@ Pure Python CLI tool to generate [Ultrastar Deluxe](https://ultrastar-deluxe.org
 ## Pipeline
 
 ```
-Input media → FFmpeg extract → Demucs separation → WhisperX ASR + wav2vec2 character alignment → torchcrepe pitch → Lyric alignment → Ultrastar .txt + ZIP
+Input media → FFmpeg extract → Demucs separation → selectable faster-whisper/WhisperX ASR → WhisperX wav2vec2 character alignment → torchcrepe pitch → Lyric alignment → Ultrastar .txt + ZIP
 ```
 
 ## Installation
@@ -100,13 +100,15 @@ Edit `cli/config.jsonc` (supports `//` and `/* */` comments):
 
 | Key | Default | Description |
 |---|---|---|
-| `whisperx_model` | `"medium"` | WhisperX ASR model size: `tiny`, `base`, `small`, `medium`, `large` |
-| `whisperx_language` | `"en"` | Language hint; empty enables detection |
+| `transcription_backend` | `"faster-whisper"` | ASR path: original `faster-whisper` or WhisperX's batched/VAD wrapper |
+| `whisper_model` | `"medium"` | ASR model used by either backend |
+| `whisper_language` | `"en"` | Language hint; empty enables detection |
+| `faster_whisper_compute_type` | `"auto"` | CTranslate2 compute type for standalone faster-whisper |
 | `whisperx_batch_size` | `8` | Number of ASR chunks processed per inference batch |
 | `whisperx_compute_type` | `"default"` | CTranslate2 compute type (`default`, `float16`, `float32`, `int8`) |
 | `whisperx_align_model` | `""` | Optional wav2vec2 alignment model override |
 | `whisperx_interpolate_method` | `"nearest"` | Missing-character timing policy (`nearest`, `linear`, `ignore`) |
-| `transcribe_runs` | `3` | Demucs + WhisperX passes consolidated via Smith-Waterman majority vote |
+| `transcribe_runs` | `3` | Demucs + ASR + WhisperX alignment passes consolidated via majority vote |
 | `demucs_model` | `"htdemucs"` | Demucs model name |
 | `sample_rate` | `44100` | Audio sample rate |
 | `pitch_min_hz` | `65.41` | Pitch floor (C2) |

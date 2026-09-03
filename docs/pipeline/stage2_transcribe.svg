@@ -56,11 +56,11 @@
 
   <!-- WhisperX box -->
   <rect x="710" y="262" width="640" height="372" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
-  <text x="730" y="290" font-size="15" font-weight="bold" fill="#1d4ed8">WhisperX — load_model(config.whisperx_model, default "medium")</text>
+  <text x="730" y="290" font-size="15" font-weight="bold" fill="#1d4ed8">Selectable ASR backend → WhisperX forced alignment</text>
   <text x="730" y="314" font-size="12.5" fill="#475569">input: tmp/song_vocals.wav (vocals only, so recognition ignores instruments)</text>
-  <text x="730" y="342" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">result = model.transcribe(audio, batch_size=config.whisperx_batch_size)</text>
-  <text x="730" y="362" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">aligned = whisperx.align(result["segments"], model_a, metadata, audio,</text>
-  <text x="730" y="382" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">    device, return_char_alignments=True)</text>
+  <text x="730" y="342" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">backend = config.transcription_backend  # faster-whisper or whisperx</text>
+  <text x="730" y="362" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">segments = transcribe(vocals, model=config.whisper_model, prompt=lyrics)</text>
+  <text x="730" y="382" font-size="12.5" fill="#0f172a" font-family="Consolas, monospace">aligned = whisperx.align(segments, ..., return_char_alignments=True)</text>
 
   <rect x="730" y="400" width="120" height="44" rx="8" fill="#bfdbfe" stroke="#3b82f6"/>
   <text x="790" y="420" font-size="13" fill="#1e3a8a" text-anchor="middle">hello</text>
@@ -74,7 +74,7 @@
   <text x="1150" y="428" font-size="16" fill="#64748b">…</text>
 
   <text x="730" y="486" font-size="12.5" fill="#475569">aligned words per pass: [{word, start, end, score, characters}]</text>
-  <text x="730" y="510" font-size="12.5" fill="#475569">language hint: config.whisperx_language; aligner chosen per language</text>
+  <text x="730" y="510" font-size="12.5" fill="#475569">language hint: config.whisper_language; WhisperX aligner chosen per language</text>
   <rect x="730" y="528" width="600" height="58" rx="8" fill="#ffffff" stroke="#93c5fd"/>
   <text x="744" y="552" font-size="12" fill="#1d4ed8">Debug dump: tmp/song_whisperx_passes.json (words + character alignments).</text>
   <text x="744" y="570" font-size="12" fill="#1d4ed8">Empty runs skipped; all runs empty → RuntimeError.</text>

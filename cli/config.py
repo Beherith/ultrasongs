@@ -24,8 +24,10 @@ class Config:
     """Frozen pipeline configuration."""
 
     device: str = "auto"
-    whisperx_model: str = "medium"
-    whisperx_language: str = "en"
+    transcription_backend: str = "faster-whisper"
+    whisper_model: str = "medium"
+    whisper_language: str = "en"
+    faster_whisper_compute_type: str = "auto"
     whisperx_batch_size: int = 8
     whisperx_compute_type: str = "default"
     whisperx_align_model: str = ""
@@ -93,8 +95,10 @@ def load_config(config_path: str | None = None) -> Config:
     # Map JSONC keys to dataclass fields
     field_map = {
         "device": str,
-        "whisperx_model": str,
-        "whisperx_language": str,
+        "transcription_backend": str,
+        "whisper_model": str,
+        "whisper_language": str,
+        "faster_whisper_compute_type": str,
         "whisperx_batch_size": int,
         "whisperx_compute_type": str,
         "whisperx_align_model": str,
@@ -143,6 +147,16 @@ def load_config(config_path: str | None = None) -> Config:
                 print(f"[config] Warning: invalid value for {key}: {data[key]!r} — using default", file=sys.stderr)
 
     defaults = Config()
+    if kwargs.get("transcription_backend", defaults.transcription_backend) not in {
+        "faster-whisper", "whisperx",
+    }:
+        print("[config] Warning: invalid transcription_backend — using default", file=sys.stderr)
+        kwargs.pop("transcription_backend", None)
+    if kwargs.get("faster_whisper_compute_type", defaults.faster_whisper_compute_type) not in {
+        "auto", "default", "float16", "float32", "int8", "int8_float16",
+    }:
+        print("[config] Warning: invalid faster_whisper_compute_type — using default", file=sys.stderr)
+        kwargs.pop("faster_whisper_compute_type", None)
     if kwargs.get("whisperx_batch_size", defaults.whisperx_batch_size) < 1:
         print("[config] Warning: whisperx_batch_size must be at least 1 — using default", file=sys.stderr)
         kwargs.pop("whisperx_batch_size", None)

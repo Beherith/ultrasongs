@@ -772,6 +772,7 @@ def _note_segments(
             safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in f"{word or 'w'}/{syllable or 's'}")
             fname = f"{plot_index:04d}_{safe}_{start:.3f}_{end:.3f}.png"
             fig.savefig(plot_dir / fname, dpi=140)
+            logger.info(f"[note_segments] plot saved to {fname}")
             plt.close(fig)
         except Exception as exc:  # pragma: no cover - plotting must never break the pipeline
             logger.error("[note_segments] plot render failed: %s", exc)

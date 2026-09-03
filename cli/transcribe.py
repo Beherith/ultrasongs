@@ -358,6 +358,7 @@ def _dump_whisperx_passes(
     dump_path = temp_path / f"{base_name}_whisperx_passes.json"
     payload = {
         "source": str(mp3_path),
+        "transcription_backend": config.transcription_backend,
         "num_runs": n_runs,
         "runs": pass_records,
     }
@@ -381,7 +382,10 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     DEVICE = _get_device(config.device)
 
     logger.info(f"Starting transcription: {mp3_path}")
-    logger.info(f"Device: {DEVICE}, WhisperX model: {config.whisperx_model}")
+    logger.info(
+        f"Device: {DEVICE}, ASR backend: {config.transcription_backend}, "
+        f"Whisper model: {config.whisper_model}"
+    )
 
     base = mp3_path.with_suffix("")
     vocals_mp3 = base.with_name(base.name + "_vocals.mp3")
@@ -397,26 +401,44 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
 
     # Step 2: Separate + transcribe, repeated.
     # Demucs is not fully deterministic, so each pass yields a slightly different
-    # vocal/instrumental split; the per-pass WhisperX outputs are consolidated.
+    # vocal/instrumental split; the per-pass aligned outputs are consolidated.
     logger.info(
         f"Step 2/6: Separating + transcribing "
         f"({'single run' if n_runs == 1 else f'{n_runs} runs + consolidation'})…"
     )
     from cli.consensus import consolidate_whisperx_runs
-    from cli.whisperx_transcribe import load_asr_model, load_audio, transcribe_and_align
+    from cli.whisperx_transcribe import (
+        align_segments,
+        load_audio,
+        load_faster_whisper_model,
+        load_whisperx_asr_model,
+        transcribe_with_faster_whisper,
+        transcribe_with_whisperx,
+    )
 
     # Models are loaded once and reused across every pass.
     demucs_model = load_demucs_model(config.demucs_model)
-    language_hint = config.whisperx_language or None
-    print(f"[whisperx] Running on {DEVICE} (compute_type={config.whisperx_compute_type})")
+    language_hint = config.whisper_language or None
     try:
-        whisperx_model = load_asr_model(
-            config.whisperx_model,
-            DEVICE,
-            config.whisperx_compute_type,
-            language_hint,
-            lyrics_prompt,
-        )
+        if config.transcription_backend == "faster-whisper":
+            print(
+                f"[faster-whisper] Running on {DEVICE} "
+                f"(compute_type={config.faster_whisper_compute_type})"
+            )
+            asr_model = load_faster_whisper_model(
+                config.whisper_model,
+                DEVICE,
+                config.faster_whisper_compute_type,
+            )
+        else:
+            print(f"[whisperx] Running on {DEVICE} (compute_type={config.whisperx_compute_type})")
+            asr_model = load_whisperx_asr_model(
+                config.whisper_model,
+                DEVICE,
+                config.whisperx_compute_type,
+                language_hint,
+                lyrics_prompt,
+            )
     except Exception:
         demucs_model = None
         release_demucs_model()
@@ -441,15 +463,31 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
 
             sf.write(str(vocals_wav), vocals, out_sr)
 
-            logger.info(f"WhisperX transcription + forced alignment {label}…")
+            logger.info(
+                f"{config.transcription_backend} transcription + "
+                f"WhisperX forced alignment {label}…"
+            )
             try:
                 whisperx_audio = load_audio(str(vocals_wav))
-                run_words, run_language = transcribe_and_align(
-                    whisperx_model,
+                if config.transcription_backend == "faster-whisper":
+                    segments, run_language = transcribe_with_faster_whisper(
+                        asr_model,
+                        str(vocals_wav),
+                        language_hint,
+                        lyrics_prompt,
+                    )
+                else:
+                    segments, run_language = transcribe_with_whisperx(
+                        asr_model,
+                        whisperx_audio,
+                        config.whisperx_batch_size,
+                        language_hint,
+                    )
+                run_words, run_language = align_segments(
+                    segments,
+                    run_language,
                     whisperx_audio,
                     DEVICE,
-                    config.whisperx_batch_size,
-                    language_hint,
                     config.whisperx_align_model or None,
                     config.whisperx_interpolate_method,
                     align_model_cache,
@@ -466,12 +504,12 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
             })
 
             if not run_words:
-                logger.warning(f"WhisperX pass {label} returned no aligned words; skipping")
+                logger.warning(f"Aligned ASR pass {label} returned no words; skipping")
             else:
                 if detected_language is None:
                     detected_language = run_language
                 logger.info(
-                    f"WhisperX pass {label}: {len(run_words)} aligned words "
+                    f"Aligned ASR pass {label}: {len(run_words)} words "
                     f"(language={run_language})"
                 )
                 raw_runs.append(run_words)
@@ -483,7 +521,7 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
                     torch.cuda.empty_cache()
     finally:
         demucs_model = None
-        whisperx_model = None
+        asr_model = None
         align_model_cache.clear()
         release_demucs_model()
 
@@ -499,7 +537,7 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
         raw_words = raw_runs[0]
 
     if detected_language is None:
-        detected_language = config.whisperx_language or "en"
+        detected_language = config.whisper_language or "en"
 
     # Stems, pitch, and pauses come from the first pass's vocal track.
     # Step 3: Save stems

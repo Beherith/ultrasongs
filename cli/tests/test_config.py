@@ -11,8 +11,10 @@ from cli.config import Config, load_config
 class TestConfigDefaults:
     def test_default_values(self):
         cfg = Config()
-        assert cfg.whisperx_model == "medium"
-        assert cfg.whisperx_language == "en"
+        assert cfg.transcription_backend == "faster-whisper"
+        assert cfg.whisper_model == "medium"
+        assert cfg.whisper_language == "en"
+        assert cfg.faster_whisper_compute_type == "auto"
         assert cfg.whisperx_batch_size == 8
         assert cfg.whisperx_compute_type == "default"
         assert cfg.whisperx_align_model == ""
@@ -53,21 +55,23 @@ class TestConfigDefaults:
     def test_frozen(self):
         cfg = Config()
         with pytest.raises(Exception):  # FrozenInstanceError
-            cfg.whisperx_model = "large"
+            cfg.whisper_model = "large"
 
 
 class TestLoadConfig:
     def test_load_from_file(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonc", delete=False) as f:
             json.dump({
-                "whisperx_model": "large",
+                "transcription_backend": "whisperx",
+                "whisper_model": "large",
                 "whisperx_batch_size": 4,
                 "sample_rate": 48000,
                 "output_dir": "/custom/output",
             }, f)
             f.flush()
             cfg = load_config(f.name)
-            assert cfg.whisperx_model == "large"
+            assert cfg.transcription_backend == "whisperx"
+            assert cfg.whisper_model == "large"
             assert cfg.whisperx_batch_size == 4
             assert cfg.sample_rate == 48000
             assert cfg.output_dir == "/custom/output"
@@ -79,7 +83,7 @@ class TestLoadConfig:
             f.write('''
 {
   // This is a comment
-  "whisperx_model": "tiny",
+  "whisper_model": "tiny",
   /* multi-line
      comment */
   "sample_rate": 22050,
@@ -87,12 +91,12 @@ class TestLoadConfig:
 ''')
             f.flush()
             cfg = load_config(f.name)
-            assert cfg.whisperx_model == "tiny"
+            assert cfg.whisper_model == "tiny"
             assert cfg.sample_rate == 22050
 
     def test_missing_file_returns_defaults(self):
         cfg = load_config("/nonexistent/path/config.jsonc")
-        assert cfg.whisperx_model == "medium"
+        assert cfg.whisper_model == "medium"
 
     def test_invalid_value_uses_default(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonc", delete=False) as f:
@@ -109,6 +113,8 @@ class TestLoadConfig:
                 "whisperx_batch_size": 0,
                 "whisperx_compute_type": "half-ish",
                 "whisperx_interpolate_method": "guess",
+                "transcription_backend": "magic",
+                "faster_whisper_compute_type": "half-ish",
             }, f)
             f.flush()
             cfg = load_config(f.name)
@@ -116,3 +122,5 @@ class TestLoadConfig:
         assert cfg.whisperx_batch_size == 8
         assert cfg.whisperx_compute_type == "default"
         assert cfg.whisperx_interpolate_method == "nearest"
+        assert cfg.transcription_backend == "faster-whisper"
+        assert cfg.faster_whisper_compute_type == "auto"

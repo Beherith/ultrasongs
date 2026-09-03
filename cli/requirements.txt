@@ -4,6 +4,7 @@
 #   pip install torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
 # Then install the rest:
 whisperx==3.8.6
+faster-whisper>=1.2.0
 demucs>=4.0.0
 torchcrepe>=0.0.20
 soundfile>=0.12.0

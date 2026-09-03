@@ -5,23 +5,31 @@
   // "cpu" — force CPU (useful for debugging or when GPU causes issues).
   "device": "auto",
 
-  // WhisperX ASR model size.
+  // ASR backend. "faster-whisper" uses the original non-VAD transcription
+  // path, then sends its segments to WhisperX only for forced alignment.
+  // "whisperx" uses WhisperX's batched, VAD-driven transcription wrapper.
+  "transcription_backend": "faster-whisper",
+
+  // Whisper ASR model used by either transcription backend.
   // Options: "tiny", "base", "small", "medium", "large"
   // "medium" is the default — it offers the best balance of transcription accuracy
   // and processing speed. Use "large" for harder-to-understand audio (heavy accents,
   // fast singing, overlapping vocals) at the cost of significantly slower runtime
   // and higher VRAM usage (~10GB). Use "small" or "base" for faster processing on
   // clean audio or limited hardware.
-  "whisperx_model": "large",
+  "whisper_model": "large-v3",
 
-  // Language hint for WhisperX transcription and forced alignment.
-  // When set (e.g., "en", "de", "es"), WhisperX skips auto-detection and uses
+  // Language hint for Whisper transcription and WhisperX forced alignment.
+  // When set (e.g., "en", "de", "es"), ASR skips auto-detection and uses
   // the specified language model directly. This improves transcription speed and
   // accuracy for known-language songs. Set to "" (empty string) to let Whisper
   // auto-detect the language, which is useful for multilingual songs or when
   // the language is unknown. Note: forcing the wrong language will produce
   // garbled transcription.
-  "whisperx_language": "en",
+  "whisper_language": "en",
+
+  // CTranslate2 compute type for the standalone faster-whisper backend.
+  "faster_whisper_compute_type": "auto",
 
   // Number of audio chunks WhisperX transcribes in one inference batch.
   // Reduce this if the ASR model runs out of VRAM; increase it for more throughput.
@@ -41,21 +49,22 @@
   "whisperx_interpolate_method": "linear",
 
   // Number of independent separation + transcription passes to run and
-  // consolidate. Demucs and WhisperX ASR are not fully deterministic, so a single
+  // consolidate. Demucs and Whisper ASR are not fully deterministic, so a single
   // run can recognize slightly different words from another. Each pass runs
   // Demucs on the source audio, then transcribes that pass's vocals with
-  // WhisperX; the passes are then aligned to each other with Smith-Waterman and
+  // the selected ASR backend; WhisperX aligns every pass at character level,
+  // then the passes are aligned to each other with Smith-Waterman and
   // a per-word majority vote produces a single consensus transcription that is
   // more stable than any single run. Set to 1 for a single fast pass (no
   // consolidation). Higher values (e.g., 5) are more robust but roughly
-  // multiply the Demucs + WhisperX runtime.
+  // multiply the Demucs + ASR + forced-alignment runtime.
   "transcribe_runs": 7,
 
   // Demucs source separation model.
   // "htdemucs" (Hybrid Transformer) is the default — it produces the highest
   // quality vocal/instrumental splits. Alternatives like "hdemucs" (older hybrid
   // model) or "mdx" variants are lighter but less accurate. A better separation
-  // directly improves pitch detection and WhisperX transcription quality.
+  // directly improves pitch detection and transcription quality.
   "demucs_model": "htdemucs",
 
   // Audio sample rate for internal processing.
