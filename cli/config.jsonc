@@ -216,7 +216,7 @@
    // Hz) as the background of the amplitude panel. This is for debugging only:
    // it can be slow and produces many PNG files, so keep it false during normal
    // use.
-   "note_segment_plots": true,
+   "note_segment_plots": false,
 
    // FFmpeg audio bitrate for the extracted MP3.
   // 128kbps is sufficient for pitch detection, BPM analysis, and transcription

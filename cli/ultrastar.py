@@ -5,7 +5,7 @@ import re
 from cli.pipeline_types import UltrastarMeta, UltrastarNote
 
 
-_NOTE_RE = re.compile(r"^([:*])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$")
+_NOTE_RE = re.compile(r"^\s*([:*])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$")
 
 
 def ms_to_beats(ms: float, bpm: float, gap: int) -> int:
@@ -55,6 +55,54 @@ def build_ultrastar_txt(notes: list[UltrastarNote], meta: UltrastarMeta) -> str:
     return f"{header}\n\n{body}\nE\n"
 
 
+def extract_lyrics_from_ultrastar(content: str) -> str:
+    """Extract plain lyrics text from an Ultrastar .txt file.
+
+    Reassembles note syllables into words and lines:
+    - syllables without a leading space extend the current word
+    - syllables with a leading space start a new word
+    - syllables with a trailing space end the current word
+    - unvoiced notes (~) are skipped
+    - line-break notes (-) end the current lyric line
+    """
+    lines: list[str] = []
+    words: list[str] = []
+    pending = ""
+
+    def flush_word() -> None:
+        nonlocal pending
+        if pending:
+            words.append(pending)
+            pending = ""
+
+    def flush_line() -> None:
+        flush_word()
+        if words:
+            lines.append(" ".join(words))
+            words.clear()
+
+    for line in content.split("\n"):
+        trimmed = line.strip()
+        if not trimmed or trimmed.startswith("#") or trimmed == "E":
+            continue
+
+        if match := _NOTE_RE.match(line.rstrip("\r\n")):
+            raw = match.group(5) or ""
+            syllable = raw.strip()
+            if not syllable or syllable == "~":
+                continue
+            if raw.startswith(" "):
+                flush_word()
+            pending += syllable
+            if raw.endswith(" "):
+                flush_word()
+        elif trimmed.startswith("-"):
+            flush_line()
+
+    flush_line()
+    return "\n".join(lines) + "\n" if lines else ""
+
+
 def parse_ultrastar_txt(content: str) -> tuple[UltrastarMeta, list[UltrastarNote]]:
     """Parse an Ultrastar .txt file into structured data.
 
@@ -87,10 +135,10 @@ def parse_ultrastar_txt(content: str) -> tuple[UltrastarMeta, list[UltrastarNote
                 syllable=match.group(5) or "",
             ))
 
-        elif trimmed.startswith("- "):
+        elif trimmed.startswith("-"):
             notes.append(UltrastarNote(
                 note_type="-",
-                start_beat=int(trimmed[2:]),
+                start_beat=int(trimmed[1:].strip()),
                 duration=0,
                 pitch=0,
                 syllable="",

@@ -62,6 +62,9 @@ cli/.pytest_cache/
 # Add ./output/ directory to gitignore for intermediate output files
 /output/
 
+# TEst Songs
+/songs/
+
 
 # Ralph Loop state
 .opencode/ralph-loop.local.md

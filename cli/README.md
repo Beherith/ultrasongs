@@ -57,6 +57,13 @@ python -m cli process \
   [--resume intermediate.json]
 ```
 
+`--lyrics` also accepts an existing Ultrastar `.txt` file: the plain lyrics are extracted from it, and `--mp3`/`--title`/`--artist` (optional in that case) fall back to the file's `#MP3` (resolved relative to the .txt file's directory), `#TITLE`, and `#ARTIST` tags. `#BPM` and `#GAP` are ignored; command line arguments always win.
+
+```bash
+python -m cli process --lyrics output/song.txt
+python -m cli process --lyrics output/song.txt --title "New Title"
+```
+
 **Stages** (`--stage`): Run a partial pipeline. Each stage includes all prior stages.
 
 | Stage | What it does |
@@ -93,6 +100,18 @@ python -m cli diff \
 ```
 
 **Tolerances:** BPM ±2, beat offset ±4, duration ±4, pitch ±3 semitones.
+
+### `lyrics` — Extract plain lyrics from an Ultrastar file
+
+Reassembles note syllables into words and lines (unvoiced `~` notes are skipped, `-` notes become line breaks). Prints to stdout by default.
+
+```bash
+python -m cli lyrics \
+  --txt "Existing Song.txt" \
+  [--output lyrics.txt]
+```
+
+A standalone wrapper is available at the repo root: `python extract_lyrics.py song.txt [-o lyrics.txt]`.
 
 ## Configuration
 

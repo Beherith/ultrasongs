@@ -15,6 +15,8 @@ Generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` son
 - Smith-Waterman phonetic alignment of transcribed words → user lyrics
 - BPM detection via [librosa](https://librosa.org/) + beat-accurate note placement
 - Syllable splitting (20+ languages via [pyphen](https://github.com/karpathy/pyphen))
+- Re-process from an existing Ultrastar `.txt` — lyrics, title, artist, and audio track are extracted automatically
+- Standalone lyrics extraction from Ultrastar files (`lyrics` subcommand or `extract_lyrics.py`)
 - Partial pipeline execution and resume from intermediate results
 - Built-in `.txt` diff tool with configurable tolerances
 - HTML preview with SVG pitch visualization
@@ -51,6 +53,11 @@ python -m cli process --mp3 song.mp3 --lyrics lyrics.txt --title "Title" --artis
 # With video background
 python -m cli process --mp3 song.mp4 --lyrics lyrics.txt --title "Title" --artist "Artist" --video song.mp4
 
+# Re-process from an existing Ultrastar file
+# Lyrics, title, artist, and audio (#MP3 tag, relative to the .txt file)
+# are taken from the file; --mp3/--title/--artist override when given.
+python -m cli process --lyrics output/song.txt
+
 # Import existing Ultrastar file
 python -m cli import --txt existing.txt --mp3 existing.mp3
 
@@ -59,6 +66,10 @@ python -m cli diff --original reference.txt --generated output.txt
 
 # Generate HTML preview
 python -m cli preview --txt output.txt --pitch tmp/name_pitch.json
+
+# Extract plain lyrics from an Ultrastar file (to stdout or --output file)
+python -m cli lyrics --txt output.txt
+python extract_lyrics.py output.txt   # standalone script
 ```
 
 Global flags:

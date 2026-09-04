@@ -43,10 +43,14 @@ GPU note: CUDA 12.8 + PyTorch 2.8 install command is documented at the top of `c
 pip install -e cli/                    # Install package (creates `ultrasongs` cmd)
 pip install -r cli/requirements.txt    # Install dependencies
 
-python -m cli process --mp3 song.mp3 --lyrics lyrics.txt --title "Title" --artist "Artist" [--video song.mp4] [--output ./dir]
+python -m cli process --lyrics lyrics.txt --mp3 song.mp3 --title "Title" --artist "Artist" [--video song.mp4] [--output ./dir]
+# With an Ultrastar .txt as lyrics input, --mp3/--title/--artist are optional
+# and fall back to the file's #MP3/#TITLE/#ARTIST tags (BPM/GAP are ignored).
+python -m cli process --lyrics output/tit31.txt
 python -m cli import --txt existing.txt --mp3 existing.mp3
 python -m cli diff --original a.txt --generated b.txt      # exit 0 if within tolerances, else 1
 python -m cli preview --txt output.txt --pitch tmp/whisperx_pitch.json
+python -m cli lyrics --txt output/tit31.txt [--output lyrics.txt]   # plain lyrics to stdout or file
 
 python -m cli -v process ...           # Verbose (DEBUG) logging
 python -m cli -q process ...           # Quiet (WARNING+) logging
@@ -60,6 +64,8 @@ python -m cli process ... --resume tmp/name_transcribe.json --stage align   # Re
 ```
 
 Diff tolerances (`cli/diff.py`): BPM ±2, GAP exact match, singing-note count exact, per-note beat offset ±4, duration ±4, pitch ±3 semitones.
+
+`process --lyrics` also accepts an Ultrastar `.txt` file: if the first non-empty line is a `#` header, plain lyrics are automatically extracted from it (`extract_lyrics_from_ultrastar`) and the pipeline runs on those. `--title`, `--artist`, and `--mp3` then fall back to the file's `#TITLE`, `#ARTIST`, and `#MP3` tags (the `#MP3` path is resolved relative to the .txt file's directory) when not given on the command line. `#BPM` and `#GAP` are ignored.
 
 ## Code Conventions
 
@@ -87,7 +93,7 @@ Diff tolerances (`cli/diff.py`): BPM ±2, GAP exact match, singing-note count ex
 | `cli/debug_bpm.py` | Standalone debug script: splits an MP3 into 30 s chunks (FFmpeg) and compares BPM estimates |
 | `cli/align.py` | `align_lyrics()`: Smith-Waterman phonetic alignment (affine gaps), interpolation for unmatched words, pause-boundary clamping, syllabification, `_note_segments()` per-syllable vocal-activity trimming + pitch-change splitting, optional matplotlib diagnostic plots |
 | `cli/syllabify.py` | Syllable splitting via pyphen (language alias map, cached hyphenators) |
-| `cli/ultrastar.py` | `ms_to_beats()`, `build_ultrastar_txt()`, `parse_ultrastar_txt()` |
+| `cli/ultrastar.py` | `ms_to_beats()`, `build_ultrastar_txt()`, `parse_ultrastar_txt()`, `extract_lyrics_from_ultrastar()` |
 | `cli/generate.py` | `generate_ultrastar()`: beat mapping anchored to first beat (`#GAP`), overlap prevention, line breaks |
 | `cli/package.py` | Output packaging (`.txt`, MP3, video, stems, ZIP) |
 | `cli/diff.py` | Compare two Ultrastar `.txt` files with tolerances, `DiffReport.print()` |
@@ -95,7 +101,7 @@ Diff tolerances (`cli/diff.py`): BPM ±2, GAP exact match, singing-note count ex
 | `cli/pitch_to_html.py` | Standalone script: render a pitch JSON as scrollable HTML verse visualizations |
 | `cli/logging_setup.py` | `setup_logging()` / `get_logger()` |
 
-Repo-root one-off debug scripts (read `tmp/`/`output/` artifacts, not part of the pipeline): `check_pitch.py`, `compare_timings.py`, `octave_spectrogram.py`, `pitch_to_html.py`, `score_songs.py`. Root `tests/` is an empty leftover (only stale `__pycache__`); real tests live in `cli/tests/`.
+Repo-root one-off debug scripts (read `tmp/`/`output/` artifacts, not part of the pipeline): `check_pitch.py`, `compare_timings.py`, `octave_spectrogram.py`, `pitch_to_html.py`, `score_songs.py`. Repo-root `extract_lyrics.py` is a standalone wrapper around `cli/ultrastar.extract_lyrics_from_ultrastar` (same function as the `lyrics` subcommand). Root `tests/` is an empty leftover (only stale `__pycache__`); real tests live in `cli/tests/`.
 
 ## Transcription Backends
 
@@ -206,7 +212,7 @@ pytest cli/tests/
 | `cli/tests/test_pipeline_types.py` | `TranscribeResult`/`WordTimestamp` round-trips, character alignments, legacy pitch-frame recovery |
 | `cli/tests/test_syllabify.py` | `split_word()`, `syllabify_line()`, multi-language, unsupported |
 | `cli/tests/test_transcribe_alignment.py` | CREPE/band-energy frame-count parity, exact frame alignment (incl. real torchcrepe) |
-| `cli/tests/test_ultrastar.py` | `ms_to_beats()`, `build_ultrastar_txt()`, `parse_ultrastar_txt()`, round-trip |
+| `cli/tests/test_ultrastar.py` | `ms_to_beats()`, `build_ultrastar_txt()`, `parse_ultrastar_txt()`, `extract_lyrics_from_ultrastar()`, round-trip |
 | `cli/tests/test_whisperx_transcribe.py` | Word/character extraction, artifact filters, model loading (monkeypatched), alignment-model caching, faster-whisper paths, Windows DLL registration |
 
 ## Other

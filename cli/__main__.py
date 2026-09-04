@@ -36,10 +36,26 @@ def _build_parser() -> argparse.ArgumentParser:
 
     # ── process ──────────────────────────────────────────────────────────────
     proc = subparsers.add_parser("process", help="Full pipeline: extract, transcribe, align, generate")
-    proc.add_argument("--mp3", required=True, help="Input audio/video file")
-    proc.add_argument("--lyrics", required=True, help="Lyrics text file")
-    proc.add_argument("--title", required=True, help="Song title")
-    proc.add_argument("--artist", required=True, help="Artist name")
+    proc.add_argument(
+        "--mp3",
+        default=None,
+        help="Input audio/video file (default: #MP3 tag of the lyrics file, if it is an Ultrastar .txt)",
+    )
+    proc.add_argument(
+        "--lyrics",
+        required=True,
+        help="Lyrics text file (plain text, or an Ultrastar .txt file whose lyrics will be extracted)",
+    )
+    proc.add_argument(
+        "--title",
+        default=None,
+        help="Song title (default: #TITLE tag of the lyrics file, if it is an Ultrastar .txt)",
+    )
+    proc.add_argument(
+        "--artist",
+        default=None,
+        help="Artist name (default: #ARTIST tag of the lyrics file, if it is an Ultrastar .txt)",
+    )
     proc.add_argument("--video", default=None, help="Optional video file")
     proc.add_argument("--output", default=None, help="Output directory (overrides config)")
     proc.add_argument(
@@ -71,6 +87,11 @@ def _build_parser() -> argparse.ArgumentParser:
     prev.add_argument("--output", default=None, help="Output HTML file (default: <title>.html)")
     prev.add_argument("--pitch", default=None, help="Pitch detection JSON to overlay")
 
+    # ── lyrics ───────────────────────────────────────────────────────────────
+    lyr = subparsers.add_parser("lyrics", help="Extract plain lyrics from an Ultrastar .txt file")
+    lyr.add_argument("--txt", required=True, help="Ultrastar .txt file")
+    lyr.add_argument("--output", default=None, help="Output lyrics file (default: print to stdout)")
+
     return parser
 
 
@@ -97,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_diff(args, config)
     elif args.command == "preview":
         return _cmd_preview(args, config)
+    elif args.command == "lyrics":
+        return _cmd_lyrics(args)
     else:
         parser.print_help()
         return 1
@@ -115,9 +138,42 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
 
     logger = get_logger("cli.process")
 
-    mp3_path = Path(args.mp3)
     lyrics_path = Path(args.lyrics)
-    lyrics_text = lyrics_path.read_text(encoding="utf-8")
+    lyrics_input = lyrics_path.read_text(encoding="utf-8")
+
+    title = args.title
+    artist = args.artist
+    mp3_arg = args.mp3
+    if _looks_like_ultrastar(lyrics_input):
+        from cli.ultrastar import extract_lyrics_from_ultrastar, parse_ultrastar_txt
+
+        lyrics_text = extract_lyrics_from_ultrastar(lyrics_input)
+        meta, _ = parse_ultrastar_txt(lyrics_input)
+        if title is None:
+            title = meta.title
+        if artist is None:
+            artist = meta.artist
+        if mp3_arg is None:
+            mp3_arg = meta.mp3
+        logger.info(f"Lyrics input {lyrics_path.name} is an Ultrastar file; extracted plain lyrics")
+    else:
+        lyrics_text = lyrics_input
+
+    if not title or not artist or not mp3_arg:
+        missing = [name for name, value in (("--title", title), ("--artist", artist), ("--mp3", mp3_arg)) if not value]
+        logger.error(
+            f"Missing {', '.join(missing)}: provide them as command line arguments "
+            f"or use an Ultrastar .txt lyrics file with matching tags"
+        )
+        return 1
+
+    if args.mp3 is None:
+        mp3_path = lyrics_path.parent / mp3_arg
+    else:
+        mp3_path = Path(mp3_arg)
+    if not mp3_path.exists():
+        logger.error(f"Input audio file not found: {mp3_path}")
+        return 1
 
     # Ensure temp directory exists
     config.temp_path.mkdir(parents=True, exist_ok=True)
@@ -189,9 +245,9 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
             bpm=bpm_result.bpm,
             first_beat_ms=bpm_result.first_beat_ms,
             gap_ms=config.gap_lead_in_ms,
-            title=args.title,
-            artist=args.artist,
-            mp3_filename=f"{args.title}.mp3",
+            title=title,
+            artist=artist,
+            mp3_filename=f"{title}.mp3",
             video_filename=Path(args.video).name if args.video else None,
             config=config,
         )
@@ -203,7 +259,7 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
             txt_content=txt_content,
             mp3_path=audio_out,
             output_dir=output_dir,
-            title=args.title,
+            title=title,
             video_path=Path(args.video) if args.video else None,
             vocals_path=Path(result.vocals_path),
             accompaniment_path=Path(result.accompaniment_path),
@@ -212,7 +268,7 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
 
         from cli.html_preview import generate_preview
 
-        txt_path = output_dir / f"{args.title}.txt"
+        txt_path = output_dir / f"{title}.txt"
         pitch_json = config.temp_path / "whisperx_pitch.json"
         if pitch_json.exists():
             generate_preview(txt_path, pitch_json_path=pitch_json)
@@ -271,6 +327,33 @@ def _cmd_preview(args: argparse.Namespace, config: "Config") -> int:  # type: ig
     pitch_json = args.pitch if args.pitch else None
     generate_preview(txt_path, output_html, pitch_json)
     return 0
+
+
+def _cmd_lyrics(args: argparse.Namespace) -> int:
+    """Extract plain lyrics from an Ultrastar .txt file."""
+    from cli.logging_setup import get_logger
+    from cli.ultrastar import extract_lyrics_from_ultrastar
+
+    logger = get_logger("cli.lyrics")
+    content = Path(args.txt).read_text(encoding="utf-8")
+    lyrics = extract_lyrics_from_ultrastar(content)
+    if args.output:
+        output_path = Path(args.output)
+        output_path.write_text(lyrics, encoding="utf-8")
+        logger.info(f"Lyrics written to {output_path}")
+    else:
+        sys.stdout.write(lyrics)
+    return 0
+
+
+def _looks_like_ultrastar(text: str) -> bool:
+    """Return True if the text looks like an Ultrastar .txt file (header line first)."""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        return stripped.startswith("#")
+    return False
 
 
 if __name__ == "__main__":
