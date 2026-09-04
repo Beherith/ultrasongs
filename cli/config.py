@@ -32,6 +32,8 @@ class Config:
     whisperx_compute_type: str = "default"
     whisperx_align_model: str = ""
     whisperx_interpolate_method: str = "nearest"
+    whisperx_chunk_pause_ms: int = 1000
+    whisperx_align_runs: int = 3
     transcribe_runs: int = 3
     demucs_model: str = "htdemucs"
     sample_rate: int = 44100
@@ -103,6 +105,8 @@ def load_config(config_path: str | None = None) -> Config:
         "whisperx_compute_type": str,
         "whisperx_align_model": str,
         "whisperx_interpolate_method": str,
+        "whisperx_chunk_pause_ms": int,
+        "whisperx_align_runs": int,
         "transcribe_runs": int,
         "demucs_model": str,
         "sample_rate": int,
@@ -170,5 +174,12 @@ def load_config(config_path: str | None = None) -> Config:
     }:
         print("[config] Warning: invalid whisperx_interpolate_method — using default", file=sys.stderr)
         kwargs.pop("whisperx_interpolate_method", None)
+    if kwargs.get("whisperx_chunk_pause_ms", defaults.whisperx_chunk_pause_ms) < 0:
+        print("[config] Warning: whisperx_chunk_pause_ms must be non-negative — using default", file=sys.stderr)
+        kwargs.pop("whisperx_chunk_pause_ms", None)
+    whisperx_align_runs = kwargs.get("whisperx_align_runs", defaults.whisperx_align_runs)
+    if whisperx_align_runs < 1 or whisperx_align_runs % 2 == 0:
+        print("[config] Warning: whisperx_align_runs must be a positive odd number — using default", file=sys.stderr)
+        kwargs.pop("whisperx_align_runs", None)
 
     return Config(**kwargs)

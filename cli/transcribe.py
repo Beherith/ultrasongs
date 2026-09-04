@@ -1,4 +1,4 @@
-"""Transcription pipeline: Demucs, WhisperX forced alignment, and torchcrepe.
+"""Transcription pipeline: Demucs, faster-whisper, WhisperX, and torchcrepe.
 
 Refactored from python/transcribe_service.py into importable CLI modules.
 Heavy dependencies are lazy-loaded to allow import without GPU packages.
@@ -346,16 +346,17 @@ def detect_pauses(
 
 # ── Main transcription function ─────────────────────────────────────────────
 
-def _dump_whisperx_passes(
+def _dump_transcription_passes(
     config: Config,
     base_name: str,
     mp3_path: Path,
     n_runs: int,
     pass_records: list[dict[str, Any]],
 ) -> None:
-    """Write each pass's WhisperX alignment to a JSON file in the temp dir."""
+    """Write each pass's approximate ASR words to a JSON file in the temp dir."""
     temp_path = config.temp_path
-    dump_path = temp_path / f"{base_name}_whisperx_passes.json"
+    backend_name = config.transcription_backend.replace("-", "_")
+    dump_path = temp_path / f"{base_name}_{backend_name}_passes.json"
     payload = {
         "source": str(mp3_path),
         "transcription_backend": config.transcription_backend,
@@ -368,9 +369,9 @@ def _dump_whisperx_passes(
             json.dumps(payload, indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        logger.info(f"Saved per-pass WhisperX alignment to {dump_path}")
+        logger.info(f"Saved per-pass transcription results to {dump_path}")
     except OSError as exc:
-        logger.warning(f"Could not write WhisperX passes dump {dump_path}: {exc}")
+        logger.warning(f"Could not write transcription passes dump {dump_path}: {exc}")
 
 
 def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> TranscribeResult:
@@ -401,14 +402,15 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
 
     # Step 2: Separate + transcribe, repeated.
     # Demucs is not fully deterministic, so each pass yields a slightly different
-    # vocal/instrumental split; the per-pass aligned outputs are consolidated.
+    # vocal/instrumental split; the approximate ASR word outputs are consolidated.
     logger.info(
         f"Step 2/6: Separating + transcribing "
         f"({'single run' if n_runs == 1 else f'{n_runs} runs + consolidation'})…"
     )
-    from cli.consensus import consolidate_whisperx_runs
+    from cli.consensus import consolidate_timing_runs, consolidate_transcription_runs
     from cli.whisperx_transcribe import (
         align_segments,
+        extract_faster_whisper_words,
         load_audio,
         load_faster_whisper_model,
         load_whisperx_asr_model,
@@ -463,12 +465,8 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
 
             sf.write(str(vocals_wav), vocals, out_sr)
 
-            logger.info(
-                f"{config.transcription_backend} transcription + "
-                f"WhisperX forced alignment {label}…"
-            )
+            logger.info(f"{config.transcription_backend} transcription {label}…")
             try:
-                whisperx_audio = load_audio(str(vocals_wav))
                 if config.transcription_backend == "faster-whisper":
                     segments, run_language = transcribe_with_faster_whisper(
                         asr_model,
@@ -476,22 +474,24 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
                         language_hint,
                         lyrics_prompt,
                     )
+                    run_words = extract_faster_whisper_words(segments)
                 else:
+                    whisperx_audio = load_audio(str(vocals_wav))
                     segments, run_language = transcribe_with_whisperx(
                         asr_model,
                         whisperx_audio,
                         config.whisperx_batch_size,
                         language_hint,
                     )
-                run_words, run_language = align_segments(
-                    segments,
-                    run_language,
-                    whisperx_audio,
-                    DEVICE,
-                    config.whisperx_align_model or None,
-                    config.whisperx_interpolate_method,
-                    align_model_cache,
-                )
+                    run_words, run_language = align_segments(
+                        segments,
+                        run_language,
+                        whisperx_audio,
+                        DEVICE,
+                        config.whisperx_align_model or None,
+                        config.whisperx_interpolate_method,
+                        align_model_cache,
+                    )
             finally:
                 vocals_wav.unlink(missing_ok=True)
 
@@ -504,12 +504,12 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
             })
 
             if not run_words:
-                logger.warning(f"Aligned ASR pass {label} returned no words; skipping")
+                logger.warning(f"ASR pass {label} returned no words; skipping")
             else:
                 if detected_language is None:
                     detected_language = run_language
                 logger.info(
-                    f"Aligned ASR pass {label}: {len(run_words)} words "
+                    f"ASR pass {label}: {len(run_words)} words "
                     f"(language={run_language})"
                 )
                 raw_runs.append(run_words)
@@ -525,13 +525,13 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
         align_model_cache.clear()
         release_demucs_model()
 
-    _dump_whisperx_passes(config, base.name, mp3_path, n_runs, pass_records)
+    _dump_transcription_passes(config, base.name, mp3_path, n_runs, pass_records)
 
     if not raw_runs:
-        raise RuntimeError("WhisperX returned empty forced alignment on all passes")
+        raise RuntimeError(f"{config.transcription_backend} returned no words on any pass")
 
     if len(raw_runs) > 1:
-        raw_words = consolidate_whisperx_runs(raw_runs)
+        raw_words = consolidate_transcription_runs(raw_runs)
         logger.info(f"Consolidated {len(raw_runs)} runs into {len(raw_words)} words")
     else:
         raw_words = raw_runs[0]
@@ -539,7 +539,105 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     if detected_language is None:
         detected_language = config.whisper_language or "en"
 
-    # Stems, pitch, and pauses come from the first pass's vocal track.
+    # Stems, pitch, pauses, and exact timing all use the first pass's vocal
+    # track. The later WhisperX alignment never changes pitch or amplitude.
+    audio_duration = len(primary_vocals) / primary_sr
+
+    # Detect pauses before forced alignment: pauses longer than the configured
+    # threshold become hard chunk boundaries for both lyrics and vocals.
+    pauses = detect_pauses(
+        primary_vocals, primary_sr,
+        min_silence_ms=config.pause_min_silence_ms,
+        threshold_ratio=config.pause_threshold_pct / 100.0,
+    )
+    logger.info(f"Detected {len(pauses)} pause regions")
+
+    if config.transcription_backend == "faster-whisper":
+        if not lyrics_prompt or not lyrics_prompt.strip():
+            raise RuntimeError("The hybrid faster-whisper/WhisperX pipeline requires lyrics")
+
+        from cli.hybrid_transcribe import (
+            build_lyric_chunks,
+            offset_aligned_words,
+            slice_audio,
+        )
+
+        chunks = build_lyric_chunks(
+            lyrics_prompt,
+            raw_words,
+            pauses,
+            audio_duration,
+            min_pause_seconds=config.whisperx_chunk_pause_ms / 1000.0,
+        )
+        if not chunks:
+            raise RuntimeError("Could not map the supplied lyrics onto the transcription")
+        logger.info(
+            "WhisperX exact timing: %d lyric/audio chunk(s) split at pauses > %.3f s",
+            len(chunks),
+            config.whisperx_chunk_pause_ms / 1000.0,
+        )
+
+        exact_runs: list[list[dict[str, Any]]] = []
+        exact_align_cache: dict[str, tuple[Any, dict[str, Any]]] = {}
+        sf.write(str(vocals_wav), primary_vocals, primary_sr)
+        try:
+            whisperx_audio = load_audio(str(vocals_wav))
+            for align_run_index in range(config.whisperx_align_runs):
+                exact_words: list[dict[str, Any]] = []
+                for chunk_index, chunk in enumerate(chunks, start=1):
+                    chunk_audio = slice_audio(
+                        whisperx_audio,
+                        chunk.start,
+                        chunk.end,
+                        audio_duration,
+                    )
+                    local_duration = chunk.end - chunk.start
+                    logger.info(
+                        "WhisperX timing pass %d/%d, lyric chunk %d/%d: "
+                        "%.2f-%.2f s, words %d-%d",
+                        align_run_index + 1,
+                        config.whisperx_align_runs,
+                        chunk_index,
+                        len(chunks),
+                        chunk.start,
+                        chunk.end,
+                        chunk.first_word + 1,
+                        chunk.last_word + 1,
+                    )
+                    aligned_chunk, _ = align_segments(
+                        [{"text": chunk.text, "start": 0.0, "end": local_duration}],
+                        detected_language,
+                        chunk_audio,
+                        DEVICE,
+                        config.whisperx_align_model or None,
+                        config.whisperx_interpolate_method,
+                        exact_align_cache,
+                        filter_artifacts=False,
+                    )
+                    if not aligned_chunk:
+                        raise RuntimeError(
+                            "WhisperX returned no timings for "
+                            f"pass {align_run_index + 1}/{config.whisperx_align_runs}, "
+                            f"chunk {chunk_index}/{len(chunks)}"
+                        )
+                    exact_words.extend(offset_aligned_words(aligned_chunk, chunk.start))
+                exact_runs.append(exact_words)
+        finally:
+            vocals_wav.unlink(missing_ok=True)
+            exact_align_cache.clear()
+
+        if not exact_runs:
+            raise RuntimeError("WhisperX returned no exact lyric timings")
+        exact_words = consolidate_timing_runs(exact_runs)
+        logger.info(
+            "WhisperX exact alignment consolidated %d passes into %d timed lyric words "
+            "from %d approximate ASR words",
+            len(exact_runs),
+            len(exact_words),
+            len(raw_words),
+        )
+        raw_words = exact_words
+
     # Step 3: Save stems
     logger.info("Step 3/6: Saving vocal stems…")
     with open(vocals_mp3, "wb") as f:
@@ -567,14 +665,6 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
     gc.collect()
     if DEVICE == "cuda":
         torch.cuda.empty_cache()
-
-    # Step 6: Pause detection
-    pauses = detect_pauses(
-        primary_vocals, primary_sr,
-        min_silence_ms=config.pause_min_silence_ms,
-        threshold_ratio=config.pause_threshold_pct / 100.0,
-    )
-    logger.info(f"Detected {len(pauses)} pause regions")
 
     words = add_pitch_to_words(raw_words, times, freqs, confs, energies)
     pitch_frames = build_pitch_frames(times, freqs, confs, energies)

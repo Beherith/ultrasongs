@@ -1,6 +1,11 @@
 """Tests for multi-run WhisperX forced-alignment consolidation."""
 
-from cli.consensus import consolidate_whisperx_runs, word_similarity
+from cli.consensus import (
+    consolidate_transcription_runs,
+    consolidate_timing_runs,
+    consolidate_whisperx_runs,
+    word_similarity,
+)
 
 
 def _words(pairs: list[tuple[str, float, float]]) -> list[dict]:
@@ -27,6 +32,10 @@ class TestWordSimilarity:
 
 
 class TestConsolidate:
+    def test_generic_entry_point(self):
+        result = consolidate_transcription_runs([_words([("hello", 0.1, 0.5)])])
+        assert result[0]["word"] == "hello"
+
     def test_empty_input(self):
         assert consolidate_whisperx_runs([]) == []
         assert consolidate_whisperx_runs([[], []]) == []
@@ -94,3 +103,31 @@ class TestConsolidate:
         ]
         result = consolidate_whisperx_runs(runs)
         assert len(result) == 2
+
+
+class TestTimingConsolidation:
+    def test_selects_median_timing_candidate_from_odd_runs(self):
+        runs = [
+            [{
+                "word": "hello", "start": 0.0, "end": 0.4,
+                "characters": [{"char": "h", "start": 0.0, "end": 0.1, "score": 0.9}],
+            }],
+            [{
+                "word": "hello", "start": 0.2, "end": 0.6,
+                "characters": [{"char": "h", "start": 0.2, "end": 0.3, "score": 0.8}],
+            }],
+            [{
+                "word": "hello", "start": 4.0, "end": 4.5,
+                "characters": [{"char": "h", "start": 4.0, "end": 4.1, "score": 1.0}],
+            }],
+        ]
+
+        result = consolidate_timing_runs(runs)
+
+        assert result[0]["start"] == 0.2
+        assert result[0]["characters"][0]["start"] == 0.2
+
+    def test_timing_consolidation_handles_empty_and_single_runs(self):
+        assert consolidate_timing_runs([]) == []
+        word = {"word": "one", "start": 0.1, "end": 0.4}
+        assert consolidate_timing_runs([[word]]) == [word]

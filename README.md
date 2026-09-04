@@ -4,14 +4,14 @@
 
 Generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` song files from any audio or video file + song lyrics. Pure Python CLI — runs fully local, no external AI APIs, no web server.
 
-**Pipeline:** FFmpeg extract → Demucs vocal separation → selectable faster-whisper/WhisperX ASR → WhisperX wav2vec2 character alignment → torchcrepe pitch detection → Smith-Waterman lyric alignment → BPM beat mapping → `.txt` + ZIP export.
+**Pipeline:** FFmpeg extract → Demucs vocal separation → multi-pass faster-whisper consensus → Smith-Waterman lyric alignment → pause-delimited lyric/vocal chunks → multi-pass WhisperX exact word/character timing → BPM + torchcrepe analysis → `.txt` + ZIP export.
 
 ## Features
 
 - Upload any audio or video format (MP4, MKV, MP3, FLAC, WAV, …)
 - Automatic vocal separation via [Demucs](https://github.com/facebookresearch/demucs) `htdemucs`
 - Per-word MIDI pitch via [torchcrepe](https://github.com/maxrmorrison/torchcrepe) — neural pitch estimation tuned for singing voices
-- Selectable standalone [faster-whisper](https://github.com/SYSTRAN/faster-whisper) or WhisperX ASR, followed by WhisperX word/character forced alignment
+- Multi-pass [faster-whisper](https://github.com/SYSTRAN/faster-whisper) transcription for accurate text, followed by WhisperX forced alignment for exact word/character timing
 - Smith-Waterman phonetic alignment of transcribed words → user lyrics
 - BPM detection via [librosa](https://librosa.org/) + beat-accurate note placement
 - Syllable splitting (20+ languages via [pyphen](https://github.com/karpathy/pyphen))
@@ -94,11 +94,12 @@ FFmpeg normalizes input media to mono 128 kbps MP3. Strips video, downmixes to m
 The transcription stage performs:
 
 1. **Vocal separation** (Demucs `htdemucs`): splits audio into vocals + accompaniment stems.
-2. **ASR**: standalone faster-whisper by default, or WhisperX's batched/VAD wrapper; both receive the lyrics as `initial_prompt`.
-3. **Forced alignment** (WhisperX + language-specific wav2vec2): produces word and character timestamps with alignment scores.
-4. **Consensus**: multiple aligned passes are matched and voted; each winning word keeps one coherent character-timing result.
-5. **Pitch analysis** (torchcrepe): runs the `full` model on vocals at 16 kHz, 10 ms hop, C2–C6 range, with Viterbi decoding.
-6. **Pause detection**: sliding-window RMS energy analysis; frames below 5% of the 95th percentile are silent; consecutive silence ≥400 ms is a pause.
+2. **Initial ASR**: standalone faster-whisper receives the lyrics as an `initial_prompt` and emits approximate word timestamps.
+3. **Consensus**: multiple faster-whisper passes are matched and voted before any forced alignment.
+4. **Pause detection**: sliding-window RMS energy analysis; frames below 5% of the 95th percentile are silent; consecutive silence ≥400 ms is retained for note/line handling.
+5. **Lyric chunking**: the consensus is aligned to the supplied lyrics; lyrics and the primary vocal waveform are split at vocal pauses longer than one second.
+6. **Exact timing** (WhisperX + language-specific wav2vec2): forced-aligns the authoritative lyrics inside each audio chunk an odd, configurable number of times, then selects the coherent per-word result nearest the median timing.
+7. **Pitch analysis** (torchcrepe): runs the `full` model on vocals at 16 kHz, 10 ms hop, C2–C6 range, with Viterbi decoding.
 
 Produces `{stem}_transcribe.json` with words, character timestamps, MIDI, pitch frames, language, pauses, and stem paths.
 

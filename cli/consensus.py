@@ -1,6 +1,6 @@
-"""Consolidate multiple WhisperX forced-alignment runs into one consensus.
+"""Consolidate multiple ASR word-timestamp runs into one consensus.
 
-WhisperX ASR (and the Demucs vocal separation it transcribes) is not fully
+Whisper ASR (and the Demucs vocal separation it transcribes) is not fully
 deterministic, so independent runs of the same audio can recognize slightly
 different words. Running the transcription several times and voting on the
 result — with Smith-Waterman used to align the word sequences before voting —
@@ -62,10 +62,10 @@ def _align_to_reference(
     return alignment
 
 
-def consolidate_whisperx_runs(
+def consolidate_transcription_runs(
     runs: list[list[dict[str, Any]]],
 ) -> list[dict[str, Any]]:
-    """Consolidate several forced-aligned WhisperX word lists.
+    """Consolidate several ASR word-timestamp lists.
 
     Each ``runs`` entry is a full transcription as a list of word dicts with at
     least ``word``, ``start`` and ``end`` keys. The longest run is used as the
@@ -185,9 +185,78 @@ def consolidate_whisperx_runs(
             )
 
     logger.info(
-        f"Consolidated {len(runs)} WhisperX runs "
+        f"Consolidated {len(runs)} transcription runs "
         f"(reference: run {reference_idx + 1}, {len(reference_words)} words; "
         f"{disagreements} words disagreed)"
     )
 
     return consensus
+
+
+def consolidate_timing_runs(
+    runs: list[list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Choose the median coherent timing candidate from forced-alignment runs.
+
+    Word and character timestamps always come from the same pass. This avoids
+    synthesizing character boundaries while rejecting timing outliers.
+    """
+    non_empty = [index for index, run in enumerate(runs) if run]
+    if not non_empty:
+        return []
+    if len(non_empty) == 1:
+        return [dict(word) for word in runs[non_empty[0]]]
+
+    reference_index = max(non_empty, key=lambda index: len(runs[index]))
+    reference = runs[reference_index]
+    reference_norm = [normalize_char(str(word["word"])) for word in reference]
+    columns: list[list[dict[str, Any]]] = [[dict(word)] for word in reference]
+
+    for run_index in non_empty:
+        if run_index == reference_index:
+            continue
+        run = runs[run_index]
+        mapping = _align_to_reference(reference_norm, [str(word["word"]) for word in run])
+        for reference_word_index in range(len(reference)):
+            run_word_index = mapping.get(reference_word_index, -1)
+            if run_word_index >= 0:
+                columns[reference_word_index].append(dict(run[run_word_index]))
+
+    consolidated: list[dict[str, Any]] = []
+    for reference_word, column in zip(reference, columns):
+        expected = normalize_char(str(reference_word["word"]))
+        candidates = [
+            word for word in column
+            if normalize_char(str(word["word"])) == expected
+        ] or column
+        median_start = median(float(word["start"]) for word in candidates)
+        median_end = median(float(word["end"]) for word in candidates)
+
+        def candidate_key(word: dict[str, Any]) -> tuple[float, float]:
+            timing_distance = (
+                abs(float(word["start"]) - median_start)
+                + abs(float(word["end"]) - median_end)
+            )
+            scores = [
+                float(character["score"])
+                for character in word.get("characters", [])
+                if character.get("score") is not None
+            ]
+            quality = sum(scores) / len(scores) if scores else -1.0
+            return timing_distance, -quality
+
+        consolidated.append(dict(min(candidates, key=candidate_key)))
+
+    logger.info(
+        "Consolidated %d WhisperX timing runs into %d coherently timed words",
+        len(runs),
+        len(consolidated),
+    )
+    return consolidated
+
+
+def consolidate_whisperx_runs(
+    runs: list[list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Backward-compatible alias for older callers and resume-era tests."""
+    return consolidate_transcription_runs(runs)

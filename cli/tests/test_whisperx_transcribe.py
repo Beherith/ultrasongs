@@ -7,6 +7,7 @@ import cli.whisperx_transcribe as whisperx_adapter
 from cli.whisperx_transcribe import (
     align_segments,
     extract_aligned_words,
+    extract_faster_whisper_words,
     filter_known_text_artifacts,
     filter_repeated_character_runs,
     load_faster_whisper_model,
@@ -168,6 +169,9 @@ def test_faster_whisper_segments_keep_original_decoding_options():
     calls = []
     segments = [SimpleNamespace(
         text=" hello", start=0.1, end=0.5, avg_logprob=-0.2,
+        words=[SimpleNamespace(
+            word=" hello", start=0.1, end=0.5, probability=0.9,
+        )],
     )]
     model = SimpleNamespace(
         transcribe=lambda path, **kwargs: calls.append((path, kwargs))
@@ -181,12 +185,43 @@ def test_faster_whisper_segments_keep_original_decoding_options():
     assert language == "en"
     assert transcript == [{
         "text": " hello", "start": 0.1, "end": 0.5, "avg_logprob": -0.2,
+        "words": [{
+            "word": "hello", "start": 0.1, "end": 0.5, "score": 0.9,
+        }],
     }]
     assert calls == [("vocals.wav", {
         "word_timestamps": True,
         "initial_prompt": "known lyrics",
         "language": "en",
     })]
+
+
+def test_extract_faster_whisper_words_flattens_segments():
+    segments = [
+        {"text": " one", "words": [{"word": "one", "start": 0.1, "end": 0.4}]},
+        {"text": " two", "words": [{"word": "two", "start": 0.5, "end": 0.8}]},
+    ]
+
+    assert [word["word"] for word in extract_faster_whisper_words(segments)] == [
+        "one", "two",
+    ]
+
+
+def test_authoritative_lyrics_are_not_filtered_before_alignment(monkeypatch):
+    align_calls = []
+    fake_whisperx = SimpleNamespace(
+        load_align_model=lambda **kwargs: (object(), {"language": "en"}),
+        align=lambda segments, *args, **kwargs: align_calls.append(segments) or {"segments": []},
+    )
+    monkeypatch.setitem(sys.modules, "whisperx", fake_whisperx)
+
+    lyrics = [{"text": "sing xxxxxxxx", "start": 0.0, "end": 1.0}]
+    align_segments(
+        lyrics, "en", object(), "cpu", None, "nearest", {},
+        filter_artifacts=False,
+    )
+
+    assert align_calls == [lyrics]
 
 
 def test_whisperx_transcription_returns_segments_and_language():

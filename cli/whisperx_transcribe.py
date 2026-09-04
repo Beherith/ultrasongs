@@ -180,17 +180,42 @@ def transcribe_with_faster_whisper(
         initial_prompt=initial_prompt,
         language=language_hint,
     )
-    transcript = [
-        {
+    transcript = []
+    for segment in segments:
+        if not str(segment.text).strip():
+            continue
+        words = []
+        for word in getattr(segment, "words", None) or []:
+            if word.start is None or word.end is None or not str(word.word).strip():
+                continue
+            words.append({
+                "word": str(word.word).strip(),
+                "start": float(word.start),
+                "end": float(word.end),
+                "score": _optional_float(getattr(word, "probability", None)),
+            })
+        transcript.append({
             "text": str(segment.text),
             "start": float(segment.start),
             "end": float(segment.end),
             "avg_logprob": float(segment.avg_logprob),
-        }
-        for segment in segments
-        if str(segment.text).strip()
-    ]
+            "words": words,
+        })
     return transcript, str(info.language or language_hint or "en")
+
+
+def extract_faster_whisper_words(
+    segments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Flatten standalone faster-whisper word timestamps before forced alignment."""
+    return [
+        dict(word)
+        for segment in segments
+        for word in segment.get("words", [])
+        if str(word.get("word") or "").strip()
+        and word.get("start") is not None
+        and word.get("end") is not None
+    ]
 
 
 def transcribe_with_whisperx(
@@ -218,13 +243,16 @@ def align_segments(
     align_model_name: str | None,
     interpolate_method: str,
     align_model_cache: dict[str, tuple[Any, dict[str, Any]]],
+    *,
+    filter_artifacts: bool = True,
 ) -> tuple[list[dict[str, Any]], str]:
     """Forced-align ASR segments with WhisperX and retain character timings."""
     _prepare_windows_dll_search_path()
     import whisperx
 
-    segments = filter_repeated_character_runs(segments)
-    segments = filter_known_text_artifacts(segments)
+    if filter_artifacts:
+        segments = filter_repeated_character_runs(segments)
+        segments = filter_known_text_artifacts(segments)
     if not segments:
         return [], language
 

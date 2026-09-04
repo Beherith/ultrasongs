@@ -5,7 +5,7 @@ Pure Python CLI tool to generate [Ultrastar Deluxe](https://ultrastar-deluxe.org
 ## Pipeline
 
 ```
-Input media → FFmpeg extract → Demucs separation → selectable faster-whisper/WhisperX ASR → WhisperX wav2vec2 character alignment → torchcrepe pitch → Lyric alignment → Ultrastar .txt + ZIP
+Input media → FFmpeg extract → Demucs separation → multi-pass faster-whisper → lyric alignment + pause chunks → multi-pass WhisperX exact timing → torchcrepe pitch → Ultrastar .txt + ZIP
 ```
 
 ## Installation
@@ -24,8 +24,8 @@ pip install -r cli/requirements.txt
 Demucs/WhisperX inference. The exact install command is documented at the top
 of `cli/requirements.txt`.
 
-WhisperX downloads its ASR and language-specific wav2vec2 alignment models on
-first use. Once those model files are cached, processing remains fully local.
+WhisperX downloads its language-specific wav2vec2 alignment model on first
+use. Once the model files are cached, processing remains fully local.
 
 ## Usage
 
@@ -62,7 +62,7 @@ python -m cli process \
 | Stage | What it does |
 |---|---|
 | `extract` | Normalize input to mono 128kbps MP3 |
-| `transcribe` | Demucs separation + WhisperX word/character alignment + torchcrepe pitch |
+| `transcribe` | Demucs + multi-pass faster-whisper + lyric chunking + WhisperX timing + torchcrepe pitch |
 | `align` | BPM detection + Smith-Waterman lyric alignment |
 | `generate` | Build `.txt` + package output ZIP |
 | `all` | Everything (default) |
@@ -100,15 +100,17 @@ Edit `cli/config.jsonc` (supports `//` and `/* */` comments):
 
 | Key | Default | Description |
 |---|---|---|
-| `transcription_backend` | `"faster-whisper"` | ASR path: original `faster-whisper` or WhisperX's batched/VAD wrapper |
-| `whisper_model` | `"medium"` | ASR model used by either backend |
+| `transcription_backend` | `"faster-whisper"` | Hybrid faster-whisper/WhisperX path; `"whisperx"` retains the legacy ASR path |
+| `whisper_model` | `"medium"` | Initial ASR model |
 | `whisper_language` | `"en"` | Language hint; empty enables detection |
 | `faster_whisper_compute_type` | `"auto"` | CTranslate2 compute type for standalone faster-whisper |
 | `whisperx_batch_size` | `8` | Number of ASR chunks processed per inference batch |
 | `whisperx_compute_type` | `"default"` | CTranslate2 compute type (`default`, `float16`, `float32`, `int8`) |
 | `whisperx_align_model` | `""` | Optional wav2vec2 alignment model override |
 | `whisperx_interpolate_method` | `"nearest"` | Missing-character timing policy (`nearest`, `linear`, `ignore`) |
-| `transcribe_runs` | `3` | Demucs + ASR + WhisperX alignment passes consolidated via majority vote |
+| `whisperx_chunk_pause_ms` | `1000` | Split lyric/audio chunks at pauses strictly longer than this |
+| `whisperx_align_runs` | `3` | Positive odd number of WhisperX exact-timing passes |
+| `transcribe_runs` | `3` | Demucs + faster-whisper passes consolidated before exact alignment |
 | `demucs_model` | `"htdemucs"` | Demucs model name |
 | `sample_rate` | `44100` | Audio sample rate |
 | `pitch_min_hz` | `65.41` | Pitch floor (C2) |

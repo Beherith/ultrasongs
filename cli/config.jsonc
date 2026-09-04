@@ -5,9 +5,10 @@
   // "cpu" — force CPU (useful for debugging or when GPU causes issues).
   "device": "auto",
 
-  // ASR backend. "faster-whisper" uses the original non-VAD transcription
-  // path, then sends its segments to WhisperX only for forced alignment.
-  // "whisperx" uses WhisperX's batched, VAD-driven transcription wrapper.
+  // ASR backend. "faster-whisper" uses the hybrid pipeline: multi-pass
+  // faster-whisper consensus, alignment to the supplied lyrics, pause-delimited
+  // vocal/lyric chunks, then WhisperX forced alignment for exact timestamps.
+  // "whisperx" keeps the legacy WhisperX batched/VAD transcription path.
   "transcription_backend": "faster-whisper",
 
   // Whisper ASR model used by either transcription backend.
@@ -17,7 +18,8 @@
   // fast singing, overlapping vocals) at the cost of significantly slower runtime
   // and higher VRAM usage (~10GB). Use "small" or "base" for faster processing on
   // clean audio or limited hardware.
-  "whisper_model": "large-v3",
+  // Larger models also seem to hallucinate WAY more than the medium one
+  "whisper_model": "medium",
 
   // Language hint for Whisper transcription and WhisperX forced alignment.
   // When set (e.g., "en", "de", "es"), ASR skips auto-detection and uses
@@ -48,16 +50,25 @@
   // align directly: "nearest", "linear", or "ignore".
   "whisperx_interpolate_method": "linear",
 
+  // Split the authoritative lyrics and vocal waveform at detected silences
+  // strictly longer than this before WhisperX forced alignment. Each cut is
+  // placed at the silence midpoint so no sung audio is removed.
+  "whisperx_chunk_pause_ms": 1000,
+
+  // Number of WhisperX forced-alignment passes over every lyric/audio chunk.
+  // Must be a positive odd number so each word has an unambiguous median
+  // timing candidate. This is independent of the faster-whisper pass count.
+  "whisperx_align_runs": 5,
+
   // Number of independent separation + transcription passes to run and
-  // consolidate. Demucs and Whisper ASR are not fully deterministic, so a single
+  // consolidate. Demucs and faster-whisper are not fully deterministic, so a single
   // run can recognize slightly different words from another. Each pass runs
   // Demucs on the source audio, then transcribes that pass's vocals with
-  // the selected ASR backend; WhisperX aligns every pass at character level,
-  // then the passes are aligned to each other with Smith-Waterman and
-  // a per-word majority vote produces a single consensus transcription that is
-  // more stable than any single run. Set to 1 for a single fast pass (no
-  // consolidation). Higher values (e.g., 5) are more robust but roughly
-  // multiply the Demucs + ASR + forced-alignment runtime.
+  // the selected ASR backend. The passes are aligned to each other with
+  // Smith-Waterman and a per-word majority vote produces a single consensus.
+  // In the default hybrid path, WhisperX runs only once afterward on the
+  // authoritative lyric chunks. Set to 1 for a single fast pass (no
+  // consolidation). Higher values multiply the Demucs + ASR runtime.
   "transcribe_runs": 7,
 
   // Demucs source separation model.

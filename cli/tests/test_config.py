@@ -19,6 +19,8 @@ class TestConfigDefaults:
         assert cfg.whisperx_compute_type == "default"
         assert cfg.whisperx_align_model == ""
         assert cfg.whisperx_interpolate_method == "nearest"
+        assert cfg.whisperx_chunk_pause_ms == 1000
+        assert cfg.whisperx_align_runs == 3
         assert cfg.transcribe_runs == 3
         assert cfg.demucs_model == "htdemucs"
         assert cfg.sample_rate == 44100
@@ -65,6 +67,8 @@ class TestLoadConfig:
                 "transcription_backend": "whisperx",
                 "whisper_model": "large",
                 "whisperx_batch_size": 4,
+                "whisperx_chunk_pause_ms": 1500,
+                "whisperx_align_runs": 5,
                 "sample_rate": 48000,
                 "output_dir": "/custom/output",
             }, f)
@@ -73,6 +77,8 @@ class TestLoadConfig:
             assert cfg.transcription_backend == "whisperx"
             assert cfg.whisper_model == "large"
             assert cfg.whisperx_batch_size == 4
+            assert cfg.whisperx_chunk_pause_ms == 1500
+            assert cfg.whisperx_align_runs == 5
             assert cfg.sample_rate == 48000
             assert cfg.output_dir == "/custom/output"
             # Defaults preserved
@@ -113,6 +119,8 @@ class TestLoadConfig:
                 "whisperx_batch_size": 0,
                 "whisperx_compute_type": "half-ish",
                 "whisperx_interpolate_method": "guess",
+                "whisperx_chunk_pause_ms": -1,
+                "whisperx_align_runs": 4,
                 "transcription_backend": "magic",
                 "faster_whisper_compute_type": "half-ish",
             }, f)
@@ -122,5 +130,7 @@ class TestLoadConfig:
         assert cfg.whisperx_batch_size == 8
         assert cfg.whisperx_compute_type == "default"
         assert cfg.whisperx_interpolate_method == "nearest"
+        assert cfg.whisperx_chunk_pause_ms == 1000
+        assert cfg.whisperx_align_runs == 3
         assert cfg.transcription_backend == "faster-whisper"
         assert cfg.faster_whisper_compute_type == "auto"
