@@ -104,6 +104,36 @@ E
         assert notes[1].note_type == "-"
         assert notes[1].start_beat == 10
 
+    def test_decimal_comma_gap(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:340
+#GAP:5073,53
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.gap == 5073
+
+    def test_line_break_with_extra_numbers(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:120
+#GAP:0
+
+: 0 4 60 hi
+- 105 608
+: 15 4 62  bye
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert len(notes) == 3
+        assert notes[1].note_type == "-"
+        assert notes[1].start_beat == 105
+
     def test_comma_bpm(self):
         content = """#TITLE:Test
 #ARTIST:Artist

@@ -135,17 +135,17 @@ def parse_ultrastar_txt(content: str) -> tuple[UltrastarMeta, list[UltrastarNote
                 syllable=match.group(5) or "",
             ))
 
-        elif trimmed.startswith("-"):
+        elif trimmed.startswith("-") and (beat := trimmed[1:].strip().split()):
             notes.append(UltrastarNote(
                 note_type="-",
-                start_beat=int(trimmed[1:].strip()),
+                start_beat=int(beat[0]),
                 duration=0,
                 pitch=0,
                 syllable="",
             ))
 
-    bpm_str = meta.get("BPM", "120").replace(",", ".")
-    bpm = float(bpm_str)
+    bpm = float(meta.get("BPM", "120").replace(",", "."))
+    gap = int(float(meta.get("GAP", "0").replace(",", ".")))
 
     return (
         UltrastarMeta(
@@ -153,7 +153,7 @@ def parse_ultrastar_txt(content: str) -> tuple[UltrastarMeta, list[UltrastarNote
             artist=meta.get("ARTIST", ""),
             mp3=meta.get("MP3", ""),
             bpm=bpm,
-            gap=int(meta.get("GAP", "0")),
+            gap=gap,
             video=meta.get("VIDEO"),
         ),
         notes,
