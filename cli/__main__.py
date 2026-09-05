@@ -135,11 +135,12 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
     from cli.package import package_output
     from cli.pipeline_types import TranscribeResult
     from cli.logging_setup import get_logger
+    from cli.ultrastar import read_text_fallback
 
     logger = get_logger("cli.process")
 
     lyrics_path = Path(args.lyrics)
-    lyrics_input = lyrics_path.read_text(encoding="utf-8")
+    lyrics_input = read_text_fallback(lyrics_path)
 
     title = args.title
     artist = args.artist
@@ -284,13 +285,13 @@ def _cmd_import(args: argparse.Namespace, config: "Config") -> int:  # type: ign
     from cli.logging_setup import get_logger
     from cli.package import package_output
     from cli.pipeline_types import UltrastarMeta, UltrastarNote
-    from cli.ultrastar import build_ultrastar_txt, parse_ultrastar_txt
+    from cli.ultrastar import build_ultrastar_txt, parse_ultrastar_txt, read_text_fallback
 
     logger = get_logger("cli.import")
     txt_path = Path(args.txt)
     mp3_path = Path(args.mp3)
 
-    meta, notes = parse_ultrastar_txt(txt_path.read_text(encoding="utf-8"))
+    meta, notes = parse_ultrastar_txt(read_text_fallback(txt_path))
     txt_content = _rebuild_txt(meta, notes)
 
     output_dir = Path(args.output) if args.output else config.output_path
@@ -332,10 +333,10 @@ def _cmd_preview(args: argparse.Namespace, config: "Config") -> int:  # type: ig
 def _cmd_lyrics(args: argparse.Namespace) -> int:
     """Extract plain lyrics from an Ultrastar .txt file."""
     from cli.logging_setup import get_logger
-    from cli.ultrastar import extract_lyrics_from_ultrastar
+    from cli.ultrastar import extract_lyrics_from_ultrastar, read_text_fallback
 
     logger = get_logger("cli.lyrics")
-    content = Path(args.txt).read_text(encoding="utf-8")
+    content = read_text_fallback(Path(args.txt))
     lyrics = extract_lyrics_from_ultrastar(content)
     if args.output:
         output_path = Path(args.output)

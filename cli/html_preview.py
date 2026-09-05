@@ -11,6 +11,7 @@ from pathlib import Path
 import html as html_module
 
 from cli.logging_setup import get_logger
+from cli.ultrastar import read_text_fallback
 
 logger = get_logger("cli.html_preview")
 
@@ -94,7 +95,7 @@ def split_verses(words: list[dict], gap_threshold: float = 2.0) -> list[list[dic
 def parse_ultrastar(filepath: Path) -> dict:
     """Parse an Ultrastar .txt file into metadata, notes, and verses."""
     metadata = {}
-    text = filepath.read_text(encoding="utf-8")
+    text = read_text_fallback(filepath)
 
     for line in text.splitlines():
         if not line:
@@ -103,8 +104,8 @@ def parse_ultrastar(filepath: Path) -> dict:
             key, _, value = line[1:].partition(":")
             metadata[key.strip()] = value.strip()
 
-    bpm = float(metadata.get("BPM", 120))
-    gap = float(metadata.get("GAP", 0))
+    bpm = float(metadata.get("BPM", 120).replace(",", "."))
+    gap = float(metadata.get("GAP", 0).replace(",", "."))
 
     def convert_note(parts: list[str], is_chorus: bool) -> dict:
         return {

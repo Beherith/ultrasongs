@@ -5,7 +5,7 @@ from pathlib import Path
 
 from cli.logging_setup import get_logger
 from cli.pipeline_types import UltrastarMeta, UltrastarNote
-from cli.ultrastar import parse_ultrastar_txt
+from cli.ultrastar import parse_ultrastar_txt, read_text_fallback
 
 logger = get_logger("cli.diff")
 
@@ -106,8 +106,8 @@ def diff_ultrastar(original_path: Path, generated_path: Path) -> DiffReport:
     Returns:
         DiffReport with pass/fail summary and per-note deltas.
     """
-    orig_meta, orig_notes = parse_ultrastar_txt(original_path.read_text(encoding="utf-8"))
-    gen_meta, gen_notes = parse_ultrastar_txt(generated_path.read_text(encoding="utf-8"))
+    orig_meta, orig_notes = parse_ultrastar_txt(read_text_fallback(original_path))
+    gen_meta, gen_notes = parse_ultrastar_txt(read_text_fallback(generated_path))
 
     report = DiffReport()
 

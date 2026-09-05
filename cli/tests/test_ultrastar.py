@@ -2,7 +2,13 @@
 
 import pytest
 from cli.pipeline_types import UltrastarMeta, UltrastarNote
-from cli.ultrastar import build_ultrastar_txt, extract_lyrics_from_ultrastar, ms_to_beats, parse_ultrastar_txt
+from cli.ultrastar import (
+    build_ultrastar_txt,
+    extract_lyrics_from_ultrastar,
+    ms_to_beats,
+    parse_ultrastar_txt,
+    read_text_fallback,
+)
 
 
 class TestMsToBeats:
@@ -145,6 +151,28 @@ E
 """
         meta, notes = parse_ultrastar_txt(content)
         assert meta.bpm == 120.5
+
+
+class TestReadTextFallback:
+    def test_utf8(self, tmp_path):
+        p = tmp_path / "a.txt"
+        p.write_bytes("#TITLE:Grüße\n".encode("utf-8"))
+        assert read_text_fallback(p) == "#TITLE:Grüße\n"
+
+    def test_utf8_bom(self, tmp_path):
+        p = tmp_path / "a.txt"
+        p.write_bytes("#TITLE:Grüße\n".encode("utf-8-sig"))
+        assert read_text_fallback(p) == "#TITLE:Grüße\n"
+
+    def test_cp1252(self, tmp_path):
+        p = tmp_path / "a.txt"
+        p.write_bytes("#TITLE:Grüße\näöü".encode("cp1252"))
+        assert read_text_fallback(p) == "#TITLE:Grüße\näöü"
+
+    def test_latin1_only_byte(self, tmp_path):
+        p = tmp_path / "a.txt"
+        p.write_bytes(b"#TITLE:A\x81B\n")
+        assert read_text_fallback(p) == "#TITLE:A\x81B\n"
 
 
 class TestExtractLyricsFromUltrastar:

@@ -1,8 +1,24 @@
 """Ultrastar format: parser and builder for .txt song files."""
 
 import re
+from pathlib import Path
 
 from cli.pipeline_types import UltrastarMeta, UltrastarNote
+
+
+def read_text_fallback(path: Path) -> str:
+    """Read a text file, falling back from UTF-8 to Windows-1252, then Latin-1.
+
+    Ultrastar files are often authored on Windows in cp1252/latin-1
+    (e.g. German umlauts), so UTF-8 alone is not enough.
+    """
+    data = path.read_bytes()
+    for encoding in ("utf-8-sig", "cp1252", "latin-1"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("latin-1", errors="replace")
 
 
 _NOTE_RE = re.compile(r"^\s*([:*])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$")
