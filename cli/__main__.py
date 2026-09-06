@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ignore[name-defined]
     """Execute the full or partial pipeline."""
-    from cli.ffmpeg_extract import extract_audio
+    from cli.ffmpeg_extract import extract_audio, is_video_path
     from cli.transcribe import transcribe
     from cli.bpm_detect import detect_bpm
     from cli.align import align_lyrics
@@ -175,6 +175,10 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
     if not mp3_path.exists():
         logger.error(f"Input audio file not found: {mp3_path}")
         return 1
+
+    # A video passed as the input file is also the source video for the
+    # package output and the #VIDEO tag, unless --video names another one.
+    video_path = Path(args.video) if args.video else (mp3_path if is_video_path(mp3_path) else None)
 
     # Ensure temp directory exists
     config.temp_path.mkdir(parents=True, exist_ok=True)
@@ -249,7 +253,7 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
             title=title,
             artist=artist,
             mp3_filename=f"{title}.mp3",
-            video_filename=Path(args.video).name if args.video else None,
+            video_filename=video_path.name if video_path else None,
             config=config,
         )
         logger.info("Step 5/5: Ultrastar file generated")
@@ -261,7 +265,7 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
             mp3_path=audio_out,
             output_dir=output_dir,
             title=title,
-            video_path=Path(args.video) if args.video else None,
+            video_path=video_path,
             vocals_path=Path(result.vocals_path),
             accompaniment_path=Path(result.accompaniment_path),
         )

@@ -67,6 +67,8 @@ Diff tolerances (`cli/diff.py`): BPM ±2, GAP exact match, singing-note count ex
 
 `process --lyrics` also accepts an Ultrastar `.txt` file: if the first non-empty line is a `#` header, plain lyrics are automatically extracted from it (`extract_lyrics_from_ultrastar`) and the pipeline runs on those. `--title`, `--artist`, and `--mp3` then fall back to the file's `#TITLE`, `#ARTIST`, and `#MP3` tags (the `#MP3` path is resolved relative to the .txt file's directory) when not given on the command line. `#BPM` and `#GAP` are ignored.
 
+`--mp3` accepts video files (`.mp4`, `.mkv`, `.webm`, `.mov`, `.avi`) as well as audio: the extract stage pulls the audio out with FFmpeg, and the original video is then treated like `--video` — copied into the output/ZIP and referenced by a `#VIDEO` tag (an explicit `--video` always wins). The package output always contains the extracted original MP3, the first-pass htdemucs `vocals.mp3` and `accompaniment.mp3`, and the original video when the input was one.
+
 ## Code Conventions
 
 - Python 3.10+, type hints via dataclasses in `cli/pipeline_types.py`

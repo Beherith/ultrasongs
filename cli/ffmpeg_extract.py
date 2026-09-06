@@ -15,6 +15,11 @@ _AUDIO_EXTS = {".mp3", ".ogg", ".flac", ".wav", ".m4a"}
 _SUPPORTED_EXTS = _VIDEO_EXTS | _AUDIO_EXTS
 
 
+def is_video_path(path: Path) -> bool:
+    """Return True if the file has a supported video extension."""
+    return path.suffix.lower() in _VIDEO_EXTS
+
+
 def extract_audio(input_path: Path, output_path: Path, config: Config) -> Path:
     """Extract and normalize audio to mono 128kbps MP3 via FFmpeg.
 
