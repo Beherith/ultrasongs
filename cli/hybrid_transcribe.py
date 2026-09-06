@@ -9,6 +9,11 @@ from typing import Any
 from cli.align import normalize_char, smith_waterman
 from cli.pipeline_types import Pause
 
+# Regions whose mapped lyric words are denser than this are not singable; they
+# usually come from collapsed/hallucinated ASR tail timings. Such a region is
+# merged into the previous chunk so the window can hold the text.
+_MAX_CHUNK_WORDS_PER_SECOND = 12.0
+
 
 @dataclass(frozen=True)
 class ApproximateLyricWord:
@@ -204,14 +209,51 @@ def build_lyric_chunks(
     for region_index, region_words in enumerate(regions):
         if not region_words:
             continue
-        chunks.append(LyricChunk(
+        chunk = LyricChunk(
             text=" ".join(word.word for _, word in region_words),
             start=boundaries[region_index],
             end=boundaries[region_index + 1],
             first_word=region_words[0][0],
             last_word=region_words[-1][0],
-        ))
+        )
+        if chunks:
+            word_count = len(region_words)
+            duration = chunk.end - chunk.start
+            if duration > 0 and word_count / duration > _MAX_CHUNK_WORDS_PER_SECOND:
+                previous = chunks[-1]
+                chunks[-1] = LyricChunk(
+                    text=f"{previous.text} {chunk.text}",
+                    start=previous.start,
+                    end=chunk.end,
+                    first_word=previous.first_word,
+                    last_word=chunk.last_word,
+                )
+                continue
+        chunks.append(chunk)
     return chunks
+
+
+def synthesize_chunk_words(text: str, duration: float) -> list[dict[str, Any]]:
+    """Evenly distribute a chunk's words across its window as a last resort.
+
+    Used when forced alignment returns no timings (for example when the
+    authoritative text is far longer than the chunk's audio slice). The
+    resulting words are chunk-relative, matching ``align_segments`` output.
+    """
+    tokens = [token for token in text.split() if token.strip()]
+    if not tokens or duration <= 0:
+        return []
+    step = duration / len(tokens)
+    return [
+        {
+            "word": token,
+            "start": index * step,
+            "end": (index + 1) * step,
+            "score": None,
+            "characters": [],
+        }
+        for index, token in enumerate(tokens)
+    ]
 
 
 def slice_audio(audio: Any, start: float, end: float, audio_duration: float) -> Any:

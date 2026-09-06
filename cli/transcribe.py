@@ -560,6 +560,7 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
             build_lyric_chunks,
             offset_aligned_words,
             slice_audio,
+            synthesize_chunk_words,
         )
 
         chunks = build_lyric_chunks(
@@ -615,8 +616,16 @@ def transcribe(mp3_path: Path, lyrics_prompt: str | None, config: Config) -> Tra
                         filter_artifacts=False,
                     )
                     if not aligned_chunk:
-                        raise RuntimeError(
+                        logger.warning(
                             "WhisperX returned no timings for "
+                            f"pass {align_run_index + 1}/{config.whisperx_align_runs}, "
+                            f"chunk {chunk_index}/{len(chunks)}; "
+                            "synthesizing evenly distributed word timings"
+                        )
+                        aligned_chunk = synthesize_chunk_words(chunk.text, local_duration)
+                    if not aligned_chunk:
+                        raise RuntimeError(
+                            "WhisperX returned no timings and the chunk has no text for "
                             f"pass {align_run_index + 1}/{config.whisperx_align_runs}, "
                             f"chunk {chunk_index}/{len(chunks)}"
                         )

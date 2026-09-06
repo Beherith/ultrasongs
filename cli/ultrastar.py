@@ -22,6 +22,10 @@ def read_text_fallback(path: Path) -> str:
 
 
 _NOTE_RE = re.compile(r"^\s*([:*])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$")
+# Note field sequence without the leading ':'/'*' type char. Used to recover the
+# real note from corrupted rest lines such as "-348: 348 2 69 Om", where a stray
+# "-<beat>: " prefix is followed by a valid "<beat> <dur> <pitch> <syllable>".
+_NOTE_FIELDS_RE = re.compile(r"^(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$")
 
 
 def ms_to_beats(ms: float, bpm: float, gap: int) -> int:
@@ -119,6 +123,50 @@ def extract_lyrics_from_ultrastar(content: str) -> str:
     return "\n".join(lines) + "\n" if lines else ""
 
 
+def _add_rest_or_corrupted_note(after_dash: str, notes: list[UltrastarNote]) -> None:
+    """Parse the text after a leading '-' (a rest or a corrupted note line).
+
+    A plain rest is "-<beat>" (optionally with a trailing ':' and stray extra
+    fields). Some files contain corrupted note lines like "-348: 348 2 69 Om":
+    a stray "-<beat>: " prefix followed by a real "<beat> <dur> <pitch>
+    <syllable>" note. When the text after the colon is a valid note field
+    sequence we recover the sung note (preserving its syllable); otherwise we
+    record a rest at the first parseable beat. Nothing here may raise.
+    """
+    if not after_dash:
+        return
+    if ":" in after_dash:
+        prefix, _colon, remainder = after_dash.partition(":")
+        remainder = remainder.strip()
+        if (match := _NOTE_FIELDS_RE.match(remainder)):
+            notes.append(UltrastarNote(
+                note_type=":",
+                start_beat=int(match.group(1)),
+                duration=int(match.group(2)),
+                pitch=int(match.group(3)),
+                syllable=match.group(4) or "",
+            ))
+            return
+        beat_text = prefix.strip()
+    else:
+        beat_text = after_dash.split()[0] if after_dash.split() else ""
+
+    beat_text = beat_text.split(":")[0].strip()
+    if not beat_text:
+        return
+    try:
+        start_beat = int(beat_text)
+    except ValueError:
+        return
+    notes.append(UltrastarNote(
+        note_type="-",
+        start_beat=start_beat,
+        duration=0,
+        pitch=0,
+        syllable="",
+    ))
+
+
 def parse_ultrastar_txt(content: str) -> tuple[UltrastarMeta, list[UltrastarNote]]:
     """Parse an Ultrastar .txt file into structured data.
 
@@ -151,14 +199,8 @@ def parse_ultrastar_txt(content: str) -> tuple[UltrastarMeta, list[UltrastarNote
                 syllable=match.group(5) or "",
             ))
 
-        elif trimmed.startswith("-") and (beat := trimmed[1:].strip().split()):
-            notes.append(UltrastarNote(
-                note_type="-",
-                start_beat=int(beat[0]),
-                duration=0,
-                pitch=0,
-                syllable="",
-            ))
+        elif trimmed.startswith("-"):
+            _add_rest_or_corrupted_note(trimmed[1:].strip(), notes)
 
     bpm = float(meta.get("BPM", "120").replace(",", "."))
     gap = int(float(meta.get("GAP", "0").replace(",", ".")))

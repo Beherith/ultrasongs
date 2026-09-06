@@ -173,35 +173,50 @@ def transcribe_with_faster_whisper(
     language_hint: str | None,
     initial_prompt: str | None,
 ) -> tuple[list[dict[str, Any]], str]:
-    """Transcribe with the standalone faster-whisper decoding path."""
+    """Transcribe with the standalone faster-whisper decoding path.
+
+    faster-whisper's word-timestamp alignment (CTranslate2) can raise an
+    IndexError on rare segments where it yields no alignments for a segment that
+    still carries word tokens. That only corrupts this run's word timings, so we
+    keep the segments decoded so far and drop the rest instead of failing the
+    whole transcription (the consensus still has the other runs to lean on).
+    """
     segments, info = model.transcribe(
         audio_path,
         word_timestamps=True,
         initial_prompt=initial_prompt,
         language=language_hint,
     )
-    transcript = []
-    for segment in segments:
-        if not str(segment.text).strip():
-            continue
-        words = []
-        for word in getattr(segment, "words", None) or []:
-            if word.start is None or word.end is None or not str(word.word).strip():
+    language = str(info.language or language_hint or "en")
+    transcript: list[dict[str, Any]] = []
+    try:
+        for segment in segments:
+            if not str(segment.text).strip():
                 continue
-            words.append({
-                "word": str(word.word).strip(),
-                "start": float(word.start),
-                "end": float(word.end),
-                "score": _optional_float(getattr(word, "probability", None)),
+            words = []
+            for word in getattr(segment, "words", None) or []:
+                if word.start is None or word.end is None or not str(word.word).strip():
+                    continue
+                words.append({
+                    "word": str(word.word).strip(),
+                    "start": float(word.start),
+                    "end": float(word.end),
+                    "score": _optional_float(getattr(word, "probability", None)),
+                })
+            transcript.append({
+                "text": str(segment.text),
+                "start": float(segment.start),
+                "end": float(segment.end),
+                "avg_logprob": float(segment.avg_logprob),
+                "words": words,
             })
-        transcript.append({
-            "text": str(segment.text),
-            "start": float(segment.start),
-            "end": float(segment.end),
-            "avg_logprob": float(segment.avg_logprob),
-            "words": words,
-        })
-    return transcript, str(info.language or language_hint or "en")
+    except Exception as exc:
+        logger.warning(
+            "faster-whisper word alignment failed mid-run (%s: %s); "
+            "keeping %d decoded segment(s) and dropping the rest",
+            type(exc).__name__, exc, len(transcript),
+        )
+    return transcript, language
 
 
 def extract_faster_whisper_words(
