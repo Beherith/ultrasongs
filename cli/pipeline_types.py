@@ -182,3 +182,5 @@ class UltrastarMeta:
     bpm: float
     gap: int             # milliseconds
     video: str | None = None
+    vocals: str | None = None       # filename within output package
+    instrumental: str | None = None # filename within output package

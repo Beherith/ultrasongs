@@ -44,6 +44,8 @@ def build_ultrastar_txt(notes: list[UltrastarNote], meta: UltrastarMeta) -> str:
         #ARTIST:Artist
         #MP3:file.mp3
         #VIDEO:file.mp4  (optional)
+        #VOCALS:file_vocals.mp3  (optional)
+        #INSTRUMENTAL:file_accompaniment.mp3  (optional)
         #BPM:120.00
         #GAP:500
 
@@ -56,11 +58,17 @@ def build_ultrastar_txt(notes: list[UltrastarNote], meta: UltrastarMeta) -> str:
         f"#TITLE:{meta.title}",
         f"#ARTIST:{meta.artist}",
         f"#MP3:{meta.mp3}",
-        f"#BPM:{meta.bpm:.2f}",
-        f"#GAP:{round(meta.gap)}",
     ]
     if meta.video:
-        header_lines.insert(3, f"#VIDEO:{meta.video}")
+        header_lines.append(f"#VIDEO:{meta.video}")
+    if meta.vocals:
+        header_lines.append(f"#VOCALS:{meta.vocals}")
+    if meta.instrumental:
+        header_lines.append(f"#INSTRUMENTAL:{meta.instrumental}")
+    header_lines.extend([
+        f"#BPM:{meta.bpm:.2f}",
+        f"#GAP:{round(meta.gap)}",
+    ])
 
     header = "\n".join(header_lines)
 
@@ -213,6 +221,8 @@ def parse_ultrastar_txt(content: str) -> tuple[UltrastarMeta, list[UltrastarNote
             bpm=bpm,
             gap=gap,
             video=meta.get("VIDEO"),
+            vocals=meta.get("VOCALS"),
+            instrumental=meta.get("INSTRUMENTAL"),
         ),
         notes,
     )

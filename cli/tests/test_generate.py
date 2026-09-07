@@ -168,3 +168,37 @@ class TestGenerateUltrastar:
             config=Config(),
         )
         assert "#VIDEO:test.mp4" in txt
+
+    def test_stem_filenames(self):
+        syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            video_filename="test.mp4",
+            vocals_filename="test_vocals.mp3",
+            instrumental_filename="test_accompaniment.mp3",
+            config=Config(),
+        )
+        assert "#VOCALS:test_vocals.mp3" in txt
+        assert "#INSTRUMENTAL:test_accompaniment.mp3" in txt
+        header = txt.split("\n\n")[0].split("\n")
+        assert header.index("#VOCALS:test_vocals.mp3") < header.index("#INSTRUMENTAL:test_accompaniment.mp3")
+        assert header.index("#INSTRUMENTAL:test_accompaniment.mp3") < header.index("#BPM:240.00")
+
+    def test_without_stems(self):
+        syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            config=Config(),
+        )
+        assert "#VOCALS:" not in txt
+        assert "#INSTRUMENTAL:" not in txt

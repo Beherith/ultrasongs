@@ -16,6 +16,8 @@ def generate_ultrastar(
     artist: str,
     mp3_filename: str,
     video_filename: str | None = None,
+    vocals_filename: str | None = None,
+    instrumental_filename: str | None = None,
     first_beat_ms: float | None = None,
     config: Config | None = None,
 ) -> str:
@@ -36,6 +38,9 @@ def generate_ultrastar(
         artist: Artist name.
         mp3_filename: MP3 filename for the #MP3 header.
         video_filename: Optional video filename.
+        vocals_filename: Optional vocals stem filename for the #VOCALS header.
+        instrumental_filename: Optional accompaniment stem filename for the
+            #INSTRUMENTAL header.
         first_beat_ms: Time in milliseconds of the song's first beat
             (BpmResult.first_beat_ms). Used as #GAP so the beat grid aligns
             with the actual groove. Falls back to first note minus gap_ms.
@@ -124,6 +129,8 @@ def generate_ultrastar(
         bpm=output_bpm,
         gap=gap,
         video=video_filename,
+        vocals=vocals_filename,
+        instrumental=instrumental_filename,
     )
 
     txt = build_ultrastar_txt(ultra_notes, meta)

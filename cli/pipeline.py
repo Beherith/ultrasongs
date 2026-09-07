@@ -203,6 +203,8 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
             artist=artist,
             mp3_filename=f"{safe_name}.mp3",
             video_filename=f"{safe_name}{video_path.suffix.lower()}" if video_path else None,
+            vocals_filename=f"{safe_name}_vocals.mp3" if Path(result.vocals_path).exists() else None,
+            instrumental_filename=f"{safe_name}_accompaniment.mp3" if Path(result.accompaniment_path).exists() else None,
             config=config,
         )
         logger.info("Step 5/5: Ultrastar file generated")

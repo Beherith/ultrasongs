@@ -66,7 +66,9 @@
     <span class="metro" title="Vocals audio volume">Vocals <input type="range" id="vocalsVol" min="0" max="100" value="100"><span id="vocalsVolVal">100</span></span>
     <span class="metro" title="MIDI note volume">Notes <input type="range" id="notesVol" min="0" max="100" value="100"><span id="notesVolVal">100</span></span>
     <span class="metro" title="Metronome volume">Metro <input type="range" id="metroVol" min="0" max="100" value="80"><span id="metroVolVal">80</span></span>
-    <span class="sep"></span>
+  </div>
+
+  <div class="toolbar">
     <button id="splitBtn" title="Split selected (S)">Split</button>
     <button id="mergeBtn" title="Merge selected with next (M)">Merge</button>
     <button id="delBtn" title="Delete selected (Del)">Delete</button>
@@ -372,7 +374,7 @@
     const idx=sel?notes.findIndex(n=>n.id===sel.id):-1;
     let nextSung=null;
     if(idx>=0){ for(let i=idx+1;i<notes.length;i++){ if(notes[i].type!=="-"){ nextSung=notes[i]; break; } } }
-    document.getElementById("splitBtn").disabled=!(sel&&sel.dur>=2);
+    document.getElementById("splitBtn").disabled=!canSplit(sel);
     document.getElementById("mergeBtn").disabled=!(sel&&nextSung);
     document.getElementById("delBtn").disabled=!sel;
     document.getElementById("goldBtn").disabled=!sel;
@@ -567,8 +569,21 @@
 
   // ── edit operations ──────────────────────────────────────────────────────
   function nextId(){ let m=0; for(const n of notes) if(n.id>m)m=n.id; return m+1; }
+  function canSplit(n){
+    if(!n) return false;
+    if(n.dur>=2) return true;
+    return nextNoteStartBeat(n)-(n.start+n.dur)>=1;
+  }
   function splitNote(){
-    const n=notes.find(x=>x.id===selectedId); if(!n||n.dur<2) return;
+    const n=notes.find(x=>x.id===selectedId); if(!canSplit(n)) return;
+    if(n.dur<2){
+      pushUndo();
+      const nb={id:nextId(),type:n.type,start:n.start+n.dur,dur:1,pitch:n.pitch,syl:"~"};
+      notes.splice(notes.findIndex(x=>x.id===n.id)+1,0,nb);
+      selectedId=nb.id;
+      renderPage();
+      return;
+    }
     let b;
     if(play.playheadMs!=null&&startMsOf(n)<play.playheadMs&&play.playheadMs<endMsOf(n)) b=msToBeat(play.playheadMs);
     else b=Math.round(n.start+n.dur/2);

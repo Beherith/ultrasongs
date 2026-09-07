@@ -47,6 +47,46 @@ class TestBuildUltrastarTxt:
         txt = build_ultrastar_txt(notes, meta)
         assert "#VIDEO:test.mp4" in txt
 
+    def test_with_stems(self):
+        meta = UltrastarMeta(
+            title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500,
+            video="test.mp4",
+            vocals="test_vocals.mp3",
+            instrumental="test_accompaniment.mp3",
+        )
+        notes = []
+        txt = build_ultrastar_txt(notes, meta)
+        header = txt.split("\n\n")[0].split("\n")
+        assert header == [
+            "#TITLE:Test",
+            "#ARTIST:Artist",
+            "#MP3:test.mp3",
+            "#VIDEO:test.mp4",
+            "#VOCALS:test_vocals.mp3",
+            "#INSTRUMENTAL:test_accompaniment.mp3",
+            "#BPM:120.00",
+            "#GAP:500",
+        ]
+
+    def test_with_stems_without_video(self):
+        meta = UltrastarMeta(
+            title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500,
+            vocals="test_vocals.mp3",
+            instrumental="test_accompaniment.mp3",
+        )
+        notes = []
+        txt = build_ultrastar_txt(notes, meta)
+        header = txt.split("\n\n")[0].split("\n")
+        assert header == [
+            "#TITLE:Test",
+            "#ARTIST:Artist",
+            "#MP3:test.mp3",
+            "#VOCALS:test_vocals.mp3",
+            "#INSTRUMENTAL:test_accompaniment.mp3",
+            "#BPM:120.00",
+            "#GAP:500",
+        ]
+
     def test_line_break(self):
         meta = UltrastarMeta(title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500)
         notes = [
@@ -92,6 +132,37 @@ E
 """
         meta, notes = parse_ultrastar_txt(content)
         assert meta.video == "test.mp4"
+
+    def test_with_stems(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#VIDEO:test.mp4
+#VOCALS:test_vocals.mp3
+#INSTRUMENTAL:test_accompaniment.mp3
+#BPM:120.00
+#GAP:500
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.vocals == "test_vocals.mp3"
+        assert meta.instrumental == "test_accompaniment.mp3"
+
+    def test_without_stems(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:120.00
+#GAP:500
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.vocals is None
+        assert meta.instrumental is None
 
     def test_line_break(self):
         content = """#TITLE:Test
@@ -334,7 +405,12 @@ E
 
 class TestRoundTrip:
     def test_build_then_parse(self):
-        original_meta = UltrastarMeta(title="Round", artist="Trip", mp3="r.mp3", bpm=115.5, gap=300)
+        original_meta = UltrastarMeta(
+            title="Round", artist="Trip", mp3="r.mp3", bpm=115.5, gap=300,
+            video="r.mp4",
+            vocals="r_vocals.mp3",
+            instrumental="r_accompaniment.mp3",
+        )
         original_notes = [
             UltrastarNote(note_type=":", start_beat=0, duration=8, pitch=64, syllable="hello"),
             UltrastarNote(note_type="-", start_beat=20, duration=0, pitch=0, syllable=""),
@@ -348,6 +424,9 @@ class TestRoundTrip:
         assert parsed_meta.mp3 == original_meta.mp3
         assert parsed_meta.bpm == original_meta.bpm
         assert parsed_meta.gap == original_meta.gap
+        assert parsed_meta.video == original_meta.video
+        assert parsed_meta.vocals == original_meta.vocals
+        assert parsed_meta.instrumental == original_meta.instrumental
         assert len(parsed_notes) == len(original_notes)
 
         for i, (orig, parsed) in enumerate(zip(original_notes, parsed_notes)):
