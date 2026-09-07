@@ -126,7 +126,7 @@ class JobManager:
 ```jsonc
 {
   "host": "127.0.0.1",
-  "port": 8080,
+  "port": 8030,
   "web_dir": "./web_jobs",
   "job_retention_days": 7,
   "max_upload_mb": 2048,

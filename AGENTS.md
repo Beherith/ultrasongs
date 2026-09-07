@@ -58,7 +58,7 @@ python -m cli process ... --no-intermediates   # skip intermediate temp files in
 
 # Web UI (requires `pip install 'ultrasongs-cli[web]'` or dash in requirements.txt).
 # Password from ULTRASONGS_WEB_PASSWORD env var, or ULTRASONGS_WEB_PASSWORD in ./.env.local (gitignored); --no-auth only on localhost.
-ULTRASONGS_WEB_PASSWORD=secret python -m cli web [--host 127.0.0.1] [--port 8080] [--no-auth] [--web-config path]
+ULTRASONGS_WEB_PASSWORD=secret python -m cli web [--host 127.0.0.1] [--port 8030] [--no-auth] [--web-config path]
 
 python -m cli -v process ...           # Verbose (DEBUG) logging
 python -m cli -q process ...           # Quiet (WARNING+) logging

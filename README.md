@@ -78,7 +78,7 @@ python extract_lyrics.py output.txt   # standalone script
 
 # Web UI (optional, needs `pip install 'ultrasongs-cli[web]'` or dash)
 # Password from the ULTRASONGS_WEB_PASSWORD env var, or ./.env.local (gitignored)
-ULTRASONGS_WEB_PASSWORD=secret python -m cli web [--host 127.0.0.1] [--port 8080] [--no-auth]
+ULTRASONGS_WEB_PASSWORD=secret python -m cli web [--host 127.0.0.1] [--port 8030] [--no-auth]
 ```
 
 Global flags:

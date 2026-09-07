@@ -113,7 +113,7 @@ def _build_parser() -> argparse.ArgumentParser:
     # ── web ──────────────────────────────────────────────────────────────────
     web = subparsers.add_parser("web", help="Run the web UI (Dash) for the pipeline")
     web.add_argument("--host", default=None, help="Bind address (default: from web config, 127.0.0.1)")
-    web.add_argument("--port", type=int, default=None, help="Bind port (default: from web config, 8080)")
+    web.add_argument("--port", type=int, default=None, help="Bind port (default: from web config, 8030)")
     web.add_argument(
         "--no-auth",
         action="store_true",

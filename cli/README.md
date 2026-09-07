@@ -143,7 +143,7 @@ Serve a single-page Dash app that runs the same pipeline. Requires the optional 
 ```bash
 ULTRASONGS_WEB_PASSWORD=secret python -m cli web \
   [--host 127.0.0.1] \
-  [--port 8080] \
+  [--port 8030] \
   [--no-auth] \
   [--web-config cli/web_config.jsonc]
 ```

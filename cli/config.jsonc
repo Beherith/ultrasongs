@@ -190,7 +190,7 @@
   // amplitude activity threshold. 0.2 keeps the threshold close to the noise
   // floor, so soft singing is still detected. Increase (e.g., 0.4) to trim more
   // instrumental bleed out of notes; decrease (e.g., 0.1) to keep softer onsets.
-  "activity_threshold_ratio": 0.2,
+  "activity_threshold_ratio": 0.12,
 
   // Minimum CREPE confidence for a frame to count as vocal activity when
   // trimming/splitting notes within a syllable.
@@ -240,7 +240,7 @@
   // without wasting disk space on intermediate files. Using a higher bitrate
   // (e.g., "192k" or "256k") won't improve results meaningfully but will increase
   // temp file sizes and I/O time.
-  "ffmpeg_audio_bitrate": "128k",
+  "ffmpeg_audio_bitrate": "256k",
 
   // Output directory for generated Ultrastar song files and ZIP packages.
   "output_dir": "./output",

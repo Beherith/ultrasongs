@@ -33,7 +33,7 @@ SOURCE_URL = "https://github.com/Beherith/ultrasongs"
 @dataclass(frozen=True)
 class WebConfig:
     host: str = "127.0.0.1"
-    port: int = 8080
+    port: int = 8030
     web_dir: str = "./web_jobs"
     job_retention_days: float = 7.0
     max_upload_mb: float = 2048.0
@@ -55,7 +55,7 @@ def load_web_config(path: str | Path | None = None) -> WebConfig:
 
     return WebConfig(
         host=pick("host", str, "127.0.0.1"),
-        port=pick("port", int, 8080),
+        port=pick("port", int, 8030),
         web_dir=pick("web_dir", str, "./web_jobs"),
         job_retention_days=pick("job_retention_days", float, 7.0),
         max_upload_mb=pick("max_upload_mb", float, 2048.0),

@@ -160,7 +160,7 @@ class TestLoadWebConfig:
         p = tmp_path / "web_config.jsonc"
         p.write_text('{"port": "not_a_port"}', encoding="utf-8")
         cfg = load_web_config(p)
-        assert cfg.port == 8080
+        assert cfg.port == 8030
         assert cfg.host == "127.0.0.1"
 
 
