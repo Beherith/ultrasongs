@@ -57,7 +57,7 @@ python -m cli edit --txt output/tit31.txt [--pitch tmp/whisperx_pitch.json] [--v
 python -m cli process ... --no-intermediates   # skip intermediate temp files in the output ZIP
 
 # Web UI (requires `pip install 'ultrasongs-cli[web]'` or dash in requirements.txt).
-# Password from ULTRASONGS_WEB_PASSWORD env var; --no-auth only on localhost.
+# Password from ULTRASONGS_WEB_PASSWORD env var, or ULTRASONGS_WEB_PASSWORD in ./.env.local (gitignored); --no-auth only on localhost.
 ULTRASONGS_WEB_PASSWORD=secret python -m cli web [--host 127.0.0.1] [--port 8080] [--no-auth] [--web-config path]
 
 python -m cli -v process ...           # Verbose (DEBUG) logging
@@ -86,14 +86,15 @@ Each processing run writes into its own per-song folder `<output_dir>/<artist> -
 - **Source of truth**: the parsed notes list. `start`/`dur` are beats (int), `pitch` is MIDI (int); ms is derived as `gap + start*beatMs` with `beatMs = 60000/bpm/4`. The file's `#BPM` is used verbatim (it already bakes in `beat_resolution_multiplier`).
 - **Two beat concepts**: `beatMs` (16th note at the listed BPM) is the note **snap grid**; `pulseMs = 60000/bpm` (quarter note) is the **visual grid + metronome** spacing.
 - **Header**: leading `#` lines are preserved verbatim (incl. `#COVER`/`#BACKGROUND`/`#CREATOR`); CRLF→LF on save. The body is serialized in the same shape as `build_ultrastar_txt`.
-- **Pitch overlay**: `--pitch` embeds the full `whisperx_pitch.json` word/frame list (s→ms) as `pitchWords`; the JS slices it into the live page window, so overlays stay correct under edits that change line structure. `--vocals` names the suggested audio file; `--embed-audio` base64-embeds it.
+- **Reloading progress**: the toolbar's **Load .txt** button imports a saved Ultrastar `.txt` (UTF-8, falling back to Windows-1252 on decode failure), replacing notes, raw header, `#BPM`/`#GAP` (and derived `beatMs`/`pulseMs`), and title/artist in the top bar. The in-browser parser mirrors `cli/ultrastar.parse_ultrastar_txt` (note regex, rest/corrupted-note recovery, comma-decimal BPM). It resets selection, undo stack, and page, and keeps the audio + pitch overlay as-is; `srcName` follows the loaded file so the next download reuses its name. Failures show "txt load failed" in the meta chip.
+- **Pitch overlay**: `--pitch` embeds the full `whisperx_pitch.json` word/frame list (s→ms) as `pitchWords`; the JS slices it into the live page window, so overlays stay correct under edits that change line structure. The toolbar's **Load pitch JSON** button can replace `pitchWords` at runtime by loading a `whisperx_pitch.json` file (same format as `--pitch`; accepts a bare `words` array or a `{words:[...]}` object), which re-renders the whisper word labels + CREPE dots; a top-bar chip shows the loaded file name + word count. `--vocals` names the suggested audio file; `--embed-audio` base64-embeds it.
 - **Payload** is injected into `cli/editor_template.html` via `__EDITOR_DATA__`; a 64-entry magma LUT is injected via `__MAGMA__` (both escaped so `</` can't close the script).
 
 ## Web Service
 
 `python -m cli web` runs a single-threaded-worker Dash app (`cli/web/`) that submits the same `cli.pipeline.run_process` the CLI uses. Requires the optional `dash` dependency (`pip install 'ultrasongs-cli[web]'`); the subcommand prints an install hint and exits 1 if Dash is missing.
 
-- **Auth**: password from the `ULTRASONGS_WEB_PASSWORD` environment variable (constant-time compare, Flask session cookie). No TLS is provided — bind to `127.0.0.1` (default) or put a reverse proxy in front. `--no-auth` disables login but is rejected unless the host is `127.0.0.1`/`localhost`. Web server settings (host, port, `web_dir`, retention, upload cap, poll interval) live in `cli/web_config.jsonc` (`--web-config` to override).
+- **Auth**: password from the `ULTRASONGS_WEB_PASSWORD` environment variable, falling back to a `ULTRASONGS_WEB_PASSWORD=...` entry in `./.env.local` (gitignored; env var wins) (constant-time compare, Flask session cookie). No TLS is provided — bind to `127.0.0.1` (default) or put a reverse proxy in front. `--no-auth` disables login but is rejected unless the host is `127.0.0.1`/`localhost`. Web server settings (host, port, `web_dir`, retention, upload cap, poll interval) live in `cli/web_config.jsonc` (`--web-config` to override).
 - **Queue**: one job at a time, FIFO (`cli/web/jobs.py`). Uploads are staged, validated (extension + size cap), then moved into the job dir. Each job gets `web_jobs/<id>/{upload,tmp,output}` plus a `job.json` manifest; jobs older than `job_retention_days` are pruned at startup and before each submission.
 - **UI**: one form (title/artist/lyrics + audio/video upload) plus an auto-generated settings accordion with one control per `config.jsonc` key (44), driven by `cli/web/settings_meta.py`. Jobs show live status, queue position, log tail, and download links (ZIP, note editor, HTML preview, stems) served from `/download/<job_id>/<file>`.
 - **Per-job config**: form values override the base `Config` (revalidated via `config_from_dict`); the job's `temp_dir`/`output_dir` are forced to the job dir, and the ZIP includes intermediates.
@@ -130,7 +131,7 @@ Each processing run writes into its own per-song folder `<output_dir>/<artist> -
 | `cli/package.py` | Output packaging (`.txt`, MP3, video, stems, ZIP), `collect_intermediates()` for ZIP bundling |
 | `cli/web/app.py` | Dash app factory: layout, settings accordion, callbacks, `/download` route, `run_server()` |
 | `cli/web/jobs.py` | `JobManager`: single-worker FIFO queue, per-job log capture, retention pruning, `snapshot()` |
-| `cli/web/auth.py` | Flask session login (`/login`, `/logout`), constant-time password check, `resolve_auth()` host guard |
+| `cli/web/auth.py` | Flask session login (`/login`, `/logout`), constant-time password check, `resolve_auth()` host guard, `load_web_password()` (env var, then `.env.local`) |
 | `cli/web/settings_meta.py` | `SettingMeta` list (one per config key) driving the auto-generated settings form |
 | `cli/web_config.jsonc` | Web server config (host, port, `web_dir`, retention, upload cap, poll interval) |
 | `cli/diff.py` | Compare two Ultrastar `.txt` files with tolerances, `DiffReport.print()` |

@@ -23,7 +23,7 @@
   .stage { padding: 14px 16px 4px; }
   .plotwrap { position: relative; width: 100%; }
   #plot { width: 100%; height: auto; display: block; touch-action: none; position: relative; z-index: 1; }
-  #fft { position: absolute; left: 4.375%; top: 4.16667%; width: 93.75%; height: 86.66667%; opacity: 0.55; z-index: 0; pointer-events: none; }
+  #fft { position: absolute; left: 4.375%; top: 4.16667%; width: 93.75%; height: 86.66667%; opacity: 1.0; z-index: 0; pointer-events: none; }
   select#lineSel { background: #0f3460; color: #cde; border: 1px solid #2a5a8a; border-radius: 5px; padding: 5px 8px; font-size: 13px; max-width: 340px; }
   .metro { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #9aa; }
   input[type=range] { accent-color: #e94560; width: 110px; }
@@ -39,8 +39,12 @@
   .drop.over { border-color: #4fc3f7; background: #16213e; }
   .drop b { color: #cde; }
   .lyric-pop { position: fixed; z-index: 50; background: #0d1b2e; color: #fff; border: 1px solid #4fc3f7; border-radius: 4px; padding: 4px 6px; font: 13px ui-monospace, monospace; min-width: 120px; }
-  .help { font-size: 12px; color: #667; padding: 0 16px 14px; }
+  .help { font-size: 12px; color: #667; padding: 0 16px 10px; }
   kbd { background: #0f3460; border-radius: 3px; padding: 1px 5px; font-family: ui-monospace, monospace; color: #cde; }
+  .legend { display: flex; gap: 10px 26px; flex-wrap: wrap; padding: 0 16px 16px; border-top: 1px solid #0f3460; }
+  .lg { display: flex; gap: 9px; align-items: center; max-width: 340px; font-size: 12px; color: #9aa; }
+  .lg svg { flex: none; }
+  .lg b { color: #cde; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -48,6 +52,7 @@
     <h1 id="title">Loading&hellip;</h1>
     <span class="chip" id="meta"></span>
     <span class="chip" id="audioChip"></span>
+    <span class="chip" id="pitchChip"></span>
   </div>
 
   <div class="toolbar">
@@ -55,6 +60,8 @@
     <select id="lineSel" title="Jump to line"></select>
     <button id="nextBtn" title="Next line (Right / PageDown)">Next &#9654;</button>
     <button id="playBtn" class="primary" title="Play / stop line (Space)">&#9654; Play</button>
+    <span class="metro" title="Vocals audio volume">Vocals <input type="range" id="vocalsVol" min="0" max="100" value="100"><span id="vocalsVolVal">100</span></span>
+    <span class="metro" title="MIDI note volume">Notes <input type="range" id="notesVol" min="0" max="100" value="100"><span id="notesVolVal">100</span></span>
     <span class="metro" title="Metronome volume">Metro <input type="range" id="metroVol" min="0" max="100" value="80"><span id="metroVolVal">80</span></span>
     <span class="sep"></span>
     <button id="splitBtn" title="Split selected (S)">Split</button>
@@ -64,6 +71,11 @@
     <button id="lyricBtn" title="Edit lyric (L / double-click)">Lyric</button>
     <span class="sep"></span>
     <button id="undoBtn" title="Undo (Ctrl+Z)">&#8630; Undo</button>
+    <span class="sep"></span>
+    <button id="txtBtn" title="Load a saved Ultrastar .txt (replaces the current song: notes, header, BPM/GAP)">Load .txt</button>
+    <input type="file" id="txtInput" accept=".txt,text/plain" hidden>
+    <button id="pitchBtn" title="Load a whisperx_pitch.json to replace the pitch overlay (whisper words + CREPE dots)">Load pitch JSON</button>
+    <input type="file" id="pitchInput" accept=".json,application/json" hidden>
     <span class="sep"></span>
     <button id="saveBtn" class="primary" title="Download .txt (Ctrl+S)">Download .txt</button>
     <span class="chip" id="lineInd"></span>
@@ -89,7 +101,56 @@
   <div class="help">
     Drag a note up/down = pitch, left/right = start &middot; drag an edge = duration &middot; double-click = edit lyric &middot;
     <kbd>Space</kbd> play &middot; <kbd>&#8592;</kbd>/<kbd>&#8594;</kbd> line &middot; <kbd>S</kbd> split &middot; <kbd>M</kbd> merge &middot;
-    <kbd>G</kbd> gold &middot; <kbd>L</kbd> lyric &middot; <kbd>Del</kbd> delete &middot; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &middot; <kbd>Ctrl</kbd>+<kbd>S</kbd> download
+    <kbd>G</kbd> gold &middot; <kbd>L</kbd> lyric &middot; <kbd>Del</kbd> delete &middot; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &middot; <kbd>Ctrl</kbd>+<kbd>S</kbd> download &middot;
+    toolbar: <b>Load .txt</b> reloads a saved song &middot; <b>Load pitch JSON</b> swaps the pitch overlay
+  </div>
+
+  <div class="legend">
+    <div class="lg">
+      <svg width="96" height="36" viewBox="0 0 96 36" aria-hidden="true">
+        <rect width="96" height="36" rx="3" fill="#0a0a14"/>
+        <text x="48" y="18" fill="#4caf50" font-size="11" font-style="italic" opacity="0.85" text-anchor="middle">sing</text>
+        <line x1="22" y1="26" x2="74" y2="26" stroke="#4caf50" stroke-width="1.2" opacity="0.6"/>
+        <polygon points="16,26 22,22.5 22,29.5" fill="#4caf50" opacity="0.6"/>
+        <polygon points="80,26 74,22.5 74,29.5" fill="#4caf50" opacity="0.6"/>
+      </svg>
+      <span><b>Whisper word</b> &mdash; a word the ASR actually heard in the vocals, with its forced-alignment start/end (arrows). Drag notes so they sit under the word they sing. <i>Load pitch JSON</i> in the toolbar swaps in a different <code>whisperx_pitch.json</code> overlay.</span>
+    </div>
+    <div class="lg">
+      <svg width="96" height="36" viewBox="0 0 96 36" aria-hidden="true">
+        <rect width="96" height="36" rx="3" fill="#0a0a14"/>
+        <circle cx="16" cy="21" r="3" fill="rgb(40,200,60)" opacity="0.85"/>
+        <circle cx="32" cy="15" r="3" fill="rgb(148,209,30)" opacity="1"/>
+        <circle cx="48" cy="19" r="3" fill="rgb(255,220,0)" opacity="0.55"/>
+        <circle cx="64" cy="12" r="3" fill="rgb(238,130,20)" opacity="1"/>
+        <circle cx="80" cy="22" r="3" fill="rgb(230,40,40)" opacity="0.3"/>
+      </svg>
+      <span><b>CREPE pitch dot</b> &mdash; one per pitch-detected audio frame (y = detected pitch). Color = loudness (green quiet &#8594; red loud); transparency = pitch confidence, so faint dots are less trustworthy.</span>
+    </div>
+    <div class="lg">
+      <svg width="96" height="36" viewBox="0 0 96 36" aria-hidden="true">
+        <defs>
+          <linearGradient id="lgmag" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0" stop-color="rgb(0,0,4)"/>
+            <stop offset="0.5" stop-color="rgb(47,17,99)"/>
+            <stop offset="1" stop-color="rgb(186,56,120)"/>
+          </linearGradient>
+        </defs>
+        <rect width="96" height="36" rx="3" fill="url(#lgmag)" opacity="0.55"/>
+        <ellipse cx="32" cy="21" rx="13" ry="5" fill="rgb(254,180,123)" opacity="0.7"/>
+        <ellipse cx="68" cy="12" rx="10" ry="4" fill="rgb(254,216,154)" opacity="0.6"/>
+      </svg>
+      <span><b>FFT background</b> &mdash; live spectrogram of the dropped vocals, one row per semitone: dark = quiet, bright red = energy. It appears only after loading audio.</span>
+    </div>
+    <div class="lg">
+      <svg width="96" height="36" viewBox="0 0 96 36" aria-hidden="true">
+        <rect width="96" height="36" rx="3" fill="#0a0a14"/>
+        <line x1="28" y1="4" x2="28" y2="32" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+        <line x1="48" y1="4" x2="48" y2="32" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>
+        <line x1="68" y1="4" x2="68" y2="32" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      </svg>
+      <span><b>Beat grid</b> &mdash; one vertical line per beat (quarter note); the brighter, thicker line marks every 4th beat (the bar line the metronome accents).</span>
+    </div>
   </div>
 
 <script>window.EDITOR_DATA = __EDITOR_DATA__;</script>
@@ -103,8 +164,8 @@
   const W=1280, H=480, PAD_L=56, PAD_R=24, PAD_T=20, PAD_B=44;
   const PLOT_W=W-PAD_L-PAD_R, PLOT_H=H-PAD_T-PAD_B;
   const MARGIN_L_MS=200, MARGIN_R_MS=400, MIDI_MIN=24, MIDI_MAX=96;
-  const N_FFT=2048, FFT_SIZE=8192, HOP=512;
-  const BPM=D.bpm, GAP=D.gap, BEAT_MS=D.beatMs, PULSE_MS=D.pulseMs;
+  const N_FFT=2048, FFT_SIZE=4096, HOP=512;
+  let BPM=D.bpm, GAP=D.gap, BEAT_MS=D.beatMs, PULSE_MS=D.pulseMs;
   const MEGA=[[0,0,4],[2,1,9],[3,3,18],[6,5,26],[10,8,34],[14,11,43],[19,13,52],[24,15,61],[29,17,71],[34,17,80],[41,17,90],[47,17,99],[54,16,107],[61,15,113],[68,15,118],[74,16,121],[82,19,124],[89,21,126],[95,24,127],[101,26,128],[107,29,129],[114,31,129],[120,34,129],[126,36,130],[132,38,129],[139,41,129],[145,43,129],[152,45,128],[158,47,127],[165,49,126],[171,51,124],[178,53,123],[186,56,120],[192,58,118],[199,61,115],[205,64,113],[211,67,110],[217,70,107],[223,74,104],[228,79,100],[233,84,98],[237,90,95],[241,96,93],[244,103,92],[246,110,92],[248,118,92],[250,125,94],[251,133,96],[252,142,100],[253,150,104],[254,157,108],[254,165,113],[254,172,118],[254,180,123],[254,187,129],[254,194,135],[254,202,141],[254,209,148],[254,216,154],[253,224,161],[253,231,169],[252,238,176],[252,246,184],[252,253,191]];
   const NOTE_NAMES=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 
@@ -244,7 +305,7 @@
     for(const n of pageNotes){
       const x=tx(startMsOf(n)), w=Math.max(tx(endMsOf(n))-x,2), y=ty(n.pitch);
       const gold=n.type==="*";
-      const fill=gold?"#e94560":"#0f3460", stroke=gold?"#ff6b81":"#4fc3f7", tfill=gold?"#fff":"#cde";
+      const fill=gold?"rgba(232,190,60,0.7)":"rgba(15,52,96,0.7)", stroke=gold?"#ffd54a":"#4fc3f7", tfill=gold?"#1a1a2e":"#cde";
       const sel=n.id===selectedId;
       const label=(n.syl.trim()||"&nbsp;");
       const fs=Math.max(7,Math.min(12,w/(Math.max(1,n.syl.trim().length)*0.55)));
@@ -592,6 +653,8 @@
     if(!audio.ctx){
       audio.ctx=new (window.AudioContext||window.webkitAudioContext)();
       audio.master=audio.ctx.createGain(); audio.master.gain.value=0.9; audio.master.connect(audio.ctx.destination);
+      audio.vocals=audio.ctx.createGain(); audio.vocals.gain.value=vocalsGain(); audio.vocals.connect(audio.master);
+      audio.notes=audio.ctx.createGain(); audio.notes.gain.value=notesGain(); audio.notes.connect(audio.master);
       audio.metro=audio.ctx.createGain(); audio.metro.gain.value=metroGain(); audio.metro.connect(audio.master);
     }
     return audio.ctx;
@@ -610,6 +673,100 @@
     else if(audio.error){ chip.textContent="audio decode failed"; chip.className="chip err"; }
     else { chip.textContent="audio: not loaded"; chip.className="chip"; }
   }
+  function updatePitchChip(name,count,ok){
+    const chip=document.getElementById("pitchChip");
+    if(!ok){ chip.textContent="pitch JSON failed"; chip.className="chip err"; return; }
+    chip.textContent=count?("pitch: "+name+" ("+count+" words)"):"pitch: none";
+    chip.className=ok?"chip ok":"chip";
+  }
+  function loadPitchFile(f){
+    if(!f) return;
+    f.text().then(txt=>{
+      const data=JSON.parse(txt);
+      const src=Array.isArray(data)?data:data.words;
+      if(!Array.isArray(src)) throw new Error("no 'words' array");
+      D.pitchWords=src.map(w=>({
+        word:w.word||"",
+        start_ms:(w.start||0)*1000,
+        end_ms:(w.end||0)*1000,
+        midi:w.midi||0,
+        frames:(w.pitchFrames||[]).map(pf=>({t_ms:(pf.time||0)*1000,m:pf.midi||0,conf:pf.confidence||0,amp:pf.amplitude||0}))
+      }));
+      updatePitchChip(f.name,D.pitchWords.length,true);
+      lastRefKey="";
+      renderPage();
+    }).catch(e=>updatePitchChip("",0,false));
+  }
+  function updateMetaChip(){
+    const lineCount=computeGroups(D.notes).length;
+    document.getElementById("meta").textContent=
+      `BPM ${D.bpm} · GAP ${D.gap}ms · ${D.notes.length} notes · ${lineCount} lines`;
+  }
+  function addRestOrCorrupted(afterDash,out){
+    if(!afterDash) return;
+    let beatText;
+    if(afterDash.includes(":")){
+      const ci=afterDash.indexOf(":");
+      const remainder=afterDash.slice(ci+1).trim();
+      const m2=/^(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$/.exec(remainder);
+      if(m2){ out.push({type:":",start:+m2[1],dur:+m2[2],pitch:+m2[3],syl:m2[4]||""}); return; }
+      beatText=afterDash.slice(0,ci).trim();
+    }else{
+      const parts=afterDash.split(/\s+/);
+      beatText=parts[0]||"";
+    }
+    beatText=beatText.split(":")[0].trim();
+    if(!/^-?\d+$/.test(beatText)) return;
+    out.push({type:"-",start:+beatText,dur:0,pitch:0,syl:""});
+  }
+  function parseUltrastarTxt(content){
+    const text=content.replace(/\r\n/g,"\n").replace(/\r/g,"\n");
+    const meta={}, notes=[], rawHeader=[];
+    let headerDone=false;
+    for(const line of text.split("\n")){
+      const trimmed=line.trim();
+      if(!headerDone){ if(trimmed.startsWith("#")) rawHeader.push(line); else headerDone=true; }
+      if(trimmed.startsWith("#")){
+        const colon=trimmed.indexOf(":");
+        if(colon>0) meta[trimmed.slice(1,colon).toUpperCase()]=trimmed.slice(colon+1).trim();
+      }else{
+        const m=/^\s*([:*])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$/.exec(trimmed);
+        if(m) notes.push({type:m[1],start:+m[2],dur:+m[3],pitch:+m[4],syl:m[5]||""});
+        else if(trimmed.startsWith("-")) addRestOrCorrupted(trimmed.slice(1).trim(),notes);
+      }
+    }
+    const bpm=parseFloat((meta.BPM||"120").replace(/,/g,"."))||120;
+    const gap=Math.trunc(parseFloat((meta.GAP||"0").replace(/,/g,".")))||0;
+    return {rawHeader,meta,notes,bpm,gap};
+  }
+  async function loadTxtFile(f){
+    if(!f) return;
+    const metaChip=document.getElementById("meta");
+    try{
+      const bytes=new Uint8Array(await f.arrayBuffer());
+      let text;
+      try{ text=new TextDecoder("utf-8",{fatal:true}).decode(bytes); }
+      catch{ text=new TextDecoder("windows-1252").decode(bytes); }
+      const p=parseUltrastarTxt(text);
+      if(!p.rawHeader.length&&!p.notes.length) throw new Error("no Ultrastar content");
+      D.rawHeader=p.rawHeader;
+      D.notes=p.notes.map((n,i)=>({id:i,type:n.type,start:n.start,dur:n.dur,pitch:n.pitch,syl:n.syl}));
+      D.bpm=p.bpm; D.gap=p.gap; D.beatMs=60000/p.bpm/4; D.pulseMs=60000/p.bpm;
+      D.meta={title:p.meta.TITLE||"",artist:p.meta.ARTIST||"",mp3:p.meta.MP3||"",bpm:p.bpm,gap:p.gap,video:p.meta.VIDEO||""};
+      D.srcName=f.name;
+      BPM=p.bpm; GAP=p.gap; BEAT_MS=D.beatMs; PULSE_MS=D.pulseMs;
+      stopPlay(); cancelLyric();
+      notes=D.notes.slice(); selectedId=null; undoStack=[]; currentPage=0;
+      lastRefKey=""; lastFftKey="";
+      document.getElementById("title").textContent=(D.meta.title||"(untitled)")+" — "+(D.meta.artist||"");
+      metaChip.className="chip";
+      updateMetaChip();
+      renderPage();
+    }catch(e){
+      metaChip.textContent="txt load failed";
+      metaChip.className="chip err";
+    }
+  }
   function playLine(){
     if(play.active){ stopPlay(); return; }
     const pageNotes=groups[currentPage]||[];
@@ -621,7 +778,7 @@
     if(audio.buffer){
       const src=ctx.createBufferSource(); src.buffer=audio.buffer;
       src.start(t0ctx,Math.max(0,lineStartMs/1000),(lineEndMs-lineStartMs)/1000+0.5);
-      src.connect(audio.master); play.sources.push(src);
+      src.connect(audio.vocals); play.sources.push(src);
     }
     for(const n of pageNotes){
       const f=440*Math.pow(2,(n.pitch-69)/12);
@@ -633,7 +790,7 @@
       g.gain.linearRampToValueAtTime(peak,st+0.015);
       g.gain.setValueAtTime(peak,Math.max(st+0.015,st+dur-0.06));
       g.gain.linearRampToValueAtTime(0.0001,st+dur);
-      osc.connect(g); g.connect(audio.master);
+      osc.connect(g); g.connect(audio.notes);
       osc.start(st); osc.stop(st+dur+0.02); play.sources.push(osc);
     }
     const firstP=Math.ceil((lineStartMs-GAP)/PULSE_MS), lastP=Math.floor((lineEndMs-GAP)/PULSE_MS);
@@ -706,12 +863,15 @@
   }
 
   // ── events ───────────────────────────────────────────────────────────────
-  function metroGain(){ return (+document.getElementById("metroVol").value)/100; }
-  const metroVol=document.getElementById("metroVol");
-  metroVol.oninput=()=>{
-    document.getElementById("metroVolVal").textContent=metroVol.value;
-    if(audio.metro) audio.metro.gain.value=metroGain();
-  };
+  const volOf=id=>+document.getElementById(id).value/100;
+  const vocalsGain=()=>volOf("vocalsVol"), notesGain=()=>volOf("notesVol"), metroGain=()=>volOf("metroVol");
+  for(const [id,bus] of [["vocalsVol","vocals"],["notesVol","notes"],["metroVol","metro"]]){
+    const el=document.getElementById(id);
+    el.oninput=()=>{
+      document.getElementById(id+"Val").textContent=el.value;
+      if(audio[bus]) audio[bus].gain.value=volOf(id);
+    };
+  }
   document.getElementById("lineSel").onchange=e=>gotoPage(+e.target.value);
   document.getElementById("prevBtn").onclick=()=>gotoPage(currentPage-1);
   document.getElementById("nextBtn").onclick=()=>gotoPage(currentPage+1);
@@ -722,6 +882,12 @@
   document.getElementById("goldBtn").onclick=toggleGold;
   document.getElementById("lyricBtn").onclick=()=>{ const n=notes.find(x=>x.id===selectedId); if(n) openLyricPopover(n); };
   document.getElementById("undoBtn").onclick=undo;
+  const txtInput=document.getElementById("txtInput");
+  document.getElementById("txtBtn").onclick=()=>txtInput.click();
+  txtInput.onchange=e=>{ loadTxtFile(e.target.files[0]); e.target.value=""; };
+  const pitchInput=document.getElementById("pitchInput");
+  document.getElementById("pitchBtn").onclick=()=>pitchInput.click();
+  pitchInput.onchange=e=>{ loadPitchFile(e.target.files[0]); e.target.value=""; };
   document.getElementById("saveBtn").onclick=downloadTxt;
 
   const drop=document.getElementById("drop"), fileInput=document.getElementById("fileInput");
@@ -755,10 +921,9 @@
 
   // ── init ─────────────────────────────────────────────────────────────────
   document.getElementById("title").textContent=(D.meta.title||"(untitled)")+" — "+(D.meta.artist||"");
-  const lineCount=computeGroups(D.notes).length;
-  document.getElementById("meta").textContent=
-    `BPM ${D.bpm} · GAP ${D.gap}ms · ${D.notes.length} notes · ${lineCount} lines`;
+  updateMetaChip();
   updateAudioChip();
+  updatePitchChip("embedded",(D.pitchWords||[]).length,true);
   renderPage();
   if(D.audioB64){
     const bin=atob(D.audioB64), bytes=new Uint8Array(bin.length);

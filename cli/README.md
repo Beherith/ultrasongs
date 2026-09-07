@@ -148,7 +148,7 @@ ULTRASONGS_WEB_PASSWORD=secret python -m cli web \
   [--web-config cli/web_config.jsonc]
 ```
 
-- **Auth:** password from the `ULTRASONGS_WEB_PASSWORD` environment variable (Flask session cookie, constant-time compare). No TLS is provided — bind to `127.0.0.1` (default) or use a reverse proxy. `--no-auth` is rejected unless the host is `127.0.0.1`/`localhost`.
+- **Auth:** password from the `ULTRASONGS_WEB_PASSWORD` environment variable, or from a `ULTRASONGS_WEB_PASSWORD=...` entry in `./.env.local` (gitignored; env var wins) (Flask session cookie, constant-time compare). No TLS is provided — bind to `127.0.0.1` (default) or use a reverse proxy. `--no-auth` is rejected unless the host is `127.0.0.1`/`localhost`.
 - **Queue:** one job at a time, FIFO. Each job gets `web_jobs/<job_id>/{upload,tmp,output}` + a `job.json` manifest; jobs older than `job_retention_days` are pruned at startup and before each submission.
 - **Settings:** the form auto-generates one control per `config.jsonc` key (44). Values override the base config for that job only.
 - **Server settings** (host, port, `web_dir`, retention, upload cap, poll interval) live in `cli/web_config.jsonc`.

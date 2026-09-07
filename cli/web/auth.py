@@ -1,11 +1,14 @@
 """Session authentication for the web service.
 
-Password comes from the ULTRASONGS_WEB_PASSWORD environment variable.
+Password comes from the ULTRASONGS_WEB_PASSWORD environment variable, falling
+back to a ULTRASONGS_WEB_PASSWORD entry in ./.env.local (gitignored).
 No TLS is provided — bind to localhost or use a reverse proxy for LAN access.
 """
 
 import hmac
+import os
 import secrets
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from flask import redirect, request, session
@@ -14,6 +17,33 @@ if TYPE_CHECKING:  # pragma: no cover
     from flask import Flask
 
 AUTH_SESSION_KEY = "us_auth"
+PASSWORD_ENV = "ULTRASONGS_WEB_PASSWORD"
+ENV_FILE_NAME = ".env.local"
+
+
+def parse_env_file(path: Path) -> dict[str, str]:
+    """Parse a KEY=VALUE .env-style file (blank lines and # comments ignored)."""
+    values: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key:
+            values[key] = value.strip().strip("'\"")
+    return values
+
+
+def load_web_password(env_file: Path | None = None) -> str | None:
+    """Read the web password: env var first, then ULTRASONGS_WEB_PASSWORD in .env.local."""
+    password = os.environ.get(PASSWORD_ENV)
+    if password:
+        return password
+    env_file = env_file or Path.cwd() / ENV_FILE_NAME
+    if env_file.is_file():
+        return parse_env_file(env_file).get(PASSWORD_ENV) or None
+    return None
 
 LOGIN_PAGE = """<!doctype html>
 <html>
@@ -56,7 +86,10 @@ def resolve_auth(password_env: str | None, no_auth: bool, host: str) -> tuple[st
         return None, None
     if password_env:
         return password_env, None
-    return None, "Set the ULTRASONGS_WEB_PASSWORD environment variable (or use --no-auth on localhost)"
+    return None, (
+        f"Set the {PASSWORD_ENV} environment variable or put {PASSWORD_ENV}=... in ./{ENV_FILE_NAME} "
+        "(or use --no-auth on localhost)"
+    )
 
 
 def install_auth(server: "Flask", password: str | None) -> None:

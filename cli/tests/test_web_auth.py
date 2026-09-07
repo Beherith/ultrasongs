@@ -3,7 +3,7 @@
 import pytest
 from flask import Flask
 
-from cli.web.auth import install_auth, resolve_auth
+from cli.web.auth import install_auth, load_web_password, parse_env_file, resolve_auth
 
 
 def _app(password: str | None) -> Flask:
@@ -98,3 +98,46 @@ class TestResolveAuth:
         password, error = resolve_auth(None, True, host)
         assert password is None
         assert error is None
+
+
+class TestParseEnvFile:
+    def test_parses_key_value_lines(self, tmp_path):
+        p = tmp_path / ".env.local"
+        p.write_text("# comment\n\nULTRASONGS_WEB_PASSWORD=secret\nOTHER=value\n", encoding="utf-8")
+        values = parse_env_file(p)
+        assert values["ULTRASONGS_WEB_PASSWORD"] == "secret"
+        assert values["OTHER"] == "value"
+
+    def test_strips_quotes(self, tmp_path):
+        p = tmp_path / ".env.local"
+        p.write_text('ULTRASONGS_WEB_PASSWORD="quoted pass"\n', encoding="utf-8")
+        assert parse_env_file(p)["ULTRASONGS_WEB_PASSWORD"] == "quoted pass"
+
+    def test_ignores_malformed_lines(self, tmp_path):
+        p = tmp_path / ".env.local"
+        p.write_text("no-equals-here\n=orphan\n#ULTRASONGS_WEB_PASSWORD=commented\n", encoding="utf-8")
+        assert parse_env_file(p) == {}
+
+
+class TestLoadWebPassword:
+    def test_env_var_wins(self, tmp_path, monkeypatch):
+        p = tmp_path / ".env.local"
+        p.write_text("ULTRASONGS_WEB_PASSWORD=file-pass\n", encoding="utf-8")
+        monkeypatch.setenv("ULTRASONGS_WEB_PASSWORD", "env-pass")
+        assert load_web_password(env_file=p) == "env-pass"
+
+    def test_falls_back_to_env_file(self, tmp_path, monkeypatch):
+        p = tmp_path / ".env.local"
+        p.write_text("ULTRASONGS_WEB_PASSWORD=file-pass\n", encoding="utf-8")
+        monkeypatch.delenv("ULTRASONGS_WEB_PASSWORD", raising=False)
+        assert load_web_password(env_file=p) == "file-pass"
+
+    def test_missing_file_and_env_returns_none(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("ULTRASONGS_WEB_PASSWORD", raising=False)
+        assert load_web_password(env_file=tmp_path / "nope.env.local") is None
+
+    def test_empty_password_returns_none(self, tmp_path, monkeypatch):
+        p = tmp_path / ".env.local"
+        p.write_text("ULTRASONGS_WEB_PASSWORD=\n", encoding="utf-8")
+        monkeypatch.delenv("ULTRASONGS_WEB_PASSWORD", raising=False)
+        assert load_web_password(env_file=p) is None

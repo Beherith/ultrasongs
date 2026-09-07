@@ -273,14 +273,12 @@ def _cmd_preview(args: argparse.Namespace, config: "Config") -> int:  # type: ig
 
 def _cmd_web(args: argparse.Namespace, config: "Config") -> int:  # type: ignore[name-defined]
     """Run the Dash web UI."""
-    import os
-
     from cli.logging_setup import get_logger
 
     logger = get_logger("cli.web")
     try:
         from cli.web.app import load_web_config, run_server
-        from cli.web.auth import resolve_auth
+        from cli.web.auth import load_web_password, resolve_auth
     except ImportError:
         logger.error("The web UI requires Dash. Install it with: pip install 'ultrasongs-cli[web]'")
         return 1
@@ -290,7 +288,7 @@ def _cmd_web(args: argparse.Namespace, config: "Config") -> int:  # type: ignore
     host = args.host or web_cfg.host
     port = args.port or web_cfg.port
     password, error = resolve_auth(
-        os.environ.get("ULTRASONGS_WEB_PASSWORD"),
+        load_web_password(),
         args.no_auth,
         host,
     )

@@ -1,6 +1,7 @@
 {
   // Web service configuration (cli/web). The login password is NOT stored
-  // here; it comes from the ULTRASONGS_WEB_PASSWORD environment variable.
+  // here; it comes from the ULTRASONGS_WEB_PASSWORD environment variable, or
+  // from a ULTRASONGS_WEB_PASSWORD entry in ./.env.local (gitignored).
 
   // Host to bind the web server to. Keep 127.0.0.1 unless you put a reverse
   // proxy in front — there is no TLS.

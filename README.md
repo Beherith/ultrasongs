@@ -77,6 +77,7 @@ python -m cli lyrics --txt output.txt
 python extract_lyrics.py output.txt   # standalone script
 
 # Web UI (optional, needs `pip install 'ultrasongs-cli[web]'` or dash)
+# Password from the ULTRASONGS_WEB_PASSWORD env var, or ./.env.local (gitignored)
 ULTRASONGS_WEB_PASSWORD=secret python -m cli web [--host 127.0.0.1] [--port 8080] [--no-auth]
 ```
 
@@ -102,7 +103,7 @@ python -m cli process ... --resume tmp/name_transcribe.json --stage align
 
 `python -m cli web` serves a single-page Dash app that runs the same pipeline the CLI uses. One job at a time (FIFO queue); each job shows live status, queue position, log tail, and download links (ZIP, HTML preview, stems).
 
-- **Auth:** password from the `ULTRASONGS_WEB_PASSWORD` environment variable (session cookie, constant-time compare). There is no TLS — bind to `127.0.0.1` (default) or put a reverse proxy in front. `--no-auth` disables login but is only allowed on `127.0.0.1`/`localhost`.
+- **Auth:** password from the `ULTRASONGS_WEB_PASSWORD` environment variable, or from a `ULTRASONGS_WEB_PASSWORD=...` entry in `./.env.local` (gitignored; env var wins) (session cookie, constant-time compare). There is no TLS — bind to `127.0.0.1` (default) or put a reverse proxy in front. `--no-auth` disables login but is only allowed on `127.0.0.1`/`localhost`.
 - **Flags:** `--host`, `--port`, `--no-auth`, `--web-config <path>` (defaults from `cli/web_config.jsonc`).
 - **Per-job settings:** the form auto-generates one control per `config.jsonc` key; values override the base config for that job only. "Reset settings to file defaults" restores them.
 - **Jobs:** stored under `web_jobs/<job_id>/{upload,tmp,output}` with a `job.json` manifest; jobs older than `job_retention_days` (default 7) are pruned at startup and before each submission.
