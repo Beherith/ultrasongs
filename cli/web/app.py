@@ -27,6 +27,7 @@ logger = get_logger("cli.web.app")
 DEFAULT_WEB_CONFIG_PATH = Path(__file__).parent.parent / "web_config.jsonc"
 STAGING_DIRNAME = "staging"
 SETTING_ID = "setting-{key}"
+SOURCE_URL = "https://github.com/Beherith/ultrasongs"
 
 
 @dataclass(frozen=True)
@@ -303,6 +304,8 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
             song_form,
             build_settings_section(pipeline_config),
             job_card,
+            html.A("Source on GitHub", href=SOURCE_URL, target="_blank", rel="noopener",
+                   style={"fontSize": "13px", "color": "#7dd3fc", "textDecoration": "none"}),
         ],
         style=CSS["page"],
     )

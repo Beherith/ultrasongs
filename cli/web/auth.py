@@ -61,6 +61,9 @@ input[type=password] {{ width: 100%; box-sizing: border-box; padding: .5rem;
 button {{ width: 100%; padding: .5rem; border: 0; border-radius: 4px;
        background: #89b4fa; color: #1e1e2e; font-weight: 600; cursor: pointer; }}
 .error {{ color: #f38ba8; font-size: .85rem; margin-bottom: .75rem; }}
+.src {{ margin: 1rem 0 0; font-size: .8rem; text-align: center; }}
+.src a {{ color: #89b4fa; text-decoration: none; }}
+.src a:hover {{ text-decoration: underline; }}
 </style>
 </head>
 <body>
@@ -70,6 +73,7 @@ button {{ width: 100%; padding: .5rem; border: 0; border-radius: 4px;
 <input type="password" name="password" placeholder="Password" autofocus>
 <button type="submit">Sign in</button>
 </form>
+<p class="src"><a href="https://github.com/Beherith/ultrasongs">Ultrasongs on GitHub</a></p>
 </body>
 </html>
 """

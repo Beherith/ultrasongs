@@ -13,6 +13,8 @@
   .chip { font-size: 12px; color: #9aa; }
   .chip.ok { color: #7ee787; }
   .chip.err { color: #ff6b81; }
+  a.chip { color: #4fc3f7; text-decoration: none; margin-left: auto; }
+  a.chip:hover { text-decoration: underline; }
   .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 16px; background: #14203a; border-bottom: 1px solid #0f3460; }
   button { background: #0f3460; color: #cde; border: 1px solid #2a5a8a; border-radius: 5px; padding: 5px 11px; font-size: 13px; cursor: pointer; }
   button:hover:not(:disabled) { background: #164a7a; }
@@ -53,6 +55,7 @@
     <span class="chip" id="meta"></span>
     <span class="chip" id="audioChip"></span>
     <span class="chip" id="pitchChip"></span>
+    <a class="chip" href="https://github.com/Beherith/ultrasongs" target="_blank" rel="noopener" title="Ultrasongs source code on GitHub">Source</a>
   </div>
 
   <div class="toolbar">
@@ -178,6 +181,7 @@
   let cur={t0:GAP,t1:GAP+250,lo:48,hi:72};
   let dragActive=false;
   let drag=null;
+  let lastTap=null;
   let lastFftKey="";
   let lyricInput=null;
   const audio={ctx:null,buffer:null,master:null,error:null};
@@ -290,9 +294,9 @@
     // pitch grid + labels
     for(let m=cur.lo;m<=cur.hi;m++){
       const y=ty(m);
-      s+=`<line x1="${PAD_L}" y1="${y.toFixed(1)}" x2="${PAD_L+PLOT_W}" y2="${y.toFixed(1)}" stroke="#2a2a4a" stroke-width="0.5"/>`;
-      const label=(m%12===0)?`${pitchToNote(m)}`:`${m}`;
-      s+=`<text x="${PAD_L-4}" y="${(y+3).toFixed(1)}" fill="#666" font-size="8" font-family="monospace" text-anchor="end">${label}</text>`;
+      const isC=(m%12===0);
+      s+=`<line x1="${PAD_L}" y1="${y.toFixed(1)}" x2="${PAD_L+PLOT_W}" y2="${y.toFixed(1)}" stroke="${isC?'rgba(255,255,255,0.7)':'#2a2a4a'}" stroke-width="${isC?1:0.5}"/>`;
+      s+=`<text x="${PAD_L-4}" y="${(y+3).toFixed(1)}" fill="${isC?'#fff':'#666'}" font-size="8" font-family="monospace" text-anchor="end">${pitchToNote(m)}</text>`;
     }
     // time axis
     const step=tRange>20000?5000:tRange>8000?2000:tRange>3000?1000:500;
@@ -508,11 +512,19 @@
   svgEl.addEventListener("pointerdown",e=>{
     if(lyricInput) return;
     const g=e.target.closest("[data-id]");
-    if(!g){ if(selectedId!=null) select(null); return; }
+    if(!g){ if(selectedId!=null) select(null); lastTap=null; return; }
     const id=+g.getAttribute("data-id");
     const note=notes.find(n=>n.id===id);
     if(!note) return;
     const handle=e.target.getAttribute("data-handle")||"body";
+    const now=performance.now();
+    if(handle==="body"&&lastTap&&lastTap.id===id&&now-lastTap.t<400&&Math.hypot(e.clientX-lastTap.x,e.clientY-lastTap.y)<8){
+      lastTap=null;
+      selectedId=id;
+      openLyricPopover(note);
+      return;
+    }
+    lastTap={id,x:e.clientX,y:e.clientY,t:now};
     pushUndo();
     selectedId=id;
     dragActive=true;
@@ -552,12 +564,6 @@
   }
   svgEl.addEventListener("pointerup",endDrag);
   svgEl.addEventListener("pointercancel",endDrag);
-  svgEl.addEventListener("dblclick",e=>{
-    const g=e.target.closest("[data-id]");
-    if(!g) return;
-    const note=notes.find(n=>n.id===+g.getAttribute("data-id"));
-    if(note){ selectedId=note.id; openLyricPopover(note); }
-  });
 
   // ── edit operations ──────────────────────────────────────────────────────
   function nextId(){ let m=0; for(const n of notes) if(n.id>m)m=n.id; return m+1; }
@@ -785,7 +791,7 @@
       const st=t0ctx+(startMsOf(n)-lineStartMs)/1000, dur=n.dur*BEAT_MS/1000;
       if(dur<=0) continue;
       const osc=ctx.createOscillator(); osc.type="triangle"; osc.frequency.value=f;
-      const g=ctx.createGain(), peak=0.16;
+      const g=ctx.createGain(), peak=0.9;
       g.gain.setValueAtTime(0.0001,st);
       g.gain.linearRampToValueAtTime(peak,st+0.015);
       g.gain.setValueAtTime(peak,Math.max(st+0.015,st+dur-0.06));
@@ -793,11 +799,12 @@
       osc.connect(g); g.connect(audio.notes);
       osc.start(st); osc.stop(st+dur+0.02); play.sources.push(osc);
     }
-    const firstP=Math.ceil((lineStartMs-GAP)/PULSE_MS), lastP=Math.floor((lineEndMs-GAP)/PULSE_MS);
+    const METRO_MS=PULSE_MS*2;
+    const firstP=Math.ceil((lineStartMs-GAP)/METRO_MS), lastP=Math.floor((lineEndMs-GAP)/METRO_MS);
     for(let i=firstP;i<=lastP;i++){
-      const bt=GAP+i*PULSE_MS;
+      const bt=GAP+i*METRO_MS;
       if(bt<lineStartMs-1||bt>lineEndMs+1) continue;
-      const t=t0ctx+(bt-lineStartMs)/1000, down=(i%4===0);
+      const t=t0ctx+(bt-lineStartMs)/1000, down=(i%2===0);
       const osc=ctx.createOscillator(); osc.type="square"; osc.frequency.value=down?1320:880;
       const g=ctx.createGain();
       g.gain.setValueAtTime(down?0.22:0.14,t);
