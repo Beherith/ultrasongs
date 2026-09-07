@@ -15,7 +15,7 @@ User (CLI) → argparse → cli/__main__.py → pipeline stages → output/
 User (browser) → Flask/Dash → cli/web/jobs.py (FIFO queue) → cli/pipeline.run_process → web_jobs/<id>/output/
 ```
 
-- **CLI layer**: `argparse` subcommands (`process`, `import`, `diff`, `preview`, `lyrics`, `web`), global flags `-c/--config`, `-v/--verbose`, `-q/--quiet`
+- **CLI layer**: `argparse` subcommands (`process`, `import`, `diff`, `preview`, `lyrics`, `edit`, `web`), global flags `-c/--config`, `-v/--verbose`, `-q/--quiet`
 - **Pipeline**: sequential stages, each a module in `cli/`; heavy ML imports are lazy-loaded inside functions
 - **Config**: `cli/config.jsonc` (JSON with comments), loaded into a frozen `Config` dataclass (`cli/config.py`); code-level fallback defaults live in the dataclass, invalid values fall back with a warning
 - **Logging**: `cli/logging_setup.py` — stdout handler, `[timestamp] [name] message` format
@@ -53,6 +53,7 @@ python -m cli import --txt existing.txt --mp3 existing.mp3
 python -m cli diff --original a.txt --generated b.txt      # exit 0 if within tolerances, else 1
 python -m cli preview --txt output.txt --pitch tmp/whisperx_pitch.json
 python -m cli lyrics --txt output/tit31.txt [--output lyrics.txt]   # plain lyrics to stdout or file
+python -m cli edit --txt output/tit31.txt [--pitch tmp/whisperx_pitch.json] [--vocals output/vocals.mp3] [--embed-audio] [--output out.html]
 python -m cli process ... --no-intermediates   # skip intermediate temp files in the output ZIP
 
 # Web UI (requires `pip install 'ultrasongs-cli[web]'` or dash in requirements.txt).
@@ -77,6 +78,16 @@ Diff tolerances (`cli/diff.py`): BPM ±2, GAP exact match, singing-note count ex
 `--mp3` accepts video files (`.mp4`, `.mkv`, `.webm`, `.mov`, `.avi`) as well as audio: the extract stage pulls the audio out with FFmpeg, and the original video is then treated like `--video` — copied into the output/ZIP and referenced by a `#VIDEO` tag (an explicit `--video` always wins). The package output always contains the extracted original MP3, the first-pass htdemucs `vocals.mp3` and `accompaniment.mp3`, and the original video when the input was one.
 
 Output names are sanitized (`cli/pipeline.sanitize_filename`) so titles are safe on disk: the ZIP, `.txt`, `.mp3`, and `.html` all use the sanitized title. `--no-intermediates` (CLI) keeps the ZIP to the package output only; by default the ZIP also bundles the job's `tmp/` artifacts under `intermediates/` (`cli/package.collect_intermediates`).
+
+## Note Editor (`edit`)
+
+`python -m cli edit --txt song.txt` generates a **self-contained** HTML note editor (no server, no build step, no CDN). It visually matches the `preview` SVG output and lets the user hand-tune notes by drag (pitch/start), edge-drag (duration), split, merge, delete, gold-toggle, and lyric edit, with an undo stack, a live FFT spectrogram background, and audio + MIDI + metronome playback. Save = browser Blob download of the edited `.txt`.
+
+- **Source of truth**: the parsed notes list. `start`/`dur` are beats (int), `pitch` is MIDI (int); ms is derived as `gap + start*beatMs` with `beatMs = 60000/bpm/4`. The file's `#BPM` is used verbatim (it already bakes in `beat_resolution_multiplier`).
+- **Two beat concepts**: `beatMs` (16th note at the listed BPM) is the note **snap grid**; `pulseMs = 60000/bpm` (quarter note) is the **visual grid + metronome** spacing.
+- **Header**: leading `#` lines are preserved verbatim (incl. `#COVER`/`#BACKGROUND`/`#CREATOR`); CRLF→LF on save. The body is serialized in the same shape as `build_ultrastar_txt`.
+- **Pitch overlay**: `--pitch` embeds the full `whisperx_pitch.json` word/frame list (s→ms) as `pitchWords`; the JS slices it into the live page window, so overlays stay correct under edits that change line structure. `--vocals` names the suggested audio file; `--embed-audio` base64-embeds it.
+- **Payload** is injected into `cli/editor_template.html` via `__EDITOR_DATA__`; a 64-entry magma LUT is injected via `__MAGMA__` (both escaped so `</` can't close the script).
 
 ## Web Service
 
@@ -124,6 +135,8 @@ Output names are sanitized (`cli/pipeline.sanitize_filename`) so titles are safe
 | `cli/web_config.jsonc` | Web server config (host, port, `web_dir`, retention, upload cap, poll interval) |
 | `cli/diff.py` | Compare two Ultrastar `.txt` files with tolerances, `DiffReport.print()` |
 | `cli/html_preview.py` | `generate_preview()`: HTML with SVG pitch visualization, beat grid, confidence/amplitude colors, optional `whisperx_pitch.json` overlay |
+| `cli/editor.py` | `generate_editor()`: build the note-editor payload (raw header, notes, full `pitchWords`), inject into the template with a magma LUT, optional base64 audio embed |
+| `cli/editor_template.html` | Self-contained editor SPA (inlined CSS+JS): SVG note overlay, live FFT background, drag/split/merge/delete/gold/lyric + undo, Web Audio playback, Blob download |
 | `cli/pitch_to_html.py` | Standalone script: render a pitch JSON as scrollable HTML verse visualizations |
 | `cli/logging_setup.py` | `setup_logging()` / `get_logger()` |
 
@@ -241,6 +254,7 @@ pytest cli/tests/
 | `cli/tests/test_config_dict.py` | `config_from_dict()` overrides, invalid-value fallback, `load_jsonc()` |
 | `cli/tests/test_consensus.py` | `word_similarity()`, transcription + timing consolidation |
 | `cli/tests/test_diff.py` | Identical files, BPM/beat tolerances, different titles |
+| `cli/tests/test_editor.py` | `extract_raw_header()`, `load_pitch_words()`, `build_payload()` shape (full `pitchWords`), `serialize_editor_txt()` round-trip/idempotency, `embed_audio_b64()`, `generate_editor()` (LUT + data injection, embed, errors) |
 | `cli/tests/test_generate.py` | Basic generation, line breaks, overlap prevention, video filename |
 | `cli/tests/test_hybrid_transcribe.py` | Approximate lyric alignment, chunk splitting at pauses, boundaries, `slice_audio()`, word offsetting |
 | `cli/tests/test_package_intermediates.py` | `collect_intermediates()` selection, ZIP `intermediates/` bundling, `--no-intermediates` |

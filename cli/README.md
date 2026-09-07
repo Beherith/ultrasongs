@@ -119,6 +119,23 @@ python -m cli lyrics \
 
 A standalone wrapper is available at the repo root: `python extract_lyrics.py song.txt [-o lyrics.txt]`.
 
+### `edit` — Generate a self-contained HTML note editor
+
+Generates a single self-contained HTML file (no server, no network) for hand-tuning a `.txt`: drag notes (pitch/start), edge-drag (duration), split/merge/delete/gold/lyric, undo, live FFT spectrogram background, audio + MIDI + metronome playback. Save is a browser download of the edited `.txt` (header tags preserved verbatim).
+
+```bash
+python -m cli edit \
+  --txt "Existing Song.txt" \
+  [--pitch tmp/whisperx_pitch.json] \
+  [--vocals vocals.mp3] \
+  [--embed-audio] \
+  [--output editor.html]
+```
+
+- `--pitch` embeds the full `whisperx_pitch.json` (word labels + pitch dots) as a time-based overlay.
+- `--vocals` names the suggested audio file (drop zone hint); `--embed-audio` base64-embeds it (requires `--vocals`).
+- Without `--output`, the file is written next to the `.txt` as `<stem>_editor.html`.
+
 ### `web` — Run the web UI
 
 Serve a single-page Dash app that runs the same pipeline. Requires the optional `dash` dependency (`pip install -e "cli/[web]"`).

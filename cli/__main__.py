@@ -97,6 +97,19 @@ def _build_parser() -> argparse.ArgumentParser:
     lyr.add_argument("--txt", required=True, help="Ultrastar .txt file")
     lyr.add_argument("--output", default=None, help="Output lyrics file (default: print to stdout)")
 
+    # ── edit ─────────────────────────────────────────────────────────────────
+    edit = subparsers.add_parser("edit", help="Generate a self-contained HTML note editor from an Ultrastar .txt")
+    edit.add_argument("--txt", required=True, help="Ultrastar .txt file to edit")
+    edit.add_argument("--pitch", default=None, help="whisperx_pitch.json to overlay (word labels + pitch dots)")
+    edit.add_argument("--vocals", default=None, help="Vocals stem (audio source for the FFT background + playback)")
+    edit.add_argument(
+        "--embed-audio",
+        action="store_true",
+        default=False,
+        help="Base64-embed the --vocals audio into the HTML (truly single-file)",
+    )
+    edit.add_argument("--output", default=None, help="Output HTML file (default: <txt_stem>_editor.html)")
+
     # ── web ──────────────────────────────────────────────────────────────────
     web = subparsers.add_parser("web", help="Run the web UI (Dash) for the pipeline")
     web.add_argument("--host", default=None, help="Bind address (default: from web config, 127.0.0.1)")
@@ -141,6 +154,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_preview(args, config)
     elif args.command == "lyrics":
         return _cmd_lyrics(args)
+    elif args.command == "edit":
+        return _cmd_edit(args, config)
     elif args.command == "web":
         return _cmd_web(args, config)
     else:
@@ -297,6 +312,27 @@ def _cmd_lyrics(args: argparse.Namespace) -> int:
         logger.info(f"Lyrics written to {output_path}")
     else:
         sys.stdout.write(lyrics)
+    return 0
+
+
+def _cmd_edit(args: argparse.Namespace, config: "Config") -> int:  # type: ignore[name-defined]
+    """Generate a self-contained HTML note editor from an Ultrastar .txt file."""
+    from cli.editor import generate_editor
+    from cli.logging_setup import get_logger
+
+    logger = get_logger("cli.edit")
+    try:
+        out = generate_editor(
+            Path(args.txt),
+            Path(args.output) if args.output else None,
+            Path(args.pitch) if args.pitch else None,
+            Path(args.vocals) if args.vocals else None,
+            args.embed_audio,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        logger.error(str(e))
+        return 1
+    logger.info(f"Editor written to {out}")
     return 0
 
 

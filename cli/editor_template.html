@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ultrastar Note Editor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #1a1a2e; color: #e6e6f0; font: 14px/1.4 system-ui, sans-serif; }
+  .bar { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; padding: 10px 16px; background: #16213e; border-bottom: 1px solid #0f3460; }
+  .bar h1 { font-size: 16px; margin: 0; }
+  .chip { font-size: 12px; color: #9aa; }
+  .chip.ok { color: #7ee787; }
+  .chip.err { color: #ff6b81; }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 16px; background: #14203a; border-bottom: 1px solid #0f3460; }
+  button { background: #0f3460; color: #cde; border: 1px solid #2a5a8a; border-radius: 5px; padding: 5px 11px; font-size: 13px; cursor: pointer; }
+  button:hover:not(:disabled) { background: #164a7a; }
+  button:disabled { opacity: 0.35; cursor: default; }
+  button.primary { background: #e94560; border-color: #e94560; color: #fff; }
+  button.primary:hover { background: #ff5c77; }
+  .sep { width: 1px; height: 22px; background: #2a5a8a; margin: 0 2px; }
+  .stage { padding: 14px 16px 4px; }
+  .plotwrap { position: relative; width: 100%; }
+  #plot { width: 100%; height: auto; display: block; touch-action: none; }
+  #fft { position: absolute; left: 4.375%; top: 4.16667%; width: 93.75%; height: 86.66667%; opacity: 0.55; }
+  .lyricline { font-size: 15px; padding: 8px 16px 2px; min-height: 26px; }
+  .lyric-line { display: block; }
+  .lyric-time { color: #e94560; font-family: ui-monospace, monospace; font-size: 12px; margin-right: 3px; }
+  .transport { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; padding: 8px 16px 16px; font-size: 13px; color: #9aa; }
+  .transport b { color: #cde; font-weight: 600; }
+  .note .bar { cursor: grab; }
+  .note .bar.active { filter: brightness(1.6); }
+  .note text { user-select: none; pointer-events: none; }
+  .drop { border: 2px dashed #2a5a8a; border-radius: 10px; padding: 22px; text-align: center; color: #9aa; margin: 14px 16px; cursor: pointer; }
+  .drop.over { border-color: #4fc3f7; background: #16213e; }
+  .drop b { color: #cde; }
+  .lyric-pop { position: fixed; z-index: 50; background: #0d1b2e; color: #fff; border: 1px solid #4fc3f7; border-radius: 4px; padding: 4px 6px; font: 13px ui-monospace, monospace; min-width: 120px; }
+  .help { font-size: 12px; color: #667; padding: 0 16px 14px; }
+  kbd { background: #0f3460; border-radius: 3px; padding: 1px 5px; font-family: ui-monospace, monospace; color: #cde; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <h1 id="title">Loading&hellip;</h1>
+    <span class="chip" id="meta"></span>
+    <span class="chip" id="audioChip"></span>
+  </div>
+
+  <div class="toolbar">
+    <button id="prevBtn" title="Previous line (Left / PageUp)">&#9664; Prev</button>
+    <button id="nextBtn" title="Next line (Right / PageDown)">Next &#9654;</button>
+    <button id="playBtn" class="primary" title="Play / stop line (Space)">&#9654; Play</button>
+    <span class="sep"></span>
+    <button id="splitBtn" title="Split selected (S)">Split</button>
+    <button id="mergeBtn" title="Merge selected with next (M)">Merge</button>
+    <button id="delBtn" title="Delete selected (Del)">Delete</button>
+    <button id="goldBtn" title="Toggle gold note (G)">Gold</button>
+    <button id="lyricBtn" title="Edit lyric (L / double-click)">Lyric</button>
+    <span class="sep"></span>
+    <button id="undoBtn" title="Undo (Ctrl+Z)">&#8630; Undo</button>
+    <span class="sep"></span>
+    <button id="saveBtn" class="primary" title="Download .txt (Ctrl+S)">Download .txt</button>
+    <span class="chip" id="lineInd"></span>
+  </div>
+
+  <div class="drop" id="drop">
+    <b>Drop the vocals audio here</b> (or click to browse) to enable the FFT background + playback.<br>
+    <span id="dropHint" style="font-size:12px"></span>
+    <input type="file" id="fileInput" accept="audio/*" hidden>
+  </div>
+
+  <div class="stage">
+    <div class="plotwrap" id="plotwrap">
+      <svg id="plot" viewBox="0 0 1280 480" preserveAspectRatio="xMidYMid meet"></svg>
+      <canvas id="fft"></canvas>
+    </div>
+  </div>
+
+  <div class="lyricline" id="lyricline"></div>
+
+  <div class="transport" id="transport"></div>
+
+  <div class="help">
+    Drag a note up/down = pitch, left/right = start &middot; drag an edge = duration &middot; double-click = edit lyric &middot;
+    <kbd>Space</kbd> play &middot; <kbd>&#8592;</kbd>/<kbd>&#8594;</kbd> line &middot; <kbd>S</kbd> split &middot; <kbd>M</kbd> merge &middot;
+    <kbd>G</kbd> gold &middot; <kbd>L</kbd> lyric &middot; <kbd>Del</kbd> delete &middot; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &middot; <kbd>Ctrl</kbd>+<kbd>S</kbd> download
+  </div>
+
+<script>window.EDITOR_DATA = __EDITOR_DATA__;</script>
+<script>
+(function () {
+  "use strict";
+  const D = window.EDITOR_DATA;
+  if (!D) { document.getElementById("title").textContent = "No editor data"; return; }
+
+  // ── layout constants ─────────────────────────────────────────────────────
+  const W=1280, H=480, PAD_L=56, PAD_R=24, PAD_T=20, PAD_B=44;
+  const PLOT_W=W-PAD_L-PAD_R, PLOT_H=H-PAD_T-PAD_B;
+  const MARGIN_L_MS=200, MARGIN_R_MS=400, MIDI_MIN=24, MIDI_MAX=96;
+  const N_FFT=2048, HOP=512;
+  const BPM=D.bpm, GAP=D.gap, BEAT_MS=D.beatMs, PULSE_MS=D.pulseMs;
+  const MEGA=__MAGMA__;
+  const NOTE_NAMES=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+  // ── state ────────────────────────────────────────────────────────────────
+  let notes=D.notes.slice();
+  let groups=[];
+  let currentPage=0;
+  let selectedId=null;
+  let undoStack=[];
+  let cur={t0:GAP,t1:GAP+250,lo:48,hi:72};
+  let dragActive=false;
+  let drag=null;
+  let lastFftKey="";
+  let lyricInput=null;
+  const audio={ctx:null,buffer:null,master:null,error:null};
+  const play={active:false,t0ctx:0,lineStartMs:0,lineEndMs:0,sources:[],rafId:0,playheadMs:null};
+
+  // ── element refs ─────────────────────────────────────────────────────────
+  const svgEl=document.getElementById("plot");
+  const fftEl=document.getElementById("fft");
+  const lyricEl=document.getElementById("lyricline");
+  const transportEl=document.getElementById("transport");
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+  const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+  const startMsOf=n=>GAP+n.start*BEAT_MS;
+  const endMsOf=n=>GAP+(n.start+n.dur)*BEAT_MS;
+  function pitchToNote(p){ return NOTE_NAMES[((p%12)+12)%12]+(Math.floor(p/12)-1); }
+  function msToSec(ms){ return (ms/1000).toFixed(2)+"s"; }
+  function beatToMs(beat){ return GAP+beat*BEAT_MS; }
+  function msToBeat(ms){ return Math.round((ms-GAP)/BEAT_MS); }
+  function ampColor(amp,aMin,aMax){
+    let t=(aMax<=aMin)?0.5:clamp((amp-aMin)/(aMax-aMin),0,1);
+    let r,g,b;
+    if(t<0.5){ r=Math.round(40+t*2*215); g=Math.round(200+t*2*20); b=Math.round(60-t*2*60); }
+    else{ r=Math.round(255-(t-0.5)*2*25); g=Math.round(220-(t-0.5)*2*180); b=Math.round(0+(t-0.5)*2*40); }
+    return `rgb(${r},${g},${b})`;
+  }
+  function magma(t){
+    t=clamp(t,0,1)*(MEGA.length-1);
+    const i=Math.floor(t), f=t-i, a=MEGA[i], b=MEGA[Math.min(MEGA.length-1,i+1)];
+    return [Math.round(a[0]+(b[0]-a[0])*f),Math.round(a[1]+(b[1]-a[1])*f),Math.round(a[2]+(b[2]-a[2])*f)];
+  }
+  const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+  function computeGroups(ns){
+    const gs=[]; let c=[];
+    for(const n of ns){
+      if(n.type==="-"){ if(c.length){ gs.push(c); c=[]; } }
+      else c.push(n);
+    }
+    if(c.length) gs.push(c);
+    return gs;
+  }
+  function verseTextLive(pageNotes){
+    let words=[], pending="";
+    const fw=()=>{ if(pending){ words.push(pending); pending=""; } };
+    for(const n of pageNotes){
+      const raw=n.syl; if(!raw) continue;
+      const syl=raw.trim(); if(!syl||syl==="~") continue;
+      if(raw.startsWith(" ")) fw();
+      pending+=syl;
+      if(raw.endsWith(" ")) fw();
+    }
+    fw();
+    return words.join(" ");
+  }
+  function noteWindow(pageNotes){
+    const cs=[],ce=[];
+    for(const n of pageNotes){ cs.push(startMsOf(n)); ce.push(endMsOf(n)); }
+    if(!cs.length) return {t0:GAP,t1:GAP+250};
+    return {t0:Math.max(0,Math.min(...cs)-MARGIN_L_MS), t1:Math.max(GAP+250,Math.max(...ce)+MARGIN_R_MS)};
+  }
+  let lastRefKey="", lastRef=null;
+  function getRef(pageNotes){
+    const key=currentPage+"|"+cur.t0+"|"+cur.t1;
+    if(key===lastRefKey&&lastRef) return lastRef;
+    const words=[], frames=[];
+    for(const pw of (D.pitchWords||[])){
+      if(pw.start_ms<=cur.t1&&pw.end_ms>=cur.t0) words.push({word:pw.word,start_ms:pw.start_ms,end_ms:pw.end_ms,midi:pw.midi});
+      for(const f of pw.frames) if(f.t_ms>=cur.t0&&f.t_ms<=cur.t1) frames.push(f);
+    }
+    let aMin=Infinity,aMax=-Infinity;
+    for(const f of frames){ if(f.amp<aMin)aMin=f.amp; if(f.amp>aMax)aMax=f.amp; }
+    if(!isFinite(aMin)){ aMin=0; aMax=1; }
+    lastRefKey=key;
+    return (lastRef={words,frames,ampMin:aMin,ampMax:aMax});
+  }
+  function midiWindow(pageNotes){
+    let lo=Infinity,hi=-Infinity;
+    for(const n of pageNotes){ if(n.pitch<lo)lo=n.pitch; if(n.pitch>hi)hi=n.pitch; }
+    if(!isFinite(lo)) return {lo:48,hi:72};
+    if(hi-lo<=24){
+      let mid=Math.round((lo+hi)/2), wl=mid-12, wh=mid+12;
+      if(wl>lo){ wl=lo; wh=wl+24; }
+      if(wh<hi){ wh=hi; wl=wh-24; }
+      wl=clamp(wl,MIDI_MIN,MIDI_MAX-24); wh=wl+24;
+      return {lo:wl,hi:wh};
+    }
+    return {lo,hi};
+  }
+  const tx=ms=>PAD_L+(ms-cur.t0)/(cur.t1-cur.t0)*PLOT_W;
+  const ty=m=>PAD_T+(cur.hi-m)/(cur.hi-cur.lo)*PLOT_H;
+  function toSvgPoint(e){
+    const pt=svgEl.createSVGPoint(); pt.x=e.clientX; pt.y=e.clientY;
+    return pt.matrixTransform(svgEl.getScreenCTM().inverse());
+  }
+
+  // ── SVG rendering ────────────────────────────────────────────────────────
+  function buildSvg(pageNotes,ref){
+    const tRange=cur.t1-cur.t0, pRange=cur.hi-cur.lo;
+    const bar_h=Math.max(PLOT_H/(pRange+1)*0.7,8);
+    let s="";
+    // word-block shading
+    for(const w of ref.words){
+      const x1=tx(w.start_ms), x2=tx(w.end_ms);
+      if(x2<PAD_L||x1>PAD_L+PLOT_W) continue;
+      s+=`<rect x="${x1.toFixed(1)}" y="${PAD_T}" width="${Math.max(x2-x1,1).toFixed(1)}" height="${PLOT_H}" fill="#0a0a1a" opacity="0.3" rx="2"/>`;
+    }
+    // beat grid
+    const firstB=Math.max(0,Math.ceil((cur.t0-GAP)/PULSE_MS));
+    const lastB=Math.floor((cur.t1-GAP)/PULSE_MS);
+    for(let i=firstB;i<=lastB;i++){
+      const x=tx(GAP+i*PULSE_MS);
+      const down=(i%4===0);
+      s+=`<line x1="${x.toFixed(1)}" y1="${PAD_T}" x2="${x.toFixed(1)}" y2="${PAD_T+PLOT_H}" stroke="${down?'rgba(255,255,255,0.35)':'rgba(255,255,255,0.12)'}" stroke-width="${down?1.5:0.8}"/>`;
+    }
+    // pitch grid + labels
+    for(let m=cur.lo;m<=cur.hi;m++){
+      const y=ty(m);
+      s+=`<line x1="${PAD_L}" y1="${y.toFixed(1)}" x2="${PAD_L+PLOT_W}" y2="${y.toFixed(1)}" stroke="#2a2a4a" stroke-width="0.5"/>`;
+      const label=(m%12===0)?`${pitchToNote(m)}`:`${m}`;
+      s+=`<text x="${PAD_L-4}" y="${(y+3).toFixed(1)}" fill="#666" font-size="8" font-family="monospace" text-anchor="end">${label}</text>`;
+    }
+    // time axis
+    const step=tRange>20000?5000:tRange>8000?2000:tRange>3000?1000:500;
+    for(let t=Math.ceil(cur.t0/step)*step;t<=cur.t1;t+=step){
+      const x=tx(t);
+      s+=`<line x1="${x.toFixed(1)}" y1="${PAD_T+PLOT_H}" x2="${x.toFixed(1)}" y2="${PAD_T+PLOT_H+4}" stroke="#555" stroke-width="0.5"/>`;
+      s+=`<text x="${x.toFixed(1)}" y="${H-4}" fill="#666" font-size="8" text-anchor="middle">${(t/1000).toFixed(1)}s</text>`;
+    }
+    // note bars
+    for(const n of pageNotes){
+      const x=tx(startMsOf(n)), w=Math.max(tx(endMsOf(n))-x,2), y=ty(n.pitch);
+      const gold=n.type==="*";
+      const fill=gold?"#e94560":"#0f3460", stroke=gold?"#ff6b81":"#4fc3f7", tfill=gold?"#fff":"#cde";
+      const sel=n.id===selectedId;
+      const label=(n.syl.trim()||"&nbsp;");
+      const fs=Math.max(7,Math.min(12,w/(Math.max(1,n.syl.trim().length)*0.55)));
+      const hy=y-4, hh=bar_h+8;
+      s+=`<g class="note" data-id="${n.id}">`;
+      s+=`<rect class="bar${sel?" sel":""}" data-handle="body" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${bar_h.toFixed(1)}" rx="2" fill="${fill}" stroke="${sel?"#ffffff":stroke}" stroke-width="${sel?2:0.8}"/>`;
+      s+=`<rect data-handle="left" x="${(x-4).toFixed(1)}" y="${hy.toFixed(1)}" width="8" height="${hh.toFixed(1)}" fill="transparent" style="cursor:ew-resize"/>`;
+      s+=`<rect data-handle="right" x="${(x+w-4).toFixed(1)}" y="${hy.toFixed(1)}" width="8" height="${hh.toFixed(1)}" fill="transparent" style="cursor:ew-resize"/>`;
+      s+=`<text x="${(x+w/2).toFixed(1)}" y="${(y+bar_h/2).toFixed(1)}" fill="${tfill}" font-size="${fs.toFixed(1)}" text-anchor="middle" dominant-baseline="central">${esc(label)}</text>`;
+      s+=`<title>${esc(n.syl)} (${pitchToNote(n.pitch)}) ${msToSec(startMsOf(n))} +${(n.dur*BEAT_MS).toFixed(0)}ms</title>`;
+      s+=`</g>`;
+    }
+    // whisper word labels
+    for(const w of ref.words){
+      const x1=tx(w.start_ms), x2=tx(w.end_ms), xm=(x1+x2)/2;
+      if(x2<PAD_L||x1>PAD_L+PLOT_W) continue;
+      const bw=Math.max(x2-x1,1);
+      const fs=Math.max(6,Math.min(9,bw/(Math.max(1,w.word.length)*0.55)));
+      const yLabel=PAD_T+PLOT_H-8;
+      s+=`<text x="${xm.toFixed(1)}" y="${yLabel}" fill="#4caf50" font-size="${fs.toFixed(1)}" font-style="italic" opacity="0.85" text-anchor="middle">${esc(w.word)}</text>`;
+      s+=`<line x1="${x1.toFixed(1)}" y1="${(yLabel+4).toFixed(1)}" x2="${x2.toFixed(1)}" y2="${(yLabel+4).toFixed(1)}" stroke="#4caf50" stroke-width="1.2" opacity="0.5"/>`;
+      s+=`<polygon points="${(x1-5).toFixed(1)},${(yLabel+4).toFixed(1)} ${x1.toFixed(1)},${(yLabel+1).toFixed(1)} ${x1.toFixed(1)},${(yLabel+7).toFixed(1)}" fill="#4caf50" opacity="0.5"/>`;
+      s+=`<polygon points="${(x2+5).toFixed(1)},${(yLabel+4).toFixed(1)} ${x2.toFixed(1)},${(yLabel+1).toFixed(1)} ${x2.toFixed(1)},${(yLabel+7).toFixed(1)}" fill="#4caf50" opacity="0.5"/>`;
+    }
+    // pitch dots
+    for(const f of ref.frames){
+      if(f.t_ms<cur.t0||f.t_ms>cur.t1||f.m<cur.lo||f.m>cur.hi) continue;
+      s+=`<circle cx="${tx(f.t_ms).toFixed(1)}" cy="${ty(f.m).toFixed(1)}" r="2.5" fill="${ampColor(f.amp,ref.ampMin,ref.ampMax)}" opacity="${Math.max(0.15,f.conf).toFixed(2)}"/>`;
+    }
+    // axes
+    s+=`<line x1="${PAD_L}" y1="${PAD_T}" x2="${PAD_L}" y2="${PAD_T+PLOT_H}" stroke="#555" stroke-width="1"/>`;
+    s+=`<line x1="${PAD_L}" y1="${PAD_T+PLOT_H}" x2="${PAD_L+PLOT_W}" y2="${PAD_T+PLOT_H}" stroke="#555" stroke-width="1"/>`;
+    s+=`<text x="${PAD_L+PLOT_W/2}" y="${H-4}" fill="#888" font-size="9" text-anchor="middle">time &#8594;</text>`;
+    s+=`<text x="8" y="${PAD_T+PLOT_H/2}" fill="#888" font-size="9" text-anchor="middle" transform="rotate(-90 8 ${PAD_T+PLOT_H/2})">pitch &#8593;</text>`;
+    // playhead
+    s+=`<line id="playhead" x1="0" y1="${PAD_T}" x2="0" y2="${PAD_T+PLOT_H}" stroke="#ffd54a" stroke-width="1.5" style="display:none"/>`;
+    return s;
+  }
+  function buildLyricLine(pageNotes){
+    if(!pageNotes.length) return `<span class="chip">&#8212;</span>`;
+    let s=`<span class="lyric-line">`;
+    for(const n of pageNotes){
+      const conf=`<span class="lyric-time">[${msToSec(startMsOf(n))}]</span>`;
+      s+=`${conf}${esc(n.syl.trim()||"~")}`;
+    }
+    return s+`</span>`;
+  }
+
+  function updateTransport(pageNotes){
+    const sel=notes.find(n=>n.id===selectedId);
+    const ph=play.playheadMs!=null?`Playhead <b>${msToSec(play.playheadMs)}</b>`:``;
+    const selTxt=sel?`Selected <b>${esc(sel.syl.trim()||"~")}</b> ${pitchToNote(sel.pitch)} @ ${msToSec(startMsOf(sel))} (${sel.dur} beats, ${sel.type})`:`Selected <b>&mdash;</b>`;
+    transportEl.innerHTML=
+      `Line <b>${currentPage+1}/${groups.length||0}</b> &nbsp; ${selTxt} &nbsp; ${ph}`+
+      ` &nbsp; BPM <b>${BPM}</b> &middot; GAP <b>${GAP}ms</b> &middot; beat <b>${BEAT_MS.toFixed(1)}ms</b>`;
+    document.getElementById("lineInd").textContent=`line ${currentPage+1}/${groups.length||0}`;
+  }
+  function updateToolbar(){
+    const sel=notes.find(n=>n.id===selectedId);
+    const idx=sel?notes.findIndex(n=>n.id===sel.id):-1;
+    let nextSung=null;
+    if(idx>=0){ for(let i=idx+1;i<notes.length;i++){ if(notes[i].type!=="-"){ nextSung=notes[i]; break; } } }
+    document.getElementById("splitBtn").disabled=!(sel&&sel.dur>=2);
+    document.getElementById("mergeBtn").disabled=!(sel&&nextSung);
+    document.getElementById("delBtn").disabled=!sel;
+    document.getElementById("goldBtn").disabled=!sel;
+    document.getElementById("lyricBtn").disabled=!sel;
+    document.getElementById("prevBtn").disabled=currentPage<=0;
+    document.getElementById("nextBtn").disabled=currentPage>=groups.length-1;
+    document.getElementById("playBtn").innerHTML=play.active?"&#9632; Stop":"&#9654; Play";
+    document.getElementById("undoBtn").disabled=!undoStack.length;
+  }
+
+  function renderPage(){
+    groups=computeGroups(notes);
+    if(currentPage>=groups.length) currentPage=Math.max(0,groups.length-1);
+    const pageNotes=groups[currentPage]||[];
+    if(!dragActive){
+      const tw=noteWindow(pageNotes), mw=midiWindow(pageNotes);
+      cur={t0:tw.t0,t1:tw.t1,lo:mw.lo,hi:mw.hi};
+    }
+    const ref=getRef(pageNotes);
+    svgEl.innerHTML=buildSvg(pageNotes,ref);
+    lyricEl.innerHTML=buildLyricLine(pageNotes);
+    updateTransport(pageNotes);
+    updateToolbar();
+    const key=currentPage+"|"+cur.t0+"|"+cur.t1+"|"+cur.lo+"|"+cur.hi;
+    if(key!==lastFftKey){ lastFftKey=key; drawFFT(); }
+  }
+
+  // ── FFT / STFT background ────────────────────────────────────────────────
+  function fft(re,im){
+    const n=re.length;
+    for(let i=1,j=0;i<n;i++){
+      let bit=n>>1;
+      for(; j&bit; bit>>=1) j^=bit;
+      j^=bit;
+      if(i<j){ let t=re[i];re[i]=re[j];re[j]=t; let u=im[i];im[i]=im[j];im[j]=u; }
+    }
+    for(let len=2;len<=n;len<<=1){
+      const ang=-2*Math.PI/len, wRe=Math.cos(ang), wIm=Math.sin(ang);
+      for(let i=0;i<n;i+=len){
+        let cRe=1,cIm=0;
+        for(let k=0;k<len/2;k++){
+          const uRe=re[i+k], uIm=im[i+k];
+          const vr=re[i+k+len/2]*cRe-im[i+k+len/2]*cIm;
+          const vi=re[i+k+len/2]*cIm+im[i+k+len/2]*cRe;
+          re[i+k]=uRe+vr; im[i+k]=uIm+vi;
+          re[i+k+len/2]=uRe-vr; im[i+k+len/2]=uIm-vi;
+          const nr=cRe*wRe-cIm*wIm, ni=cRe*wIm+cIm*wRe; cRe=nr; cIm=ni;
+        }
+      }
+    }
+  }
+  function drawFFT(){
+    const ctx2=fftEl.getContext("2d");
+    fftEl.width=PLOT_W; fftEl.height=PLOT_H;
+    const lo=cur.lo, hi=cur.hi, nRows=hi-lo+1;
+    if(!audio.buffer){ ctx2.fillStyle="#0a0a14"; ctx2.fillRect(0,0,PLOT_W,PLOT_H); return; }
+    const sr=audio.buffer.sampleRate, ch=audio.buffer.numberOfChannels, full=audio.buffer.length;
+    const s0=Math.max(0,Math.floor(cur.t0/1000*sr)), s1=Math.min(full,Math.ceil(cur.t1/1000*sr));
+    const segLen=Math.max(0,s1-s0);
+    const nFrames=1+Math.max(0,Math.floor((segLen-N_FFT)/HOP));
+    if(segLen<N_FFT||nFrames<=0){ ctx2.fillStyle="#0a0a14"; ctx2.fillRect(0,0,PLOT_W,PLOT_H); return; }
+    const seg=new Float32Array(segLen);
+    if(ch===1){ const d=audio.buffer.getChannelData(0); for(let i=0;i<segLen;i++) seg[i]=d[s0+i]; }
+    else{ for(let i=0;i<segLen;i++){ let s=0; for(let c=0;c<ch;c++) s+=audio.buffer.getChannelData(c)[s0+i]; seg[i]=s/ch; } }
+    const hann=new Float32Array(N_FFT);
+    for(let i=0;i<N_FFT;i++) hann[i]=0.5-0.5*Math.cos(2*Math.PI*i/(N_FFT-1));
+    const binHz=sr/N_FFT;
+    const binRange=[];
+    for(let m=lo;m<=hi;m++){
+      const fLo=440*Math.pow(2,(m-0.5-69)/12), fHi=440*Math.pow(2,(m+0.5-69)/12);
+      binRange.push([Math.floor(fLo/binHz),Math.ceil(fHi/binHz)]);
+    }
+    const re=new Float64Array(N_FFT), im=new Float64Array(N_FFT);
+    const energies=new Float64Array(nRows*nFrames);
+    let frame=0;
+    for(let s=0;s+N_FFT<=segLen;s+=HOP){
+      for(let k=0;k<N_FFT;k++){ re[k]=seg[s+k]*hann[k]; im[k]=0; }
+      fft(re,im);
+      for(let r=0;r<nRows;r++){
+        const b0=binRange[r][0], b1=Math.min(binRange[r][1],N_FFT/2);
+        let e=0;
+        for(let b=b0;b<=b1;b++) e+=Math.sqrt(re[b]*re[b]+im[b]*im[b]);
+        energies[r*nFrames+frame]=e;
+      }
+      frame++;
+    }
+    const nUsed=frame;
+    const db=new Float64Array(nRows*nUsed);
+    for(let i=0;i<nRows*nUsed;i++) db[i]=20*Math.log10(energies[i]+1e-7);
+    const sorted=Array.from(db).sort((a,b)=>a-b);
+    const floor=sorted[Math.floor(0.05*sorted.length)], top=sorted[Math.floor(0.995*sorted.length)];
+    const range=(top-floor)||1;
+    const off=document.createElement("canvas"); off.width=PLOT_W; off.height=nRows;
+    const octx=off.getContext("2d"), img=octx.createImageData(PLOT_W,nRows);
+    for(let y=0;y<nRows;y++){
+      const r=nRows-1-y; // top of canvas = highest midi, matching ty()
+      for(let x=0;x<PLOT_W;x++){
+        const fx=x/PLOT_W*nUsed, f0=Math.floor(fx), f1=Math.min(nUsed-1,f0+1), fr=fx-f0;
+        const v=db[r*nUsed+f0]*(1-fr)+db[r*nUsed+f1]*fr;
+        const [r2,g2,b2]=magma((v-floor)/range);
+        const idx=(y*PLOT_W+x)*4;
+        img.data[idx]=r2; img.data[idx+1]=g2; img.data[idx+2]=b2; img.data[idx+3]=255;
+      }
+    }
+    octx.putImageData(img,0,0);
+    ctx2.imageSmoothingEnabled=true;
+    ctx2.drawImage(off,0,0,PLOT_W,nRows,0,0,PLOT_W,PLOT_H);
+  }
+
+  // ── selection + drag ─────────────────────────────────────────────────────
+  function select(id){ selectedId=id; renderPage(); }
+  function prevNoteEndBeat(note){
+    const idx=notes.findIndex(n=>n.id===note.id);
+    for(let i=idx-1;i>=0;i--){ if(notes[i].type!=="-") return notes[i].start+notes[i].dur; }
+    return 0;
+  }
+  function nextNoteStartBeat(note){
+    const idx=notes.findIndex(n=>n.id===note.id);
+    for(let i=idx+1;i<notes.length;i++){ if(notes[i].type!=="-") return notes[i].start; }
+    return Infinity;
+  }
+  svgEl.addEventListener("pointerdown",e=>{
+    if(lyricInput) return;
+    const g=e.target.closest("[data-id]");
+    if(!g){ if(selectedId!=null) select(null); return; }
+    const id=+g.getAttribute("data-id");
+    const note=notes.find(n=>n.id===id);
+    if(!note) return;
+    const handle=e.target.getAttribute("data-handle")||"body";
+    pushUndo();
+    selectedId=id;
+    dragActive=true;
+    drag={id,handle,p0:toSvgPoint(e),origStart:note.start,origDur:note.dur,origPitch:note.pitch,origEnd:note.start+note.dur};
+    svgEl.setPointerCapture(e.pointerId);
+    renderPage();
+    e.preventDefault();
+  });
+  svgEl.addEventListener("pointermove",e=>{
+    if(!drag) return;
+    const p=toSvgPoint(e), dx=p.x-drag.p0.x, dy=p.y-drag.p0.y;
+    const note=notes.find(n=>n.id===drag.id);
+    if(!note) return;
+    const tScale=(cur.t1-cur.t0)/PLOT_W/BEAT_MS, pScale=(cur.hi-cur.lo)/PLOT_H;
+    if(drag.handle==="body"){
+      const dBeats=Math.round(dx*tScale), dMidi=Math.round(-dy*pScale);
+      note.start=clamp(drag.origStart+dBeats,prevNoteEndBeat(note),nextNoteStartBeat(note)-1);
+      note.pitch=clamp(drag.origPitch+dMidi,cur.lo,cur.hi);
+    }else if(drag.handle==="right"){
+      const dBeats=Math.round(dx*tScale);
+      note.dur=clamp(drag.origDur+dBeats,1,nextNoteStartBeat(note)-note.start);
+    }else if(drag.handle==="left"){
+      const dBeats=Math.round(dx*tScale);
+      const ns=clamp(drag.origStart+dBeats,prevNoteEndBeat(note),drag.origEnd-1);
+      note.start=ns; note.dur=drag.origEnd-ns;
+    }
+    renderPage();
+  });
+  function endDrag(e){
+    if(!drag) return;
+    const note=notes.find(n=>n.id===drag.id);
+    const changed=!!(note && (note.start!==drag.origStart || note.dur!==drag.origDur || note.pitch!==drag.origPitch));
+    drag=null; dragActive=false;
+    try{ svgEl.releasePointerCapture(e.pointerId); }catch(_){}
+    if(!changed && undoStack.length) undoStack.pop(); // drop no-op snapshot
+    renderPage();
+  }
+  svgEl.addEventListener("pointerup",endDrag);
+  svgEl.addEventListener("pointercancel",endDrag);
+  svgEl.addEventListener("dblclick",e=>{
+    const g=e.target.closest("[data-id]");
+    if(!g) return;
+    const note=notes.find(n=>n.id===+g.getAttribute("data-id"));
+    if(note){ selectedId=note.id; openLyricPopover(note); }
+  });
+
+  // ── edit operations ──────────────────────────────────────────────────────
+  function nextId(){ let m=0; for(const n of notes) if(n.id>m)m=n.id; return m+1; }
+  function splitNote(){
+    const n=notes.find(x=>x.id===selectedId); if(!n||n.dur<2) return;
+    let b;
+    if(play.playheadMs!=null&&startMsOf(n)<play.playheadMs&&play.playheadMs<endMsOf(n)) b=msToBeat(play.playheadMs);
+    else b=Math.round(n.start+n.dur/2);
+    if(!(n.start<b&&b<n.start+n.dur)) return;
+    pushUndo();
+    const idx=notes.findIndex(x=>x.id===n.id);
+    const A={id:n.id,type:n.type,start:n.start,dur:b-n.start,pitch:n.pitch,syl:n.syl};
+    const B={id:nextId(),type:n.type,start:b,dur:n.start+n.dur-b,pitch:n.pitch,syl:"~"};
+    notes.splice(idx,1,A,B);
+    selectedId=B.id;
+    renderPage();
+  }
+  function mergeNote(){
+    const n=notes.find(x=>x.id===selectedId); if(!n) return;
+    const idx=notes.findIndex(x=>x.id===n.id);
+    if(idx+1>=notes.length) return;
+    const x=notes[idx+1];
+    if(x.type==="-") return;
+    pushUndo();
+    n.dur=x.start+x.dur-n.start;
+    n.syl=n.syl+x.syl;
+    notes.splice(idx+1,1);
+    renderPage();
+  }
+  function deleteNote(){
+    const n=notes.find(x=>x.id===selectedId); if(!n) return;
+    pushUndo();
+    notes.splice(notes.findIndex(x=>x.id===n.id),1);
+    selectedId=null;
+    renderPage();
+  }
+  function toggleGold(){
+    const n=notes.find(x=>x.id===selectedId); if(!n) return;
+    pushUndo();
+    n.type=n.type==="*"?":":"*";
+    renderPage();
+  }
+
+  // ── lyric popover ────────────────────────────────────────────────────────
+  function openLyricPopover(n){
+    cancelLyric();
+    const g=svgEl.querySelector(`g[data-id="${n.id}"] .bar`);
+    const rect=g?g.getBoundingClientRect():{left:100,top:100};
+    const inp=document.createElement("input");
+    inp.type="text"; inp.className="lyric-pop"; inp.value=n.syl.trim();
+    inp._note=n; inp._done=false;
+    document.body.appendChild(inp);
+    inp.style.left=Math.min(rect.left,window.innerWidth-160)+"px";
+    inp.style.top=(rect.top-4)+"px";
+    inp.focus(); inp.select();
+    inp.addEventListener("keydown",e=>{
+      e.stopPropagation();
+      if(e.key==="Enter"){ e.preventDefault(); commitLyric(); }
+      else if(e.key==="Escape"){ e.preventDefault(); cancelLyric(); }
+    });
+    inp.addEventListener("blur",()=>{ if(!inp._done) commitLyric(); });
+    lyricInput=inp;
+  }
+  function commitLyric(){
+    if(!lyricInput||lyricInput._done) return;
+    lyricInput._done=true;
+    const n=lyricInput._note, val=lyricInput.value;
+    removeLyricInput();
+    if(n&&val!==n.syl){ pushUndo(); n.syl=val; renderPage(); }
+  }
+  function cancelLyric(){
+    if(!lyricInput) return;
+    lyricInput._done=true;
+    removeLyricInput();
+  }
+  function removeLyricInput(){ if(lyricInput){ lyricInput.remove(); lyricInput=null; } }
+
+  // ── undo ─────────────────────────────────────────────────────────────────
+  function pushUndo(){
+    undoStack.push(JSON.stringify(notes));
+    if(undoStack.length>100) undoStack.shift();
+    updateToolbar();
+  }
+  function undo(){
+    if(!undoStack.length) return;
+    notes=JSON.parse(undoStack.pop());
+    selectedId=null;
+    renderPage();
+  }
+
+  // ── audio ────────────────────────────────────────────────────────────────
+  function ensureCtx(){
+    if(!audio.ctx){
+      audio.ctx=new (window.AudioContext||window.webkitAudioContext)();
+      audio.master=audio.ctx.createGain(); audio.master.gain.value=0.9; audio.master.connect(audio.ctx.destination);
+    }
+    return audio.ctx;
+  }
+  function loadAudio(ab){
+    const ctx=ensureCtx();
+    ctx.decodeAudioData(ab).then(buf=>{
+      audio.buffer=buf; audio.error=null;
+      const drop=document.getElementById("drop"); if(drop) drop.style.display="none";
+      updateAudioChip(); lastFftKey=""; renderPage();
+    }).catch(e=>{ audio.error=String(e); updateAudioChip(); });
+  }
+  function updateAudioChip(){
+    const chip=document.getElementById("audioChip");
+    if(audio.buffer){ chip.textContent="audio: "+audio.buffer.duration.toFixed(1)+"s"; chip.className="chip ok"; }
+    else if(audio.error){ chip.textContent="audio decode failed"; chip.className="chip err"; }
+    else { chip.textContent="audio: not loaded"; chip.className="chip"; }
+  }
+  function playLine(){
+    if(play.active){ stopPlay(); return; }
+    const pageNotes=groups[currentPage]||[];
+    if(!pageNotes.length) return;
+    const ctx=ensureCtx(); ctx.resume();
+    const lineStartMs=startMsOf(pageNotes[0]), lineEndMs=endMsOf(pageNotes[pageNotes.length-1]);
+    const t0ctx=ctx.currentTime+0.05;
+    play.active=true; play.t0ctx=t0ctx; play.lineStartMs=lineStartMs; play.lineEndMs=lineEndMs; play.sources=[];
+    if(audio.buffer){
+      const src=ctx.createBufferSource(); src.buffer=audio.buffer;
+      src.start(t0ctx,Math.max(0,lineStartMs/1000),(lineEndMs-lineStartMs)/1000+0.5);
+      src.connect(audio.master); play.sources.push(src);
+    }
+    for(const n of pageNotes){
+      const f=440*Math.pow(2,(n.pitch-69)/12);
+      const st=t0ctx+(startMsOf(n)-lineStartMs)/1000, dur=n.dur*BEAT_MS/1000;
+      if(dur<=0) continue;
+      const osc=ctx.createOscillator(); osc.type="triangle"; osc.frequency.value=f;
+      const g=ctx.createGain(), peak=0.16;
+      g.gain.setValueAtTime(0.0001,st);
+      g.gain.linearRampToValueAtTime(peak,st+0.015);
+      g.gain.setValueAtTime(peak,Math.max(st+0.015,st+dur-0.06));
+      g.gain.linearRampToValueAtTime(0.0001,st+dur);
+      osc.connect(g); g.connect(audio.master);
+      osc.start(st); osc.stop(st+dur+0.02); play.sources.push(osc);
+    }
+    const firstP=Math.ceil((lineStartMs-GAP)/PULSE_MS), lastP=Math.floor((lineEndMs-GAP)/PULSE_MS);
+    for(let i=firstP;i<=lastP;i++){
+      const bt=GAP+i*PULSE_MS;
+      if(bt<lineStartMs-1||bt>lineEndMs+1) continue;
+      const t=t0ctx+(bt-lineStartMs)/1000, down=(i%4===0);
+      const osc=ctx.createOscillator(); osc.type="square"; osc.frequency.value=down?1320:880;
+      const g=ctx.createGain();
+      g.gain.setValueAtTime(down?0.22:0.14,t);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+0.025);
+      osc.connect(g); g.connect(audio.master);
+      osc.start(t); osc.stop(t+0.03); play.sources.push(osc);
+    }
+    updateToolbar();
+    play.rafId=requestAnimationFrame(playTick);
+  }
+  function playTick(){
+    if(!play.active) return;
+    const elapsed=audio.ctx.currentTime-play.t0ctx;
+    const ph=play.lineStartMs+elapsed*1000;
+    play.playheadMs=ph;
+    updatePlayhead(ph);
+    if(ph>=play.lineEndMs){ stopPlay(); return; }
+    play.rafId=requestAnimationFrame(playTick);
+  }
+  function stopPlay(){
+    if(!play.active) return;
+    play.active=false;
+    cancelAnimationFrame(play.rafId);
+    for(const s of play.sources){ try{ s.stop(); }catch(_){} try{ s.disconnect(); }catch(_){} }
+    play.sources=[]; play.playheadMs=null;
+    updatePlayhead(null); updateToolbar();
+  }
+  function updatePlayhead(phMs){
+    const line=document.getElementById("playhead");
+    if(!line) return;
+    if(phMs==null){ line.style.display="none"; svgEl.querySelectorAll(".bar.active").forEach(el=>el.classList.remove("active")); return; }
+    line.style.display="";
+    const x=tx(phMs); line.setAttribute("x1",x); line.setAttribute("x2",x);
+    const pageNotes=groups[currentPage]||[];
+    for(const n of pageNotes){
+      const el=svgEl.querySelector(`g[data-id="${n.id}"] .bar`);
+      if(!el) continue;
+      if(startMsOf(n)<=phMs&&phMs<endMsOf(n)) el.classList.add("active"); else el.classList.remove("active");
+    }
+  }
+
+  // ── save ─────────────────────────────────────────────────────────────────
+  function serializeTxt(){
+    const body=notes.map(n=>n.type==="-"?`- ${n.start}`:`${n.type} ${n.start} ${n.dur} ${n.pitch} ${n.syl}`).join("\n");
+    return D.rawHeader.join("\n")+"\n\n"+body+"\nE\n";
+  }
+  function downloadTxt(){
+    const blob=new Blob([serializeTxt()],{type:"text/plain;charset=utf-8"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download=D.srcName||((D.meta.title||"song")+".txt");
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }
+
+  // ── navigation ───────────────────────────────────────────────────────────
+  function gotoPage(i){
+    stopPlay(); cancelLyric();
+    const g=computeGroups(notes);
+    currentPage=clamp(i,0,Math.max(0,g.length-1));
+    selectedId=null;
+    renderPage();
+  }
+
+  // ── events ───────────────────────────────────────────────────────────────
+  document.getElementById("prevBtn").onclick=()=>gotoPage(currentPage-1);
+  document.getElementById("nextBtn").onclick=()=>gotoPage(currentPage+1);
+  document.getElementById("playBtn").onclick=playLine;
+  document.getElementById("splitBtn").onclick=splitNote;
+  document.getElementById("mergeBtn").onclick=mergeNote;
+  document.getElementById("delBtn").onclick=deleteNote;
+  document.getElementById("goldBtn").onclick=toggleGold;
+  document.getElementById("lyricBtn").onclick=()=>{ const n=notes.find(x=>x.id===selectedId); if(n) openLyricPopover(n); };
+  document.getElementById("undoBtn").onclick=undo;
+  document.getElementById("saveBtn").onclick=downloadTxt;
+
+  const drop=document.getElementById("drop"), fileInput=document.getElementById("fileInput");
+  document.getElementById("dropHint").textContent=D.audioHint?("Suggested: "+D.audioHint):"";
+  function onFile(f){ if(!f) return; f.arrayBuffer().then(loadAudio).catch(e=>{ audio.error=String(e); updateAudioChip(); }); }
+  drop.onclick=()=>fileInput.click();
+  fileInput.onchange=e=>onFile(e.target.files[0]);
+  drop.ondragover=e=>{ e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave=()=>drop.classList.remove("over");
+  drop.ondrop=e=>{ e.preventDefault(); drop.classList.remove("over"); onFile(e.dataTransfer.files[0]); };
+
+  document.addEventListener("keydown",e=>{
+    if(lyricInput&&document.activeElement===lyricInput) return;
+    if(e.ctrlKey||e.metaKey){
+      if(e.key==="z"||e.key==="Z"){ e.preventDefault(); undo(); }
+      else if(e.key==="s"||e.key==="S"){ e.preventDefault(); downloadTxt(); }
+      return;
+    }
+    switch(e.key){
+      case " ": e.preventDefault(); playLine(); break;
+      case "ArrowLeft": case "PageUp": gotoPage(currentPage-1); break;
+      case "ArrowRight": case "PageDown": gotoPage(currentPage+1); break;
+      case "s": splitNote(); break;
+      case "m": mergeNote(); break;
+      case "g": toggleGold(); break;
+      case "l": { const n=notes.find(x=>x.id===selectedId); if(n) openLyricPopover(n); break; }
+      case "Delete": case "Backspace": deleteNote(); break;
+      case "Escape": if(play.active) stopPlay(); else if(selectedId!=null) select(null); break;
+    }
+  });
+
+  // ── init ─────────────────────────────────────────────────────────────────
+  document.getElementById("title").textContent=(D.meta.title||"(untitled)")+" — "+(D.meta.artist||"");
+  const lineCount=computeGroups(D.notes).length;
+  document.getElementById("meta").textContent=
+    `BPM ${D.bpm} · GAP ${D.gap}ms · ${D.notes.length} notes · ${lineCount} lines`;
+  updateAudioChip();
+  renderPage();
+  if(D.audioB64){
+    const bin=atob(D.audioB64), bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+    loadAudio(bytes.buffer);
+  }
+})();
+</script>
+</body>
+</html>
