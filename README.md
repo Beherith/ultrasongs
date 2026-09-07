@@ -2,7 +2,7 @@
 
 > **Work in progress** — functional but rough around the edges.
 
-Generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` song files from any audio or video file + song lyrics. Pure Python CLI — runs fully local, no external AI APIs, no web server.
+Generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` song files from any audio or video file + song lyrics. Pure Python — runs fully local, no external AI APIs. CLI-first, with an optional web UI.
 
 **Pipeline:** FFmpeg extract → Demucs vocal separation → multi-pass faster-whisper consensus → Smith-Waterman lyric alignment → pause-delimited lyric/vocal chunks → multi-pass WhisperX exact word/character timing → BPM + torchcrepe analysis → `.txt` + ZIP export.
 
@@ -21,6 +21,7 @@ Generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` son
 - Built-in `.txt` diff tool with configurable tolerances
 - HTML preview with SVG pitch visualization
 - ZIP download with `.txt` + separated audio tracks
+- Optional web UI (`web` subcommand) — upload + process in the browser, per-song settings, job queue, download results
 
 ## Requirements
 
@@ -36,6 +37,9 @@ pip install -e cli/
 
 # Or just install dependencies to run directly
 pip install -r cli/requirements.txt
+
+# Optional: web UI (Dash)
+pip install -e "cli/[web]"
 ```
 
 **Optional (GPU):** CUDA 12.8 with PyTorch 2.8 for faster Demucs/WhisperX inference.
@@ -49,6 +53,7 @@ pip install torch==2.8.0 torchaudio==2.8.0 torchvision==0.23.0 --index-url https
 ```bash
 # Full pipeline
 python -m cli process --mp3 song.mp3 --lyrics lyrics.txt --title "Title" --artist "Artist"
+python -m cli process ... --no-intermediates   # keep the ZIP to package output only
 
 # With video background
 python -m cli process --mp3 song.mp4 --lyrics lyrics.txt --title "Title" --artist "Artist" --video song.mp4
@@ -70,6 +75,9 @@ python -m cli preview --txt output.txt --pitch tmp/name_pitch.json
 # Extract plain lyrics from an Ultrastar file (to stdout or --output file)
 python -m cli lyrics --txt output.txt
 python extract_lyrics.py output.txt   # standalone script
+
+# Web UI (optional, needs `pip install 'ultrasongs-cli[web]'` or dash)
+ULTRASONGS_WEB_PASSWORD=secret python -m cli web [--host 127.0.0.1] [--port 8080] [--no-auth]
 ```
 
 Global flags:
@@ -90,9 +98,20 @@ python -m cli process ... --stage transcribe
 python -m cli process ... --resume tmp/name_transcribe.json --stage align
 ```
 
+## Web UI
+
+`python -m cli web` serves a single-page Dash app that runs the same pipeline the CLI uses. One job at a time (FIFO queue); each job shows live status, queue position, log tail, and download links (ZIP, HTML preview, stems).
+
+- **Auth:** password from the `ULTRASONGS_WEB_PASSWORD` environment variable (session cookie, constant-time compare). There is no TLS — bind to `127.0.0.1` (default) or put a reverse proxy in front. `--no-auth` disables login but is only allowed on `127.0.0.1`/`localhost`.
+- **Flags:** `--host`, `--port`, `--no-auth`, `--web-config <path>` (defaults from `cli/web_config.jsonc`).
+- **Per-job settings:** the form auto-generates one control per `config.jsonc` key; values override the base config for that job only. "Reset settings to file defaults" restores them.
+- **Jobs:** stored under `web_jobs/<job_id>/{upload,tmp,output}` with a `job.json` manifest; jobs older than `job_retention_days` (default 7) are pruned at startup and before each submission.
+
 ## Configuration
 
-Edit `cli/config.jsonc` (supports `//` and `/* */` comments). 18 configuration keys covering GPU selection, model choices, pitch range, pause detection, BPM, output paths, and more. See the file for detailed per-key documentation.
+Edit `cli/config.jsonc` (supports `//` and `/* */` comments). 44 configuration keys covering GPU selection, model choices, pitch range, pause detection, BPM, note segmentation, output paths, and more. See the file for detailed per-key documentation.
+
+The web UI auto-generates a settings form from the same keys — no separate web config for pipeline options. Web server settings (host, port, job directory, retention, upload cap, poll interval) live in `cli/web_config.jsonc`.
 
 ## Pipeline
 
@@ -139,7 +158,7 @@ Converts aligned syllables to Ultrastar `.txt`:
 
 ### Stage 6 — Package
 
-Writes `.txt`, copies MP3/video/stems, creates ZIP bundle in `output/`.
+Writes `.txt`, copies MP3/video/stems, creates ZIP bundle in `output/`. The ZIP also bundles the run's intermediate files under `intermediates/` unless `--no-intermediates` is given.
 
 ### Stage 7 — Preview
 
@@ -159,9 +178,15 @@ Generates HTML with SVG pitch visualization, beat grid, and confidence-colored d
 ./output/
   {title}.txt                   ← Ultrastar song file
   {title}.mp3                   ← source audio
-  {title}.zip                   ← complete bundle
+  {title}.zip                   ← complete bundle (incl. intermediates/ unless --no-intermediates)
   vocals.mp3                    ← vocals stem (optional)
   accompaniment.mp3             ← instrumental stem (optional)
+
+./web_jobs/                     ← web UI job dirs (one per submitted song)
+  <job_id>/job.json             ← manifest (id, title, status, created_at)
+  <job_id>/upload/original.*    ← uploaded audio/video
+  <job_id>/tmp/                 ← per-job intermediate files
+  <job_id>/output/              ← same package output as the CLI
 ```
 
 ## Ultrastar .txt format
@@ -197,6 +222,7 @@ configuration, BPM detection, pitch-frame alignment, generation, and Ultrastar p
 | Component | Technology |
 |---|---|
 | CLI | argparse (stdlib) |
+| Web UI | Dash (optional, `ultrasongs-cli[web]`) |
 | Package | setuptools, pyproject.toml |
 | Audio separation | Demucs, torchaudio |
 | Pitch detection | torchcrepe |

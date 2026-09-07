@@ -62,6 +62,9 @@ cli/.pytest_cache/
 # Add ./output/ directory to gitignore for intermediate output files
 /output/
 
+# Web UI job directories
+/web_jobs/
+
 # TEst Songs
 /songs/
 

@@ -1,7 +1,6 @@
 """CLI entry point with argparse subcommands."""
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -69,6 +68,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Load intermediate results from JSON file (skips earlier stages)",
     )
+    proc.add_argument(
+        "--no-intermediates",
+        action="store_true",
+        default=False,
+        help="Do not include intermediate temp files in the output ZIP",
+    )
 
     # ── import ───────────────────────────────────────────────────────────────
     imp = subparsers.add_parser("import", help="Import existing Ultrastar .txt + MP3")
@@ -91,6 +96,22 @@ def _build_parser() -> argparse.ArgumentParser:
     lyr = subparsers.add_parser("lyrics", help="Extract plain lyrics from an Ultrastar .txt file")
     lyr.add_argument("--txt", required=True, help="Ultrastar .txt file")
     lyr.add_argument("--output", default=None, help="Output lyrics file (default: print to stdout)")
+
+    # ── web ──────────────────────────────────────────────────────────────────
+    web = subparsers.add_parser("web", help="Run the web UI (Dash) for the pipeline")
+    web.add_argument("--host", default=None, help="Bind address (default: from web config, 127.0.0.1)")
+    web.add_argument("--port", type=int, default=None, help="Bind port (default: from web config, 8080)")
+    web.add_argument(
+        "--no-auth",
+        action="store_true",
+        default=False,
+        help="Disable password login (only allowed when binding to 127.0.0.1 or localhost)",
+    )
+    web.add_argument(
+        "--web-config",
+        default=None,
+        help="Path to web_config.jsonc (default: cli/web_config.jsonc)",
+    )
 
     return parser
 
@@ -120,21 +141,17 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_preview(args, config)
     elif args.command == "lyrics":
         return _cmd_lyrics(args)
+    elif args.command == "web":
+        return _cmd_web(args, config)
     else:
         parser.print_help()
         return 1
 
 
 def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ignore[name-defined]
-    """Execute the full or partial pipeline."""
-    from cli.ffmpeg_extract import extract_audio, is_video_path
-    from cli.transcribe import transcribe
-    from cli.bpm_detect import detect_bpm
-    from cli.align import align_lyrics
-    from cli.generate import generate_ultrastar
-    from cli.package import package_output
-    from cli.pipeline_types import TranscribeResult
+    """Execute the full or partial pipeline (thin adapter over pipeline.run_process)."""
     from cli.logging_setup import get_logger
+    from cli.pipeline import ProcessRequest, run_process, prepare_lyrics_input
     from cli.ultrastar import read_text_fallback
 
     logger = get_logger("cli.process")
@@ -145,11 +162,8 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
     title = args.title
     artist = args.artist
     mp3_arg = args.mp3
-    if _looks_like_ultrastar(lyrics_input):
-        from cli.ultrastar import extract_lyrics_from_ultrastar, parse_ultrastar_txt
-
-        lyrics_text = extract_lyrics_from_ultrastar(lyrics_input)
-        meta, _ = parse_ultrastar_txt(lyrics_input)
+    lyrics_text, meta = prepare_lyrics_input(lyrics_input)
+    if meta is not None:
         if title is None:
             title = meta.title
         if artist is None:
@@ -157,8 +171,6 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
         if mp3_arg is None:
             mp3_arg = meta.mp3
         logger.info(f"Lyrics input {lyrics_path.name} is an Ultrastar file; extracted plain lyrics")
-    else:
-        lyrics_text = lyrics_input
 
     if not title or not artist or not mp3_arg:
         missing = [name for name, value in (("--title", title), ("--artist", artist), ("--mp3", mp3_arg)) if not value]
@@ -172,115 +184,23 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
         mp3_path = lyrics_path.parent / mp3_arg
     else:
         mp3_path = Path(mp3_arg)
-    if not mp3_path.exists():
-        logger.error(f"Input audio file not found: {mp3_path}")
+
+    request = ProcessRequest(
+        title=title,
+        artist=artist,
+        lyrics_text=lyrics_text,
+        input_path=mp3_path,
+        video_path=Path(args.video) if args.video else None,
+        config=config,
+        output_dir=Path(args.output) if args.output else config.output_path,
+        stage=args.stage,
+        resume_path=Path(args.resume) if args.resume else None,
+        include_intermediates=not args.no_intermediates,
+    )
+    result = run_process(request)
+    if not result.ok:
+        logger.error(result.error or "Processing failed")
         return 1
-
-    # A video passed as the input file is also the source video for the
-    # package output and the #VIDEO tag, unless --video names another one.
-    video_path = Path(args.video) if args.video else (mp3_path if is_video_path(mp3_path) else None)
-
-    # Ensure temp directory exists
-    config.temp_path.mkdir(parents=True, exist_ok=True)
-
-    audio_out = config.temp_path / f"{mp3_path.stem}.mp3"
-    resume_path = Path(args.resume) if args.resume else config.temp_path / f"{mp3_path.stem}_transcribe.json"
-
-    result: TranscribeResult | None = None
-
-    # ── Resume from saved TranscribeResult ──
-    if args.resume:
-        logger.info(f"Resuming from {resume_path}")
-        if not resume_path.exists():
-            logger.error(f"Resume file not found: {resume_path}")
-            return 1
-        result = TranscribeResult.from_dict(json.loads(resume_path.read_text(encoding="utf-8")))
-        logger.info(f"Loaded {len(result.words)} words from resume file")
-
-    # Stage: extract
-    if not result and args.stage in ("extract", "transcribe", "align", "generate", "all"):
-        logger.info("Step 1/5: Extracting audio…")
-        extract_audio(mp3_path, audio_out, config)
-        logger.info("Step 1/5: Audio extracted")
-
-    # Stage: transcribe
-    if not result and args.stage in ("transcribe", "align", "generate", "all"):
-        logger.info("Step 2/5: Transcribing…")
-        result = transcribe(audio_out, lyrics_text, config)
-        logger.info("Step 2/5: Transcription complete")
-
-        # Always persist TranscribeResult for later resume
-        transcribe_json = config.temp_path / f"{mp3_path.stem}_transcribe.json"
-        transcribe_json.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
-        logger.info(f"TranscribeResult saved to {transcribe_json}")
-
-    if not result:
-        return 0
-
-    # Stage: align
-    if args.stage in ("align", "generate", "all"):
-        if result.bpm_result is None:
-            logger.info("Step 3/5: Detecting BPM…")
-            bpm_input = Path(result.accompaniment_path) if config.bpm_use_accompaniment else audio_out
-            result.bpm_result = detect_bpm(bpm_input, config)
-        bpm_result = result.bpm_result
-        logger.info(
-            f"Step 3/5: BPM {bpm_result.bpm:.5f} "
-            f"(first beat at {bpm_result.first_beat_ms:.0f} ms, "
-            f"stable={bpm_result.stable})"
-        )
-
-        logger.info("Step 4/5: Aligning lyrics…")
-        aligned = align_lyrics(
-            lyrics_text,
-            result.words,
-            result.language,
-            result.pauses,
-            config,
-            pitch_frames=result.pitch_frames,
-            audio_path=Path(result.vocals_path),
-        )
-        logger.info("Step 4/5: Alignment complete")
-
-    # Stage: generate
-    if args.stage in ("generate", "all"):
-        logger.info("Step 5/5: Generating Ultrastar file…")
-        txt_content = generate_ultrastar(
-            aligned_syllables=aligned,
-            bpm=bpm_result.bpm,
-            first_beat_ms=bpm_result.first_beat_ms,
-            gap_ms=config.gap_lead_in_ms,
-            title=title,
-            artist=artist,
-            mp3_filename=f"{title}.mp3",
-            video_filename=video_path.name if video_path else None,
-            config=config,
-        )
-        logger.info("Step 5/5: Ultrastar file generated")
-
-        # Package output
-        output_dir = Path(args.output) if args.output else config.output_path
-        package_output(
-            txt_content=txt_content,
-            mp3_path=audio_out,
-            output_dir=output_dir,
-            title=title,
-            video_path=video_path,
-            vocals_path=Path(result.vocals_path),
-            accompaniment_path=Path(result.accompaniment_path),
-        )
-        logger.info(f"Output packaged to {output_dir}")
-
-        from cli.html_preview import generate_preview
-
-        txt_path = output_dir / f"{title}.txt"
-        pitch_json = config.temp_path / "whisperx_pitch.json"
-        if pitch_json.exists():
-            generate_preview(txt_path, pitch_json_path=pitch_json)
-        else:
-            generate_preview(txt_path)
-        logger.info("HTML preview generated")
-
     return 0
 
 
@@ -334,6 +254,35 @@ def _cmd_preview(args: argparse.Namespace, config: "Config") -> int:  # type: ig
     return 0
 
 
+def _cmd_web(args: argparse.Namespace, config: "Config") -> int:  # type: ignore[name-defined]
+    """Run the Dash web UI."""
+    import os
+
+    from cli.logging_setup import get_logger
+
+    logger = get_logger("cli.web")
+    try:
+        from cli.web.app import load_web_config, run_server
+        from cli.web.auth import resolve_auth
+    except ImportError:
+        logger.error("The web UI requires Dash. Install it with: pip install 'ultrasongs-cli[web]'")
+        return 1
+
+    web_cfg = load_web_config(args.web_config)
+
+    host = args.host or web_cfg.host
+    port = args.port or web_cfg.port
+    password, error = resolve_auth(
+        os.environ.get("ULTRASONGS_WEB_PASSWORD"),
+        args.no_auth,
+        host,
+    )
+    if error:
+        logger.error(error)
+        return 1
+    return run_server(web_cfg, config, host=host, port=port, password=password)
+
+
 def _cmd_lyrics(args: argparse.Namespace) -> int:
     """Extract plain lyrics from an Ultrastar .txt file."""
     from cli.logging_setup import get_logger
@@ -349,16 +298,6 @@ def _cmd_lyrics(args: argparse.Namespace) -> int:
     else:
         sys.stdout.write(lyrics)
     return 0
-
-
-def _looks_like_ultrastar(text: str) -> bool:
-    """Return True if the text looks like an Ultrastar .txt file (header line first)."""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        return stripped.startswith("#")
-    return False
 
 
 if __name__ == "__main__":

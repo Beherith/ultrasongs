@@ -3,10 +3,40 @@
 import shutil
 import zipfile
 from pathlib import Path
+from typing import Sequence
 
 from cli.logging_setup import get_logger
 
 logger = get_logger("cli.package")
+
+# Intermediate file extensions included in the ZIP (skips .mp3 — already in
+# the ZIP as title/vocals/accompaniment — and the note_segments_plots/ dir).
+INTERMEDIATE_SUFFIXES = {".json", ".html", ".txt"}
+INTERMEDIATE_SKIP_DIRS = {"note_segments_plots"}
+
+
+def collect_intermediates(temp_path: Path, since_ts: float | None = None) -> list[Path]:
+    """Collect intermediate temp files (JSON/HTML/TXT) for inclusion in the ZIP.
+
+    With ``since_ts``, only files modified at or after ``since_ts - 2`` seconds
+    are returned, so a shared temp dir does not leak files from other runs.
+    """
+    temp_path = Path(temp_path)
+    if not temp_path.is_dir():
+        return []
+    cutoff = since_ts - 2 if since_ts is not None else None
+    found: list[Path] = []
+    for f in sorted(temp_path.rglob("*")):
+        if not f.is_file():
+            continue
+        if any(part in INTERMEDIATE_SKIP_DIRS for part in f.relative_to(temp_path).parts[:-1]):
+            continue
+        if f.suffix.lower() not in INTERMEDIATE_SUFFIXES:
+            continue
+        if cutoff is not None and f.stat().st_mtime < cutoff:
+            continue
+        found.append(f)
+    return found
 
 
 def package_output(
@@ -17,6 +47,8 @@ def package_output(
     video_path: Path | None = None,
     vocals_path: Path | None = None,
     accompaniment_path: Path | None = None,
+    extra_files: Sequence[Path] = (),
+    intermediates_prefix: str = "intermediates",
 ) -> Path:
     """Package generated files into an output directory.
 
@@ -25,9 +57,9 @@ def package_output(
             <title>.txt
             <title>.mp3     (copy of mp3_path)
             <title>.mp4     (optional, from video_path)
-            vocals.mp3      (optional)
-            accompaniment.mp3  (optional)
-            <title>.zip     (ZIP of all above)
+        vocals.mp3      (optional)
+        accompaniment.mp3  (optional)
+        <title>.zip     (ZIP of all above plus extra_files under intermediates/)
 
     Args:
         txt_content: The Ultrastar .txt string.
@@ -37,6 +69,9 @@ def package_output(
         video_path: Optional video file.
         vocals_path: Optional vocals stem.
         accompaniment_path: Optional accompaniment stem.
+        extra_files: Optional intermediate files, written into the ZIP under
+            intermediates/<name>.
+        intermediates_prefix: ZIP directory for extra_files.
 
     Returns:
         Path to the output directory.
@@ -73,6 +108,10 @@ def package_output(
             if f.suffix.lower() == ".zip":
                 continue
             zf.write(f, f.name)
+        for f in extra_files:
+            f = Path(f)
+            if f.is_file():
+                zf.write(f, f"{intermediates_prefix}/{f.name}")
     logger.info(f"Created ZIP: {zip_path}")
 
     return output_dir

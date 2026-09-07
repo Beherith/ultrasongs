@@ -8,13 +8,14 @@ Ultrasongs generates [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatibl
 
 ## Architecture
 
-Single Python CLI package under `cli/`, invoked via `python -m cli` or `ultrasongs` (when the `ultrasongs-cli` package is installed, entry point `ultrasongs = cli.__main__:main`). No web server, no frontend.
+Single Python CLI package under `cli/`, invoked via `python -m cli` or `ultrasongs` (when the `ultrasongs-cli` package is installed, entry point `ultrasongs = cli.__main__:main`). An optional Dash web UI (`cli/web/`, `ultrasongs web`) wraps the same pipeline.
 
 ```
 User (CLI) → argparse → cli/__main__.py → pipeline stages → output/
+User (browser) → Flask/Dash → cli/web/jobs.py (FIFO queue) → cli/pipeline.run_process → web_jobs/<id>/output/
 ```
 
-- **CLI layer**: `argparse` subcommands (`process`, `import`, `diff`, `preview`), global flags `-c/--config`, `-v/--verbose`, `-q/--quiet`
+- **CLI layer**: `argparse` subcommands (`process`, `import`, `diff`, `preview`, `lyrics`, `web`), global flags `-c/--config`, `-v/--verbose`, `-q/--quiet`
 - **Pipeline**: sequential stages, each a module in `cli/`; heavy ML imports are lazy-loaded inside functions
 - **Config**: `cli/config.jsonc` (JSON with comments), loaded into a frozen `Config` dataclass (`cli/config.py`); code-level fallback defaults live in the dataclass, invalid values fall back with a warning
 - **Logging**: `cli/logging_setup.py` — stdout handler, `[timestamp] [name] message` format
@@ -24,6 +25,7 @@ User (CLI) → argparse → cli/__main__.py → pipeline stages → output/
 | Component | Technology |
 |---|---|
 | CLI | argparse (stdlib) |
+| Web UI | Dash (optional extra `ultrasongs-cli[web]`; pulls Flask + Plotly) |
 | Package | setuptools, `cli/pyproject.toml` (Python >=3.10,<3.14) |
 | Audio separation | Demucs, torchaudio |
 | ASR backends | faster-whisper (standalone, default) or WhisperX 3.8.6 (legacy/VAD path) |
@@ -51,6 +53,11 @@ python -m cli import --txt existing.txt --mp3 existing.mp3
 python -m cli diff --original a.txt --generated b.txt      # exit 0 if within tolerances, else 1
 python -m cli preview --txt output.txt --pitch tmp/whisperx_pitch.json
 python -m cli lyrics --txt output/tit31.txt [--output lyrics.txt]   # plain lyrics to stdout or file
+python -m cli process ... --no-intermediates   # skip intermediate temp files in the output ZIP
+
+# Web UI (requires `pip install 'ultrasongs-cli[web]'` or dash in requirements.txt).
+# Password from ULTRASONGS_WEB_PASSWORD env var; --no-auth only on localhost.
+ULTRASONGS_WEB_PASSWORD=secret python -m cli web [--host 127.0.0.1] [--port 8080] [--no-auth] [--web-config path]
 
 python -m cli -v process ...           # Verbose (DEBUG) logging
 python -m cli -q process ...           # Quiet (WARNING+) logging
@@ -69,6 +76,17 @@ Diff tolerances (`cli/diff.py`): BPM ±2, GAP exact match, singing-note count ex
 
 `--mp3` accepts video files (`.mp4`, `.mkv`, `.webm`, `.mov`, `.avi`) as well as audio: the extract stage pulls the audio out with FFmpeg, and the original video is then treated like `--video` — copied into the output/ZIP and referenced by a `#VIDEO` tag (an explicit `--video` always wins). The package output always contains the extracted original MP3, the first-pass htdemucs `vocals.mp3` and `accompaniment.mp3`, and the original video when the input was one.
 
+Output names are sanitized (`cli/pipeline.sanitize_filename`) so titles are safe on disk: the ZIP, `.txt`, `.mp3`, and `.html` all use the sanitized title. `--no-intermediates` (CLI) keeps the ZIP to the package output only; by default the ZIP also bundles the job's `tmp/` artifacts under `intermediates/` (`cli/package.collect_intermediates`).
+
+## Web Service
+
+`python -m cli web` runs a single-threaded-worker Dash app (`cli/web/`) that submits the same `cli.pipeline.run_process` the CLI uses. Requires the optional `dash` dependency (`pip install 'ultrasongs-cli[web]'`); the subcommand prints an install hint and exits 1 if Dash is missing.
+
+- **Auth**: password from the `ULTRASONGS_WEB_PASSWORD` environment variable (constant-time compare, Flask session cookie). No TLS is provided — bind to `127.0.0.1` (default) or put a reverse proxy in front. `--no-auth` disables login but is rejected unless the host is `127.0.0.1`/`localhost`. Web server settings (host, port, `web_dir`, retention, upload cap, poll interval) live in `cli/web_config.jsonc` (`--web-config` to override).
+- **Queue**: one job at a time, FIFO (`cli/web/jobs.py`). Uploads are staged, validated (extension + size cap), then moved into the job dir. Each job gets `web_jobs/<id>/{upload,tmp,output}` plus a `job.json` manifest; jobs older than `job_retention_days` are pruned at startup and before each submission.
+- **UI**: one form (title/artist/lyrics + audio/video upload) plus an auto-generated settings accordion with one control per `config.jsonc` key (44), driven by `cli/web/settings_meta.py`. Jobs show live status, queue position, log tail, and download links (ZIP, HTML preview, stems) served from `/download/<job_id>/<file>`.
+- **Per-job config**: form values override the base `Config` (revalidated via `config_from_dict`); the job's `temp_dir`/`output_dir` are forced to the job dir, and the ZIP includes intermediates.
+
 ## Code Conventions
 
 - Python 3.10+, type hints via dataclasses in `cli/pipeline_types.py`
@@ -82,8 +100,9 @@ Diff tolerances (`cli/diff.py`): BPM ±2, GAP exact match, singing-note count ex
 
 | File | Purpose |
 |---|---|
-| `cli/__main__.py` | CLI entry point, argparse parser, stage orchestration (5 logged steps) |
-| `cli/config.py` | JSONC loading/stripping, frozen `Config` dataclass, validation |
+| `cli/__main__.py` | CLI entry point, argparse parser, thin adapters over `cli.pipeline` (5 logged steps) |
+| `cli/pipeline.py` | `ProcessRequest`/`ProcessResult` dataclasses, `run_process()` shared by CLI and web, `prepare_lyrics_input()`, `sanitize_filename()` |
+| `cli/config.py` | JSONC loading/stripping (`load_jsonc`), `config_from_dict()`, frozen `Config` dataclass, validation |
 | `cli/pipeline_types.py` | Shared dataclasses: `PitchFrame`, `CharacterTimestamp`, `WordTimestamp`, `Pause`, `AlignedSyllable`, `BpmResult`, `TranscribeResult`, `UltrastarNote`, `UltrastarMeta` (with `to_dict`/`from_dict` for resume) |
 | `cli/ffmpeg_extract.py` | FFmpeg: video/audio → mono MP3 (128 kbps) in `tmp/` |
 | `cli/ffmpeg_pcm.py` | FFmpeg: MP3 → raw float32 PCM bytes (used for note-plot spectrograms) |
@@ -97,7 +116,12 @@ Diff tolerances (`cli/diff.py`): BPM ±2, GAP exact match, singing-note count ex
 | `cli/syllabify.py` | Syllable splitting via pyphen (language alias map, cached hyphenators) |
 | `cli/ultrastar.py` | `ms_to_beats()`, `build_ultrastar_txt()`, `parse_ultrastar_txt()`, `extract_lyrics_from_ultrastar()` |
 | `cli/generate.py` | `generate_ultrastar()`: beat mapping anchored to first beat (`#GAP`), overlap prevention, line breaks |
-| `cli/package.py` | Output packaging (`.txt`, MP3, video, stems, ZIP) |
+| `cli/package.py` | Output packaging (`.txt`, MP3, video, stems, ZIP), `collect_intermediates()` for ZIP bundling |
+| `cli/web/app.py` | Dash app factory: layout, settings accordion, callbacks, `/download` route, `run_server()` |
+| `cli/web/jobs.py` | `JobManager`: single-worker FIFO queue, per-job log capture, retention pruning, `snapshot()` |
+| `cli/web/auth.py` | Flask session login (`/login`, `/logout`), constant-time password check, `resolve_auth()` host guard |
+| `cli/web/settings_meta.py` | `SettingMeta` list (one per config key) driving the auto-generated settings form |
+| `cli/web_config.jsonc` | Web server config (host, port, `web_dir`, retention, upload cap, poll interval) |
 | `cli/diff.py` | Compare two Ultrastar `.txt` files with tolerances, `DiffReport.print()` |
 | `cli/html_preview.py` | `generate_preview()`: HTML with SVG pitch visualization, beat grid, confidence/amplitude colors, optional `whisperx_pitch.json` overlay |
 | `cli/pitch_to_html.py` | Standalone script: render a pitch JSON as scrollable HTML verse visualizations |
@@ -169,7 +193,7 @@ The `process` subcommand runs these stages (`--stage` cuts off after the given s
 | `note_pitch_tolerance` | `1` | Max semitone drift kept within a single note |
 | `note_min_duration_ms` | `60` | Min duration (ms) for a pitch-change segment |
 | `note_frame_step_ms` | `10` | Fallback frame spacing (ms) for note end times |
-| `note_segment_plots` | `true` | Write matplotlib diagnostic plots to `tmp/note_segments_plots/` (slow; debug only) |
+| `note_segment_plots` | `false` | Write matplotlib diagnostic plots to `tmp/note_segments_plots/` (slow; debug only) |
 | `ffmpeg_audio_bitrate` | `"128k"` | Output MP3 bitrate |
 | `output_dir` | `"./output"` | Output directory |
 | `temp_dir` | `"./tmp"` | Intermediate files directory |
@@ -194,6 +218,13 @@ Temp files in `./tmp/`, generated output in `./output/` (both gitignored):
 ./output/
   {title}.txt, {title}.mp3, {title}.zip, {title}.html
   vocals.mp3, accompaniment.mp3  ← optional stems
+
+./web_jobs/                       ← web UI jobs (gitignored)
+  staging/                        ← in-flight uploads, deleted after submit
+  <job_id>/job.json               ← manifest (id, title, status, created_at)
+  <job_id>/upload/original.*      ← the uploaded audio/video
+  <job_id>/tmp/                   ← per-job intermediate files
+  <job_id>/output/                ← same package output as the CLI
 ```
 
 ## Testing
@@ -207,18 +238,26 @@ pytest cli/tests/
 | `cli/tests/test_align.py` | `normalize_char()`, `phonetic_score()`, `smith_waterman()`, `align_lyrics()` |
 | `cli/tests/test_bpm.py` | `detect_bpm()`, per-chunk estimates, phase stability, `BpmResult` round-trip |
 | `cli/tests/test_config.py` | Defaults, frozen dataclass, JSONC loading, invalid-value fallback |
+| `cli/tests/test_config_dict.py` | `config_from_dict()` overrides, invalid-value fallback, `load_jsonc()` |
 | `cli/tests/test_consensus.py` | `word_similarity()`, transcription + timing consolidation |
 | `cli/tests/test_diff.py` | Identical files, BPM/beat tolerances, different titles |
 | `cli/tests/test_generate.py` | Basic generation, line breaks, overlap prevention, video filename |
 | `cli/tests/test_hybrid_transcribe.py` | Approximate lyric alignment, chunk splitting at pauses, boundaries, `slice_audio()`, word offsetting |
+| `cli/tests/test_package_intermediates.py` | `collect_intermediates()` selection, ZIP `intermediates/` bundling, `--no-intermediates` |
+| `cli/tests/test_pipeline.py` | `run_process()` orchestration, `prepare_lyrics_input()`, `sanitize_filename()`, `--stage`/`--resume` |
 | `cli/tests/test_pipeline_types.py` | `TranscribeResult`/`WordTimestamp` round-trips, character alignments, legacy pitch-frame recovery |
 | `cli/tests/test_syllabify.py` | `split_word()`, `syllabify_line()`, multi-language, unsupported |
 | `cli/tests/test_transcribe_alignment.py` | CREPE/band-energy frame-count parity, exact frame alignment (incl. real torchcrepe) |
 | `cli/tests/test_ultrastar.py` | `ms_to_beats()`, `build_ultrastar_txt()`, `parse_ultrastar_txt()`, `extract_lyrics_from_ultrastar()`, round-trip |
+| `cli/tests/test_web_app.py` | Layout generation (all 44 controls), input validation, config-override flow, process/upload callbacks |
+| `cli/tests/test_web_auth.py` | Flask `test_client`: anon redirect, wrong/right password, logout, `--no-auth` host guard |
+| `cli/tests/test_web_jobs.py` | submit→running→succeeded/failed, FIFO ordering, log-handler capture, retention pruning, `snapshot()` shape |
 | `cli/tests/test_whisperx_transcribe.py` | Word/character extraction, artifact filters, model loading (monkeypatched), alignment-model caching, faster-whisper paths, Windows DLL registration |
 
 ## Other
 
 - Test song used for debugging is committed at the repo root: `test_song_full_audio.mp3` + `test_song_lyrics_only.txt` + `test_song_reference_ultrastar_file.txt/html` (a `.vscode` debug config resumes from `tmp/test_song_full_audio_transcribe.json`)
+- `test_song_small_audio.mp3` + `test_song_small_lyrics.txt`: a ~35 s quick-test fileset — the full song cut from the `#GAP` (32.646 s, with 0.5 s lead-in) to the end of line 115 of the reference `.txt` (first "Come on brothers sing with me!", ~66.3 s, with 0.5 s tail), lyrics = the first 13 lines of `test_song_lyrics_only.txt`
+- Note: the reference `.txt`'s beat grid runs at 1/4 of its listed BPM (effective 4×121.3 ≈ 485 BPM; verified against the audio with word timestamps), so don't use standard `ms_to_beats` math on it for durations
 - `docs/pipeline.html` + `docs/pipeline/stage*.svg`: visual documentation of the 7 pipeline stages
 - A `.venv` at the repo root is the dev virtualenv (Python 3.13, CUDA wheels)

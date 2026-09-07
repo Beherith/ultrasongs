@@ -1,0 +1,24 @@
+{
+  // Web service configuration (cli/web). The login password is NOT stored
+  // here; it comes from the ULTRASONGS_WEB_PASSWORD environment variable.
+
+  // Host to bind the web server to. Keep 127.0.0.1 unless you put a reverse
+  // proxy in front — there is no TLS.
+  "host": "127.0.0.1",
+
+  // Port to listen on.
+  "port": 8080,
+
+  // Directory where web jobs are stored (upload/, tmp/, output/ per job).
+  "web_dir": "./web_jobs",
+
+  // Job directories older than this many days are deleted at server startup
+  // and before each new job is submitted.
+  "job_retention_days": 7,
+
+  // Maximum accepted upload size in megabytes.
+  "max_upload_mb": 2048,
+
+  // How often the browser polls for job status/log updates (seconds).
+  "poll_interval_s": 1.0
+}

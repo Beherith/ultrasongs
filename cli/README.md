@@ -1,6 +1,6 @@
 # Ultrasongs CLI
 
-Pure Python CLI tool to generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` song files from audio/video + lyrics. No webserver, no UI — command-line processing with stdout logging.
+Pure Python CLI tool to generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` song files from audio/video + lyrics. Command-line processing with stdout logging; an optional Dash web UI (`python -m cli web`) wraps the same pipeline.
 
 ## Pipeline
 
@@ -16,6 +16,9 @@ ffmpeg -version
 
 # Install Python dependencies
 pip install -r cli/requirements.txt
+
+# Optional: web UI (Dash)
+pip install -e "cli/[web]"
 ```
 
 **Required Python packages:** `whisperx`, `demucs`, `torchcrepe`, `torchaudio`, `soundfile`, `numpy`, `lameenc`, `librosa`, `pyphen`.
@@ -54,7 +57,8 @@ python -m cli process \
   [--video song.mp4] \
   [--output ./my-output] \
   [--stage all] \
-  [--resume intermediate.json]
+  [--resume intermediate.json] \
+  [--no-intermediates]
 ```
 
 `--lyrics` also accepts an existing Ultrastar `.txt` file: the plain lyrics are extracted from it, and `--mp3`/`--title`/`--artist` (optional in that case) fall back to the file's `#MP3` (resolved relative to the .txt file's directory), `#TITLE`, and `#ARTIST` tags. `#BPM` and `#GAP` are ignored; command line arguments always win.
@@ -75,6 +79,8 @@ python -m cli process --lyrics output/song.txt --title "New Title"
 | `all` | Everything (default) |
 
 **Resume** (`--resume`): Skip earlier stages by loading intermediate JSON results.
+
+**`--no-intermediates`**: Keep the ZIP to the package output only. By default the ZIP also bundles the run's `tmp/` artifacts under `intermediates/`.
 
 **Output:** Creates a directory containing `<title>.txt`, `<title>.mp3`, optional video/vocals/accompaniment stems, and a `<title>.zip` bundle.
 
@@ -113,12 +119,30 @@ python -m cli lyrics \
 
 A standalone wrapper is available at the repo root: `python extract_lyrics.py song.txt [-o lyrics.txt]`.
 
+### `web` — Run the web UI
+
+Serve a single-page Dash app that runs the same pipeline. Requires the optional `dash` dependency (`pip install -e "cli/[web]"`).
+
+```bash
+ULTRASONGS_WEB_PASSWORD=secret python -m cli web \
+  [--host 127.0.0.1] \
+  [--port 8080] \
+  [--no-auth] \
+  [--web-config cli/web_config.jsonc]
+```
+
+- **Auth:** password from the `ULTRASONGS_WEB_PASSWORD` environment variable (Flask session cookie, constant-time compare). No TLS is provided — bind to `127.0.0.1` (default) or use a reverse proxy. `--no-auth` is rejected unless the host is `127.0.0.1`/`localhost`.
+- **Queue:** one job at a time, FIFO. Each job gets `web_jobs/<job_id>/{upload,tmp,output}` + a `job.json` manifest; jobs older than `job_retention_days` are pruned at startup and before each submission.
+- **Settings:** the form auto-generates one control per `config.jsonc` key (44). Values override the base config for that job only.
+- **Server settings** (host, port, `web_dir`, retention, upload cap, poll interval) live in `cli/web_config.jsonc`.
+
 ## Configuration
 
 Edit `cli/config.jsonc` (supports `//` and `/* */` comments):
 
 | Key | Default | Description |
 |---|---|---|
+| `device` | `"auto"` | GPU/CPU selection (auto, cuda, cpu) |
 | `transcription_backend` | `"faster-whisper"` | Hybrid faster-whisper/WhisperX path; `"whisperx"` retains the legacy ASR path |
 | `whisper_model` | `"medium"` | Initial ASR model |
 | `whisper_language` | `"en"` | Language hint; empty enables detection |
@@ -126,15 +150,17 @@ Edit `cli/config.jsonc` (supports `//` and `/* */` comments):
 | `whisperx_batch_size` | `8` | Number of ASR chunks processed per inference batch |
 | `whisperx_compute_type` | `"default"` | CTranslate2 compute type (`default`, `float16`, `float32`, `int8`) |
 | `whisperx_align_model` | `""` | Optional wav2vec2 alignment model override |
-| `whisperx_interpolate_method` | `"nearest"` | Missing-character timing policy (`nearest`, `linear`, `ignore`) |
+| `whisperx_interpolate_method` | `"linear"` | Missing-character timing policy (`nearest`, `linear`, `ignore`) |
 | `whisperx_chunk_pause_ms` | `1000` | Split lyric/audio chunks at pauses strictly longer than this |
-| `whisperx_align_runs` | `3` | Positive odd number of WhisperX exact-timing passes |
-| `transcribe_runs` | `3` | Demucs + faster-whisper passes consolidated before exact alignment |
+| `whisperx_align_runs` | `5` | Positive odd number of WhisperX exact-timing passes |
+| `transcribe_runs` | `7` | Demucs + faster-whisper passes consolidated before exact alignment |
 | `demucs_model` | `"htdemucs"` | Demucs model name |
 | `sample_rate` | `44100` | Audio sample rate |
 | `pitch_min_hz` | `65.41` | Pitch floor (C2) |
 | `pitch_max_hz` | `1046.5` | Pitch ceiling (C6) |
 | `crepe_hop_ms` | `10` | torchcrepe hop length |
+| `band_energy_min_hz` | `60.0` | Lower bound of the band used for the per-frame amplitude proxy |
+| `band_energy_max_hz` | `4000.0` | Upper bound of the amplitude band (harmonics/formants) |
 | `pause_min_silence_ms` | `400` | Minimum silence for pause detection |
 | `pause_threshold_pct` | `5` | RMS energy threshold (% of 95th percentile) |
 | `gap_lead_in_ms` | `500` | Milliseconds before first note for `#GAP` |
@@ -154,6 +180,7 @@ Edit `cli/config.jsonc` (supports `//` and `/* */` comments):
 | `note_pitch_tolerance` | `1` | Max semitone drift kept within a single note |
 | `note_min_duration_ms` | `60` | Min duration (ms) for a pitch-change segment |
 | `note_frame_step_ms` | `10` | Fallback frame spacing (ms) for note end times |
+| `note_segment_plots` | `false` | Write matplotlib diagnostic plots to `tmp/note_segments_plots/` (slow; debug only) |
 | `ffmpeg_audio_bitrate` | `"128k"` | Output MP3 bitrate |
 | `output_dir` | `"./output"` | Output directory |
 | `temp_dir` | `"./tmp"` | Intermediate files directory |

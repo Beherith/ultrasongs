@@ -20,6 +20,9 @@ dependencies = [
     "pyphen>=0.15.0",
 ]
 
+[project.optional-dependencies]
+web = ["dash>=2.17"]
+
 [project.scripts]
 ultrasongs = "cli.__main__:main"
 

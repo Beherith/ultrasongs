@@ -80,20 +80,14 @@ class Config:
         return Path(self.temp_dir).resolve()
 
 
-def load_config(config_path: str | None = None) -> Config:
-    """Load configuration from a JSONC file, falling back to defaults."""
-    if config_path is None:
-        # Default: look next to this module
-        default_path = Path(__file__).parent / "config.jsonc"
-    else:
-        default_path = Path(config_path)
+def load_jsonc(path: Path) -> dict[str, Any]:
+    """Load a JSONC file into a dict."""
+    text = Path(path).read_text(encoding="utf-8")
+    return json.loads(_strip_jsonc(text))
 
-    if not default_path.exists():
-        return Config()
 
-    text = default_path.read_text(encoding="utf-8")
-    data: dict[str, Any] = json.loads(_strip_jsonc(text))
-
+def config_from_dict(data: dict[str, Any], source_path: Path | None = None) -> Config:
+    """Build a Config from a plain dict, falling back to defaults for invalid values."""
     # Map JSONC keys to dataclass fields
     field_map = {
         "device": str,
@@ -142,7 +136,7 @@ def load_config(config_path: str | None = None) -> Config:
         "bpm_use_accompaniment": bool,
     }
 
-    kwargs: dict[str, Any] = {"_config_path": default_path}
+    kwargs: dict[str, Any] = {"_config_path": source_path}
     for key, typ in field_map.items():
         if key in data:
             try:
@@ -183,3 +177,18 @@ def load_config(config_path: str | None = None) -> Config:
         kwargs.pop("whisperx_align_runs", None)
 
     return Config(**kwargs)
+
+
+def load_config(config_path: str | None = None) -> Config:
+    """Load configuration from a JSONC file, falling back to defaults."""
+    if config_path is None:
+        # Default: look next to this module
+        default_path = Path(__file__).parent / "config.jsonc"
+    else:
+        default_path = Path(config_path)
+
+    if not default_path.exists():
+        return Config()
+
+    data: dict[str, Any] = load_jsonc(default_path)
+    return config_from_dict(data, default_path)
