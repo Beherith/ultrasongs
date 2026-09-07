@@ -59,7 +59,7 @@ class TestPackageOutputZip:
             txt_content="#TITLE: T\n",
             mp3_path=mp3,
             output_dir=out,
-            title="T",
+            name="T",
         )
         with zipfile.ZipFile(out / "T.zip") as zf:
             names = set(zf.namelist())
@@ -78,7 +78,7 @@ class TestPackageOutputZip:
             txt_content="#TITLE: T\n",
             mp3_path=mp3,
             output_dir=out,
-            title="T",
+            name="T",
             extra_files=[transcribe, pitch],
         )
         with zipfile.ZipFile(out / "T.zip") as zf:
@@ -100,7 +100,7 @@ class TestPackageOutputZip:
             txt_content="#TITLE: T\n",
             mp3_path=mp3,
             output_dir=out,
-            title="T",
+            name="T",
             video_path=video,
             vocals_path=vocals,
             accompaniment_path=acc,
@@ -109,7 +109,7 @@ class TestPackageOutputZip:
         with zipfile.ZipFile(out / "T.zip") as zf:
             names = set(zf.namelist())
         assert names == {
-            "T.txt", "T.mp3", "song.mp4", "vocals.mp3", "accompaniment.mp3",
+            "T.txt", "T.mp3", "T.mp4", "T_vocals.mp3", "T_accompaniment.mp3",
             "intermediates/align_debug.json",
         }
 
@@ -120,7 +120,7 @@ class TestPackageOutputZip:
             txt_content="#TITLE: T\n",
             mp3_path=mp3,
             output_dir=out,
-            title="T",
+            name="T",
             extra_files=[tmp_path / "ghost.json"],
         )
         with zipfile.ZipFile(out / "T.zip") as zf:

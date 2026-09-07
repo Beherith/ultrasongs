@@ -158,7 +158,7 @@ Converts aligned syllables to Ultrastar `.txt`:
 
 ### Stage 6 — Package
 
-Writes `.txt`, copies MP3/video/stems, creates ZIP bundle in `output/`. The ZIP also bundles the run's intermediate files under `intermediates/` unless `--no-intermediates` is given.
+Writes everything into a per-song `output/<artist> - <title>/` folder. The `.txt`, MP3, video, stems, note editor, preview, and ZIP are all named after the sanitized `<artist> - <title>` base name. The ZIP also bundles the run's intermediate files under `intermediates/` unless `--no-intermediates` is given.
 
 ### Stage 7 — Preview
 
@@ -176,17 +176,20 @@ Generates HTML with SVG pitch visualization, beat grid, and confidence-colored d
   whisperx_pitch.json           ← aligned words and pitch data for preview
 
 ./output/
-  {title}.txt                   ← Ultrastar song file
-  {title}.mp3                   ← source audio
-  {title}.zip                   ← complete bundle (incl. intermediates/ unless --no-intermediates)
-  vocals.mp3                    ← vocals stem (optional)
-  accompaniment.mp3             ← instrumental stem (optional)
+  <artist> - <title>/           ← per-song folder (sanitized)
+    <artist> - <title>.txt      ← Ultrastar song file
+    <artist> - <title>.mp3      ← source audio
+    <artist> - <title>.zip      ← complete bundle (incl. intermediates/ unless --no-intermediates)
+    <artist> - <title>.html     ← HTML preview
+    <artist> - <title>_editor.html  ← self-contained note editor
+    <artist> - <title>_vocals.mp3        ← vocals stem (optional)
+    <artist> - <title>_accompaniment.mp3 ← instrumental stem (optional)
 
 ./web_jobs/                     ← web UI job dirs (one per submitted song)
   <job_id>/job.json             ← manifest (id, title, status, created_at)
   <job_id>/upload/original.*    ← uploaded audio/video
   <job_id>/tmp/                 ← per-job intermediate files
-  <job_id>/output/              ← same package output as the CLI
+  <job_id>/output/              ← same package output as the CLI (per-song subfolder)
 ```
 
 ## Ultrastar .txt format

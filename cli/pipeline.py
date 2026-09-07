@@ -37,6 +37,7 @@ class ProcessResult:
     txt_path: Path | None = None
     zip_path: Path | None = None
     html_path: Path | None = None
+    editor_path: Path | None = None
     output_dir: Path | None = None
     temp_dir: Path | None = None
 
@@ -77,6 +78,18 @@ def sanitize_filename(title: str) -> str:
     return cleaned or "untitled"
 
 
+def sanitize_output_name(artist: str, title: str) -> str:
+    """Sanitized ``<artist> - <title>`` base name for the output folder and files.
+
+    Missing artist or title are dropped; if both are missing, falls back to
+    ``untitled``.
+    """
+    parts = [p for p in ((artist or "").strip(), (title or "").strip()) if p]
+    if not parts:
+        return "untitled"
+    return sanitize_filename(" - ".join(parts))
+
+
 def run_process(req: ProcessRequest) -> ProcessResult:
     """Run the full or partial pipeline. Failures are returned, not raised."""
     config = req.config
@@ -96,6 +109,7 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
     from cli.generate import generate_ultrastar
     from cli.package import collect_intermediates, package_output
     from cli.html_preview import generate_preview
+    from cli.editor import generate_editor
 
     title = req.title
     artist = req.artist
@@ -179,7 +193,7 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
     # Stage: generate
     if stage in ("generate", "all"):
         logger.info("Step 5/5: Generating Ultrastar file…")
-        safe_title = sanitize_filename(title)
+        safe_name = sanitize_output_name(artist, title)
         txt_content = generate_ultrastar(
             aligned_syllables=aligned,
             bpm=bpm_result.bpm,
@@ -187,13 +201,29 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
             gap_ms=config.gap_lead_in_ms,
             title=title,
             artist=artist,
-            mp3_filename=f"{safe_title}.mp3",
-            video_filename=video_path.name if video_path else None,
+            mp3_filename=f"{safe_name}.mp3",
+            video_filename=f"{safe_name}{video_path.suffix.lower()}" if video_path else None,
             config=config,
         )
         logger.info("Step 5/5: Ultrastar file generated")
 
-        output_dir = Path(req.output_dir)
+        # All outputs of this run go into a per-song folder.
+        run_dir = Path(req.output_dir) / safe_name
+        run_dir.mkdir(parents=True, exist_ok=True)
+        txt_path = run_dir / f"{safe_name}.txt"
+        txt_path.write_text(txt_content, encoding="utf-8")
+
+        # The note editor is written before packaging so the ZIP includes it.
+        pitch_json = config.temp_path / "whisperx_pitch.json"
+        editor_path = run_dir / f"{safe_name}_editor.html"
+        generate_editor(
+            txt_path,
+            output_html=editor_path,
+            pitch_json_path=pitch_json if pitch_json.exists() else None,
+            vocals_hint=f"{safe_name}_vocals.mp3" if Path(result.vocals_path).exists() else None,
+        )
+        logger.info(f"Note editor written to {editor_path}")
+
         extra_files = (
             collect_intermediates(config.temp_path, since_ts=run_started)
             if req.include_intermediates
@@ -202,18 +232,16 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
         package_output(
             txt_content=txt_content,
             mp3_path=audio_out,
-            output_dir=output_dir,
-            title=safe_title,
+            output_dir=run_dir,
+            name=safe_name,
             video_path=video_path,
             vocals_path=Path(result.vocals_path),
             accompaniment_path=Path(result.accompaniment_path),
             extra_files=extra_files,
         )
-        logger.info(f"Output packaged to {output_dir}")
+        logger.info(f"Output packaged to {run_dir}")
 
-        txt_path = output_dir / f"{safe_title}.txt"
-        html_path = output_dir / f"{safe_title}.html"
-        pitch_json = config.temp_path / "whisperx_pitch.json"
+        html_path = run_dir / f"{safe_name}.html"
         if pitch_json.exists():
             generate_preview(txt_path, output_html=html_path, pitch_json_path=pitch_json)
         else:
@@ -223,14 +251,15 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
         return ProcessResult(
             ok=True,
             txt_path=txt_path,
-            zip_path=output_dir / f"{safe_title}.zip",
+            zip_path=run_dir / f"{safe_name}.zip",
             html_path=html_path,
-            output_dir=output_dir,
+            editor_path=editor_path,
+            output_dir=run_dir,
             temp_dir=config.temp_path,
         )
 
     return ProcessResult(
         ok=True,
-        output_dir=output_dir if stage in ("generate", "all") else Path(req.output_dir),
+        output_dir=Path(req.output_dir),
         temp_dir=config.temp_path,
     )

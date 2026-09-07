@@ -213,7 +213,8 @@ class TestSnapshotShape:
             job = manager.submit(_make_request(tmp_path), b"x", "song.mp3")
             snap = manager.snapshot(job.id)
             for key in ("id", "title", "status", "position", "logs_tail", "error",
-                        "done", "files", "zip_name", "html_name", "created_at", "elapsed_s"):
+                        "done", "files", "run_dir", "zip_name", "html_name",
+                        "editor_name", "created_at", "elapsed_s"):
                 assert key in snap, key
             assert snap["done"] is False
             assert manager.snapshot("nope") is None

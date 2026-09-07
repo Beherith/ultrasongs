@@ -75,9 +75,9 @@ Diff tolerances (`cli/diff.py`): BPM ±2, GAP exact match, singing-note count ex
 
 `process --lyrics` also accepts an Ultrastar `.txt` file: if the first non-empty line is a `#` header, plain lyrics are automatically extracted from it (`extract_lyrics_from_ultrastar`) and the pipeline runs on those. `--title`, `--artist`, and `--mp3` then fall back to the file's `#TITLE`, `#ARTIST`, and `#MP3` tags (the `#MP3` path is resolved relative to the .txt file's directory) when not given on the command line. `#BPM` and `#GAP` are ignored.
 
-`--mp3` accepts video files (`.mp4`, `.mkv`, `.webm`, `.mov`, `.avi`) as well as audio: the extract stage pulls the audio out with FFmpeg, and the original video is then treated like `--video` — copied into the output/ZIP and referenced by a `#VIDEO` tag (an explicit `--video` always wins). The package output always contains the extracted original MP3, the first-pass htdemucs `vocals.mp3` and `accompaniment.mp3`, and the original video when the input was one.
+`--mp3` accepts video files (`.mp4`, `.mkv`, `.webm`, `.mov`, `.avi`) as well as audio: the extract stage pulls the audio out with FFmpeg, and the original video is then treated like `--video` — copied into the output/ZIP and referenced by a `#VIDEO` tag (an explicit `--video` always wins). The package output always contains the extracted original MP3, the first-pass htdemucs vocals and accompaniment stems, and the original video when the input was one.
 
-Output names are sanitized (`cli/pipeline.sanitize_filename`) so titles are safe on disk: the ZIP, `.txt`, `.mp3`, and `.html` all use the sanitized title. `--no-intermediates` (CLI) keeps the ZIP to the package output only; by default the ZIP also bundles the job's `tmp/` artifacts under `intermediates/` (`cli/package.collect_intermediates`).
+Each processing run writes into its own per-song folder `<output_dir>/<artist> - <title>/`, and **all** output files use the sanitized `<artist> - <title>` base name (`cli/pipeline.sanitize_output_name`, built on `sanitize_filename`): `.txt`, `.mp3`, video (same extension), `.zip`, `.html` (preview), `_editor.html`, `_vocals.mp3`, `_accompaniment.mp3`. The generated `.txt`'s `#MP3`/`#VIDEO` tags and the editor's audio hint reference these names. `--no-intermediates` (CLI) keeps the ZIP to the package output only; by default the ZIP also bundles the job's `tmp/` artifacts under `intermediates/` (`cli/package.collect_intermediates`).
 
 ## Note Editor (`edit`)
 
@@ -95,7 +95,7 @@ Output names are sanitized (`cli/pipeline.sanitize_filename`) so titles are safe
 
 - **Auth**: password from the `ULTRASONGS_WEB_PASSWORD` environment variable (constant-time compare, Flask session cookie). No TLS is provided — bind to `127.0.0.1` (default) or put a reverse proxy in front. `--no-auth` disables login but is rejected unless the host is `127.0.0.1`/`localhost`. Web server settings (host, port, `web_dir`, retention, upload cap, poll interval) live in `cli/web_config.jsonc` (`--web-config` to override).
 - **Queue**: one job at a time, FIFO (`cli/web/jobs.py`). Uploads are staged, validated (extension + size cap), then moved into the job dir. Each job gets `web_jobs/<id>/{upload,tmp,output}` plus a `job.json` manifest; jobs older than `job_retention_days` are pruned at startup and before each submission.
-- **UI**: one form (title/artist/lyrics + audio/video upload) plus an auto-generated settings accordion with one control per `config.jsonc` key (44), driven by `cli/web/settings_meta.py`. Jobs show live status, queue position, log tail, and download links (ZIP, HTML preview, stems) served from `/download/<job_id>/<file>`.
+- **UI**: one form (title/artist/lyrics + audio/video upload) plus an auto-generated settings accordion with one control per `config.jsonc` key (44), driven by `cli/web/settings_meta.py`. Jobs show live status, queue position, log tail, and download links (ZIP, note editor, HTML preview, stems) served from `/download/<job_id>/<file>`.
 - **Per-job config**: form values override the base `Config` (revalidated via `config_from_dict`); the job's `temp_dir`/`output_dir` are forced to the job dir, and the ZIP includes intermediates.
 
 ## Code Conventions
@@ -112,7 +112,7 @@ Output names are sanitized (`cli/pipeline.sanitize_filename`) so titles are safe
 | File | Purpose |
 |---|---|
 | `cli/__main__.py` | CLI entry point, argparse parser, thin adapters over `cli.pipeline` (5 logged steps) |
-| `cli/pipeline.py` | `ProcessRequest`/`ProcessResult` dataclasses, `run_process()` shared by CLI and web, `prepare_lyrics_input()`, `sanitize_filename()` |
+| `cli/pipeline.py` | `ProcessRequest`/`ProcessResult` dataclasses, `run_process()` shared by CLI and web, `prepare_lyrics_input()`, `sanitize_filename()`, `sanitize_output_name()` |
 | `cli/config.py` | JSONC loading/stripping (`load_jsonc`), `config_from_dict()`, frozen `Config` dataclass, validation |
 | `cli/pipeline_types.py` | Shared dataclasses: `PitchFrame`, `CharacterTimestamp`, `WordTimestamp`, `Pause`, `AlignedSyllable`, `BpmResult`, `TranscribeResult`, `UltrastarNote`, `UltrastarMeta` (with `to_dict`/`from_dict` for resume) |
 | `cli/ffmpeg_extract.py` | FFmpeg: video/audio → mono MP3 (128 kbps) in `tmp/` |
@@ -159,7 +159,7 @@ The `process` subcommand runs these stages (`--stage` cuts off after the given s
 2. **Transcribe** (`cli/transcribe.py`, 6 internal steps): load audio → N× (Demucs + ASR + consolidation) → pause detection → hybrid chunking + WhisperX exact timing (default backend) → save stems → BPM detect → torchcrepe pitch + band energy → `TranscribeResult`. Persisted as `tmp/{stem}_transcribe.json` for `--resume`
 3. **Align** (`cli/bpm_detect.py` + `cli/align.py`): BPM is reused from the `TranscribeResult` if present (it normally is), else re-detected on the accompaniment stem or full mix. Then Smith-Waterman alignment of lyrics to exact word/character timestamps, syllabification, and per-syllable note segmentation
 4. **Generate** (`cli/generate.py`): aligned syllables + BPM → Ultrastar `.txt`, beat grid anchored to the detected first beat (`#GAP` = `first_beat_ms`, fallback `first note - gap_lead_in_ms`), exported BPM scaled by `beat_resolution_multiplier`
-5. **Package** (`cli/package.py`): write `.txt`, copy MP3/video/stems, create ZIP in `output/`
+5. **Package** (`cli/package.py`): write `.txt`, copy MP3/video/stems, create ZIP in the per-song output folder. All files are named after the sanitized `<artist> - <title>` base name (see `sanitize_output_name`). The note editor HTML (`{artist} - {title}_editor.html`, generated via `cli/editor.generate_editor` from the fresh `.txt` with the `whisperx_pitch.json` overlay and the `_vocals.mp3` audio hint) is written *before* packaging, so it is always part of the ZIP.
 6. **Preview** (`cli/html_preview.py`): HTML with SVG pitch visualization, automatically generated at the end of the generate stage, overlaying `tmp/whisperx_pitch.json` when available (written by alignment when `debug_alignment` is on)
 
 ## Configuration
@@ -208,7 +208,7 @@ The `process` subcommand runs these stages (`--stage` cuts off after the given s
 | `note_frame_step_ms` | `10` | Fallback frame spacing (ms) for note end times |
 | `note_segment_plots` | `false` | Write matplotlib diagnostic plots to `tmp/note_segments_plots/` (slow; debug only) |
 | `ffmpeg_audio_bitrate` | `"128k"` | Output MP3 bitrate |
-| `output_dir` | `"./output"` | Output directory |
+| `output_dir` | `"./output"` | Base output directory (a per-song `<artist> - <title>/` folder is created inside it) |
 | `temp_dir` | `"./tmp"` | Intermediate files directory |
 | `debug_alignment` | `true` | Write alignment debug JSON/backtrace/pitch HTML to temp dir |
 | `bpm_use_accompaniment` | `true` | Use Demucs instrumental stem for BPM detection |
@@ -229,15 +229,17 @@ Temp files in `./tmp/`, generated output in `./output/` (both gitignored):
   note_segments.txt, note_segments_plots/        ← note-segmentation diagnostics
 
 ./output/
-  {title}.txt, {title}.mp3, {title}.zip, {title}.html
-  vocals.mp3, accompaniment.mp3  ← optional stems
+  <artist> - <title>/             ← per-song folder (sanitized)
+    <artist> - <title>.txt, .mp3, .zip, .html, _editor.html
+    <artist> - <title>.<video_ext>            ← video (if input was one)
+    <artist> - <title>_vocals.mp3, _accompaniment.mp3  ← optional stems
 
 ./web_jobs/                       ← web UI jobs (gitignored)
   staging/                        ← in-flight uploads, deleted after submit
   <job_id>/job.json               ← manifest (id, title, status, created_at)
   <job_id>/upload/original.*      ← the uploaded audio/video
   <job_id>/tmp/                   ← per-job intermediate files
-  <job_id>/output/                ← same package output as the CLI
+  <job_id>/output/<artist> - <title>/   ← same package output as the CLI
 ```
 
 ## Testing
@@ -258,7 +260,7 @@ pytest cli/tests/
 | `cli/tests/test_generate.py` | Basic generation, line breaks, overlap prevention, video filename |
 | `cli/tests/test_hybrid_transcribe.py` | Approximate lyric alignment, chunk splitting at pauses, boundaries, `slice_audio()`, word offsetting |
 | `cli/tests/test_package_intermediates.py` | `collect_intermediates()` selection, ZIP `intermediates/` bundling, `--no-intermediates` |
-| `cli/tests/test_pipeline.py` | `run_process()` orchestration, `prepare_lyrics_input()`, `sanitize_filename()`, `--stage`/`--resume` |
+| `cli/tests/test_pipeline.py` | `run_process()` orchestration, `prepare_lyrics_input()`, `sanitize_filename()`, `sanitize_output_name()`, `--stage`/`--resume` |
 | `cli/tests/test_pipeline_types.py` | `TranscribeResult`/`WordTimestamp` round-trips, character alignments, legacy pitch-frame recovery |
 | `cli/tests/test_syllabify.py` | `split_word()`, `syllabify_line()`, multi-language, unsupported |
 | `cli/tests/test_transcribe_alignment.py` | CREPE/band-energy frame-count parity, exact frame alignment (incl. real torchcrepe) |

@@ -11,6 +11,7 @@ from cli.pipeline import (
     prepare_lyrics_input,
     run_process,
     sanitize_filename,
+    sanitize_output_name,
 )
 from cli.pipeline_types import BpmResult, TranscribeResult, WordTimestamp
 
@@ -85,6 +86,27 @@ class TestSanitizeFilename:
         assert sanitize_filename("Song...") == "Song"
 
 
+class TestSanitizeOutputName:
+    def test_artist_and_title(self):
+        assert sanitize_output_name("Tester", "Test Song") == "Tester - Test Song"
+
+    def test_empty_artist_title_only(self):
+        assert sanitize_output_name("", "Test Song") == "Test Song"
+
+    def test_empty_title_artist_only(self):
+        assert sanitize_output_name("Tester", "  ") == "Tester"
+
+    def test_both_empty_falls_back(self):
+        assert sanitize_output_name("", "") == "untitled"
+
+    def test_illegal_chars_sanitized(self):
+        assert sanitize_output_name("A/B", "C?D") == "A B - C D"
+
+    def test_long_name_capped(self):
+        out = sanitize_output_name("x" * 100, "y" * 100)
+        assert len(out) <= 80
+
+
 def _make_transcribe_result(tmp: Path) -> TranscribeResult:
     return TranscribeResult(
         words=[WordTimestamp(word="hello", start=1.0, end=2.0, midi=60)],
@@ -154,6 +176,14 @@ class TestRunProcess:
             (kwargs["output_dir"] / "Test Song.zip").write_bytes(b"zip")
             return kwargs["output_dir"]
 
+        def fake_editor(txt_path, output_html=None, pitch_json_path=None,
+                        vocals_hint=None, embed_audio=False):
+            calls.order.append("editor")
+            calls.kwargs["editor"] = {"pitch_json_path": pitch_json_path, "vocals_hint": vocals_hint}
+            assert output_html is not None
+            output_html.write_text("<html></html>", encoding="utf-8")
+            return output_html
+
         def fake_preview(txt_path, output_html=None, pitch_json_path=None):
             calls.order.append("preview")
             calls.kwargs["preview"] = {"pitch_json_path": pitch_json_path}
@@ -161,6 +191,7 @@ class TestRunProcess:
             output_html.write_text("<html></html>", encoding="utf-8")
             return output_html
 
+        monkeypatch.setattr("cli.editor.generate_editor", fake_editor)
         monkeypatch.setattr("cli.ffmpeg_extract.extract_audio", fake_extract)
         monkeypatch.setattr("cli.ffmpeg_extract.is_video_path", lambda p: False)
         monkeypatch.setattr("cli.transcribe.transcribe", fake_transcribe)
@@ -176,14 +207,50 @@ class TestRunProcess:
         req = _make_request(tmp_path)
         result = run_process(req)
         assert result.ok
-        assert calls.order == ["extract", "transcribe", "bpm", "align", "generate", "package", "preview"]
-        assert result.txt_path == tmp_path / "out" / "Test Song.txt"
-        assert result.zip_path == tmp_path / "out" / "Test Song.zip"
-        assert result.html_path == tmp_path / "out" / "Test Song.html"
+        assert calls.order == ["extract", "transcribe", "bpm", "align", "generate", "editor", "package", "preview"]
+        safe = "Tester - Test Song"
+        run_dir = tmp_path / "out" / safe
+        assert result.output_dir == run_dir
+        assert result.txt_path == run_dir / f"{safe}.txt"
+        assert result.zip_path == run_dir / f"{safe}.zip"
+        assert result.html_path == run_dir / f"{safe}.html"
+        assert result.editor_path == run_dir / f"{safe}_editor.html"
         assert result.temp_dir == tmp_path / "tmp"
         # BPM from the transcribe result (None) triggered detection
         assert calls.kwargs["generate"]["bpm"] == 120.0
-        assert calls.kwargs["generate"]["mp3_filename"] == "Test Song.mp3"
+        assert calls.kwargs["generate"]["mp3_filename"] == f"{safe}.mp3"
+
+    def test_editor_html_written_and_zipped(self, monkeypatch, tmp_path):
+        import zipfile
+        from cli.package import package_output
+
+        calls = _Calls()
+        self._patch_stages(monkeypatch, tmp_path, calls)
+        # A parseable Ultrastar txt so the real editor generator can run
+        monkeypatch.setattr("cli.generate.generate_ultrastar", lambda **kw: ULTRASTAR_TEXT)
+        monkeypatch.setattr("cli.package.package_output", package_output)
+        # Stems present so the package copies (and renames) them
+        tmp = tmp_path / "tmp"
+        tmp.mkdir()
+        (tmp / "song_vocals.mp3").write_bytes(b"v")
+        (tmp / "song_accompaniment.mp3").write_bytes(b"a")
+        result = run_process(_make_request(tmp_path))
+        assert result.ok
+        safe = "Tester - Test Song"
+        run_dir = tmp_path / "out" / safe
+        editor = run_dir / f"{safe}_editor.html"
+        assert editor.is_file()
+        assert result.editor_path == editor
+        assert calls.kwargs["editor"]["vocals_hint"] == f"{safe}_vocals.mp3"
+        with zipfile.ZipFile(run_dir / f"{safe}.zip") as zf:
+            names = set(zf.namelist())
+        assert f"{safe}_editor.html" in names
+        assert f"{safe}.txt" in names
+        assert f"{safe}.mp3" in names
+        assert f"{safe}_vocals.mp3" in names
+        assert f"{safe}_accompaniment.mp3" in names
+        assert "vocals.mp3" not in names
+        assert "accompaniment.mp3" not in names
 
     def test_title_sanitized_for_filenames(self, monkeypatch, tmp_path):
         calls = _Calls()
@@ -191,11 +258,12 @@ class TestRunProcess:
         req = _make_request(tmp_path, title="A/B: C?")
         result = run_process(req)
         assert result.ok
-        safe = calls.kwargs["generate"]["mp3_filename"]
-        assert "/" not in safe and ":" not in safe and "?" not in safe
+        safe = "Tester - A B C"
+        assert calls.kwargs["generate"]["mp3_filename"] == f"{safe}.mp3"
         # #TITLE tag keeps the original title
         assert calls.kwargs["generate"]["title"] == "A/B: C?"
-        assert result.txt_path.name == safe.replace(".mp3", ".txt")
+        assert result.output_dir == tmp_path / "out" / safe
+        assert result.txt_path.name == f"{safe}.txt"
 
     def test_resume_skips_extract_and_transcribe(self, monkeypatch, tmp_path):
         calls = _Calls()
@@ -208,7 +276,7 @@ class TestRunProcess:
         assert result.ok
         assert "extract" not in calls.order
         assert "transcribe" not in calls.order
-        assert calls.order == ["bpm", "align", "generate", "package", "preview"]
+        assert calls.order == ["bpm", "align", "generate", "editor", "package", "preview"]
 
     def test_missing_resume_file(self, tmp_path):
         req = _make_request(tmp_path, resume_path=tmp_path / "nope.json")
@@ -237,7 +305,8 @@ class TestRunProcess:
         req = _make_request(tmp_path, input_name="song.mp4")
         result = run_process(req)
         assert result.ok
-        assert calls.kwargs["generate"]["video_filename"] == "song.mp4"
+        # The video is renamed to the artist-title base name (same extension)
+        assert calls.kwargs["generate"]["video_filename"] == "Tester - Test Song.mp4"
         assert calls.kwargs["package"]["video_path"] == tmp_path / "song.mp4"
 
     def test_explicit_video_wins(self, monkeypatch, tmp_path):
@@ -247,7 +316,8 @@ class TestRunProcess:
         video.write_bytes(b"v")
         req = _make_request(tmp_path, video_path=video)
         run_process(req)
-        assert calls.kwargs["generate"]["video_filename"] == "other.mov"
+        assert calls.kwargs["generate"]["video_filename"] == "Tester - Test Song.mov"
+        assert calls.kwargs["package"]["video_path"] == video
 
     def test_stage_extract_only(self, monkeypatch, tmp_path):
         calls = _Calls()

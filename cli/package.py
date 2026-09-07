@@ -43,7 +43,7 @@ def package_output(
     txt_content: str,
     mp3_path: Path,
     output_dir: Path,
-    title: str,
+    name: str,
     video_path: Path | None = None,
     vocals_path: Path | None = None,
     accompaniment_path: Path | None = None,
@@ -52,20 +52,20 @@ def package_output(
 ) -> Path:
     """Package generated files into an output directory.
 
-    Creates:
+    Creates (all named after ``name``, typically ``<artist> - <title>``):
         output_dir/
-            <title>.txt
-            <title>.mp3     (copy of mp3_path)
-            <title>.mp4     (optional, from video_path)
-        vocals.mp3      (optional)
-        accompaniment.mp3  (optional)
-        <title>.zip     (ZIP of all above plus extra_files under intermediates/)
+            <name>.txt
+            <name>.mp3     (copy of mp3_path)
+            <name><ext>    (optional video, from video_path)
+            <name>_vocals.mp3      (optional)
+            <name>_accompaniment.mp3  (optional)
+            <name>.zip     (ZIP of all above plus extra_files under intermediates/)
 
     Args:
         txt_content: The Ultrastar .txt string.
         mp3_path: Path to the MP3 file.
         output_dir: Directory to write output.
-        title: Song title (used for filenames).
+        name: Output base name (used for all filenames).
         video_path: Optional video file.
         vocals_path: Optional vocals stem.
         accompaniment_path: Optional accompaniment stem.
@@ -78,31 +78,31 @@ def package_output(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    txt_path = output_dir / f"{title}.txt"
+    txt_path = output_dir / f"{name}.txt"
     txt_path.write_text(txt_content, encoding="utf-8")
     logger.info(f"Written: {txt_path}")
 
-    mp3_out = output_dir / f"{title}.mp3"
+    mp3_out = output_dir / f"{name}.mp3"
     shutil.copy2(mp3_path, mp3_out)
     logger.info(f"Copied: {mp3_out}")
 
     if video_path and video_path.exists():
-        video_out = output_dir / video_path.name
+        video_out = output_dir / f"{name}{video_path.suffix.lower()}"
         shutil.copy2(video_path, video_out)
         logger.info(f"Copied: {video_out}")
 
     if vocals_path and Path(vocals_path).exists():
-        vocals_out = output_dir / "vocals.mp3"
+        vocals_out = output_dir / f"{name}_vocals.mp3"
         shutil.copy2(vocals_path, vocals_out)
         logger.info(f"Copied: {vocals_out}")
 
     if accompaniment_path and Path(accompaniment_path).exists():
-        acc_out = output_dir / "accompaniment.mp3"
+        acc_out = output_dir / f"{name}_accompaniment.mp3"
         shutil.copy2(accompaniment_path, acc_out)
         logger.info(f"Copied: {acc_out}")
 
     # Create ZIP
-    zip_path = output_dir / f"{title}.zip"
+    zip_path = output_dir / f"{name}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in output_dir.iterdir():
             if f.suffix.lower() == ".zip":

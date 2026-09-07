@@ -10,6 +10,7 @@ import uuid
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 import dash
 from dash import dcc, html
@@ -17,7 +18,7 @@ from flask import abort, jsonify, send_file, request as flask_request
 
 from cli.config import Config, config_from_dict, load_jsonc
 from cli.logging_setup import get_logger
-from cli.pipeline import ProcessRequest, prepare_lyrics_input, sanitize_filename
+from cli.pipeline import ProcessRequest, prepare_lyrics_input
 from cli.web import auth, settings_meta
 from cli.web.jobs import ALLOWED_UPLOAD_EXTENSIONS, JobManager
 
@@ -535,27 +536,37 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
             banner_children = html.Div(snap["error"] or "Job failed", style=CSS["error"])
         result_children = None
         if snap["status"] == "succeeded":
+            def download_href(filename: str) -> str:
+                return f"/download/{snap['id']}/{quote(snap['run_dir'])}/{quote(filename)}"
+
             links = []
             if snap["zip_name"]:
                 links.append(html.A(
                     "Download ZIP",
-                    href=f"/download/{snap['id']}/{snap['zip_name']}",
+                    href=download_href(snap["zip_name"]),
                     style={"background": "#2563eb", "color": "white", "padding": "8px 16px",
                            "borderRadius": "6px", "textDecoration": "none",
                            "fontWeight": 600, "marginRight": "10px"}))
+            if snap["editor_name"]:
+                links.append(html.A(
+                    "Open editor",
+                    href=download_href(snap["editor_name"]),
+                    style={"background": "#3b4358", "color": "#e5e7eb", "padding": "8px 16px",
+                           "borderRadius": "6px", "textDecoration": "none",
+                           "marginRight": "10px"}))
             if snap["html_name"]:
                 links.append(html.A(
                     "Open preview",
-                    href=f"/download/{snap['id']}/{snap['html_name']}",
+                    href=download_href(snap["html_name"]),
                     style={"background": "#3b4358", "color": "#e5e7eb", "padding": "8px 16px",
                            "borderRadius": "6px", "textDecoration": "none",
                            "marginRight": "10px"}))
             for f in snap["files"]:
-                if f["name"] == snap["zip_name"] or f["name"] == snap["html_name"]:
+                if f["name"] in (snap["zip_name"], snap["html_name"], snap["editor_name"]):
                     continue
                 links.append(html.A(
                     f"{f['name']} ({f['size'] // 1024} KB)",
-                    href=f"/download/{snap['id']}/{f['name']}",
+                    href=download_href(f["name"]),
                     style={"display": "inline-block", "margin": "6px 10px 0 0",
                            "color": "#7dd3fc", "fontSize": "13px"}))
             result_children = html.Div([html.Div("Done!", style=CSS["ok"]),

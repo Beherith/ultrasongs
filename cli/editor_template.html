@@ -22,8 +22,11 @@
   .sep { width: 1px; height: 22px; background: #2a5a8a; margin: 0 2px; }
   .stage { padding: 14px 16px 4px; }
   .plotwrap { position: relative; width: 100%; }
-  #plot { width: 100%; height: auto; display: block; touch-action: none; }
-  #fft { position: absolute; left: 4.375%; top: 4.16667%; width: 93.75%; height: 86.66667%; opacity: 0.55; }
+  #plot { width: 100%; height: auto; display: block; touch-action: none; position: relative; z-index: 1; }
+  #fft { position: absolute; left: 4.375%; top: 4.16667%; width: 93.75%; height: 86.66667%; opacity: 0.55; z-index: 0; pointer-events: none; }
+  select#lineSel { background: #0f3460; color: #cde; border: 1px solid #2a5a8a; border-radius: 5px; padding: 5px 8px; font-size: 13px; max-width: 340px; }
+  .metro { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #9aa; }
+  input[type=range] { accent-color: #e94560; width: 110px; }
   .lyricline { font-size: 15px; padding: 8px 16px 2px; min-height: 26px; }
   .lyric-line { display: block; }
   .lyric-time { color: #e94560; font-family: ui-monospace, monospace; font-size: 12px; margin-right: 3px; }
@@ -49,8 +52,10 @@
 
   <div class="toolbar">
     <button id="prevBtn" title="Previous line (Left / PageUp)">&#9664; Prev</button>
+    <select id="lineSel" title="Jump to line"></select>
     <button id="nextBtn" title="Next line (Right / PageDown)">Next &#9654;</button>
     <button id="playBtn" class="primary" title="Play / stop line (Space)">&#9654; Play</button>
+    <span class="metro" title="Metronome volume">Metro <input type="range" id="metroVol" min="0" max="100" value="80"><span id="metroVolVal">80</span></span>
     <span class="sep"></span>
     <button id="splitBtn" title="Split selected (S)">Split</button>
     <button id="mergeBtn" title="Merge selected with next (M)">Merge</button>
@@ -98,9 +103,9 @@
   const W=1280, H=480, PAD_L=56, PAD_R=24, PAD_T=20, PAD_B=44;
   const PLOT_W=W-PAD_L-PAD_R, PLOT_H=H-PAD_T-PAD_B;
   const MARGIN_L_MS=200, MARGIN_R_MS=400, MIDI_MIN=24, MIDI_MAX=96;
-  const N_FFT=2048, HOP=512;
+  const N_FFT=2048, FFT_SIZE=8192, HOP=512;
   const BPM=D.bpm, GAP=D.gap, BEAT_MS=D.beatMs, PULSE_MS=D.pulseMs;
-  const MEGA=__MAGMA__;
+  const MEGA=[[0,0,4],[2,1,9],[3,3,18],[6,5,26],[10,8,34],[14,11,43],[19,13,52],[24,15,61],[29,17,71],[34,17,80],[41,17,90],[47,17,99],[54,16,107],[61,15,113],[68,15,118],[74,16,121],[82,19,124],[89,21,126],[95,24,127],[101,26,128],[107,29,129],[114,31,129],[120,34,129],[126,36,130],[132,38,129],[139,41,129],[145,43,129],[152,45,128],[158,47,127],[165,49,126],[171,51,124],[178,53,123],[186,56,120],[192,58,118],[199,61,115],[205,64,113],[211,67,110],[217,70,107],[223,74,104],[228,79,100],[233,84,98],[237,90,95],[241,96,93],[244,103,92],[246,110,92],[248,118,92],[250,125,94],[251,133,96],[252,142,100],[253,150,104],[254,157,108],[254,165,113],[254,172,118],[254,180,123],[254,187,129],[254,194,135],[254,202,141],[254,209,148],[254,216,154],[253,224,161],[253,231,169],[252,238,176],[252,246,184],[252,253,191]];
   const NOTE_NAMES=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 
   // ── state ────────────────────────────────────────────────────────────────
@@ -213,12 +218,6 @@
     const tRange=cur.t1-cur.t0, pRange=cur.hi-cur.lo;
     const bar_h=Math.max(PLOT_H/(pRange+1)*0.7,8);
     let s="";
-    // word-block shading
-    for(const w of ref.words){
-      const x1=tx(w.start_ms), x2=tx(w.end_ms);
-      if(x2<PAD_L||x1>PAD_L+PLOT_W) continue;
-      s+=`<rect x="${x1.toFixed(1)}" y="${PAD_T}" width="${Math.max(x2-x1,1).toFixed(1)}" height="${PLOT_H}" fill="#0a0a1a" opacity="0.3" rx="2"/>`;
-    }
     // beat grid
     const firstB=Math.max(0,Math.ceil((cur.t0-GAP)/PULSE_MS));
     const lastB=Math.floor((cur.t1-GAP)/PULSE_MS);
@@ -319,10 +318,24 @@
     document.getElementById("undoBtn").disabled=!undoStack.length;
   }
 
+  function updateLineSelect(){
+    const sel=document.getElementById("lineSel");
+    sel.innerHTML="";
+    for(let i=0;i<groups.length;i++){
+      const opt=document.createElement("option");
+      opt.value=String(i);
+      let label=verseTextLive(groups[i]).trim();
+      if(label.length>36) label=label.slice(0,36)+"…";
+      opt.textContent=(i+1)+(label?" — "+label:"");
+      sel.appendChild(opt);
+    }
+    sel.value=String(currentPage);
+  }
   function renderPage(){
     groups=computeGroups(notes);
     if(currentPage>=groups.length) currentPage=Math.max(0,groups.length-1);
     const pageNotes=groups[currentPage]||[];
+    updateLineSelect();
     if(!dragActive){
       const tw=noteWindow(pageNotes), mw=midiWindow(pageNotes);
       cur={t0:tw.t0,t1:tw.t1,lo:mw.lo,hi:mw.hi};
@@ -375,20 +388,21 @@
     else{ for(let i=0;i<segLen;i++){ let s=0; for(let c=0;c<ch;c++) s+=audio.buffer.getChannelData(c)[s0+i]; seg[i]=s/ch; } }
     const hann=new Float32Array(N_FFT);
     for(let i=0;i<N_FFT;i++) hann[i]=0.5-0.5*Math.cos(2*Math.PI*i/(N_FFT-1));
-    const binHz=sr/N_FFT;
+    const binHz=sr/FFT_SIZE;
     const binRange=[];
     for(let m=lo;m<=hi;m++){
       const fLo=440*Math.pow(2,(m-0.5-69)/12), fHi=440*Math.pow(2,(m+0.5-69)/12);
       binRange.push([Math.floor(fLo/binHz),Math.ceil(fHi/binHz)]);
     }
-    const re=new Float64Array(N_FFT), im=new Float64Array(N_FFT);
+    const re=new Float64Array(FFT_SIZE), im=new Float64Array(FFT_SIZE);
     const energies=new Float64Array(nRows*nFrames);
     let frame=0;
     for(let s=0;s+N_FFT<=segLen;s+=HOP){
       for(let k=0;k<N_FFT;k++){ re[k]=seg[s+k]*hann[k]; im[k]=0; }
+      for(let k=N_FFT;k<FFT_SIZE;k++){ re[k]=0; im[k]=0; }
       fft(re,im);
       for(let r=0;r<nRows;r++){
-        const b0=binRange[r][0], b1=Math.min(binRange[r][1],N_FFT/2);
+        const b0=binRange[r][0], b1=Math.min(binRange[r][1],FFT_SIZE/2);
         let e=0;
         for(let b=b0;b<=b1;b++) e+=Math.sqrt(re[b]*re[b]+im[b]*im[b]);
         energies[r*nFrames+frame]=e;
@@ -578,6 +592,7 @@
     if(!audio.ctx){
       audio.ctx=new (window.AudioContext||window.webkitAudioContext)();
       audio.master=audio.ctx.createGain(); audio.master.gain.value=0.9; audio.master.connect(audio.ctx.destination);
+      audio.metro=audio.ctx.createGain(); audio.metro.gain.value=metroGain(); audio.metro.connect(audio.master);
     }
     return audio.ctx;
   }
@@ -630,7 +645,7 @@
       const g=ctx.createGain();
       g.gain.setValueAtTime(down?0.22:0.14,t);
       g.gain.exponentialRampToValueAtTime(0.0001,t+0.025);
-      osc.connect(g); g.connect(audio.master);
+      osc.connect(g); g.connect(audio.metro);
       osc.start(t); osc.stop(t+0.03); play.sources.push(osc);
     }
     updateToolbar();
@@ -691,6 +706,13 @@
   }
 
   // ── events ───────────────────────────────────────────────────────────────
+  function metroGain(){ return (+document.getElementById("metroVol").value)/100; }
+  const metroVol=document.getElementById("metroVol");
+  metroVol.oninput=()=>{
+    document.getElementById("metroVolVal").textContent=metroVol.value;
+    if(audio.metro) audio.metro.gain.value=metroGain();
+  };
+  document.getElementById("lineSel").onchange=e=>gotoPage(+e.target.value);
   document.getElementById("prevBtn").onclick=()=>gotoPage(currentPage-1);
   document.getElementById("nextBtn").onclick=()=>gotoPage(currentPage+1);
   document.getElementById("playBtn").onclick=playLine;

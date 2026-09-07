@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from cli.logging_setup import get_logger
-from cli.pipeline import ProcessRequest, ProcessResult, sanitize_filename
+from cli.pipeline import ProcessRequest, ProcessResult, sanitize_output_name
 
 logger = get_logger("cli.web.jobs")
 
@@ -235,12 +235,15 @@ class JobManager:
         job = self.job(job_id)
         if job is None:
             return None
+        # The pipeline writes all outputs into a per-song subfolder.
+        safe = sanitize_output_name(
+            job.request.artist if job.request else "", job.title)
+        run_dir = job.output_dir / safe
         files: list[dict] = []
-        if job.output_dir.is_dir():
-            for f in sorted(job.output_dir.iterdir()):
+        if run_dir.is_dir():
+            for f in sorted(run_dir.iterdir()):
                 if f.is_file():
                     files.append({"name": f.name, "size": f.stat().st_size})
-        safe = sanitize_filename(job.title)
         return {
             "id": job.id,
             "title": job.title,
@@ -250,8 +253,11 @@ class JobManager:
             "error": job.error,
             "done": job.status in TERMINAL_STATUSES,
             "files": files,
-            "zip_name": f"{safe}.zip" if (job.output_dir / f"{safe}.zip").is_file() else None,
-            "html_name": f"{safe}.html" if (job.output_dir / f"{safe}.html").is_file() else None,
+            "run_dir": safe,
+            "zip_name": f"{safe}.zip" if (run_dir / f"{safe}.zip").is_file() else None,
+            "html_name": f"{safe}.html" if (run_dir / f"{safe}.html").is_file() else None,
+            "editor_name": (f"{safe}_editor.html"
+                            if (run_dir / f"{safe}_editor.html").is_file() else None),
             "created_at": job.created_at,
             "elapsed_s": time.time() - job.created_at,
         }

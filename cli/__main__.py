@@ -223,6 +223,7 @@ def _cmd_import(args: argparse.Namespace, config: "Config") -> int:  # type: ign
     """Import an existing Ultrastar .txt + MP3."""
     from cli.logging_setup import get_logger
     from cli.package import package_output
+    from cli.pipeline import sanitize_output_name
     from cli.pipeline_types import UltrastarMeta, UltrastarNote
     from cli.ultrastar import build_ultrastar_txt, parse_ultrastar_txt, read_text_fallback
 
@@ -233,12 +234,13 @@ def _cmd_import(args: argparse.Namespace, config: "Config") -> int:  # type: ign
     meta, notes = parse_ultrastar_txt(read_text_fallback(txt_path))
     txt_content = _rebuild_txt(meta, notes)
 
-    output_dir = Path(args.output) if args.output else config.output_path
+    name = sanitize_output_name(meta.artist, meta.title)
+    output_dir = (Path(args.output) if args.output else config.output_path) / name
     package_output(
         txt_content=txt_content,
         mp3_path=mp3_path,
         output_dir=output_dir,
-        title=meta.title,
+        name=name,
     )
     logger.info(f"Imported to {output_dir}")
     return 0
