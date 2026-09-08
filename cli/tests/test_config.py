@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from cli.config import Config, load_config
+from cli.config import Config, load_config, parse_config_overrides
 
 
 class TestConfigDefaults:
@@ -134,3 +134,67 @@ class TestLoadConfig:
         assert cfg.whisperx_align_runs == 3
         assert cfg.transcription_backend == "faster-whisper"
         assert cfg.faster_whisper_compute_type == "auto"
+
+
+class TestParseConfigOverrides:
+    def test_key_value_pairs(self):
+        assert parse_config_overrides("transcribe_runs=5,whisper_model=small") == {
+            "transcribe_runs": 5,
+            "whisper_model": "small",
+        }
+
+    def test_pair_value_types(self):
+        result = parse_config_overrides("flag=true,count=3,ratio=0.5,bitrate=128k")
+        assert result == {"flag": True, "count": 3, "ratio": 0.5, "bitrate": "128k"}
+
+    def test_single_pair(self):
+        assert parse_config_overrides("debug_alignment=true") == {"debug_alignment": True}
+
+    def test_json_object(self):
+        result = parse_config_overrides('{"transcribe_runs": 5, "whisper_model": "small"}')
+        assert result == {"transcribe_runs": 5, "whisper_model": "small"}
+
+    def test_empty_string(self):
+        assert parse_config_overrides("") == {}
+        assert parse_config_overrides("   ") == {}
+
+    def test_invalid_pair_raises(self):
+        with pytest.raises(ValueError):
+            parse_config_overrides("no_equals_sign")
+
+    def test_empty_key_raises(self):
+        with pytest.raises(ValueError):
+            parse_config_overrides("=5")
+
+    def test_non_object_json_raises(self):
+        with pytest.raises(ValueError):
+            parse_config_overrides("[1, 2, 3]")
+
+    def test_invalid_json_raises(self):
+        with pytest.raises(ValueError):
+            parse_config_overrides('{"transcribe_runs": ')
+
+
+class TestLoadConfigOverrides:
+    def test_override_wins_over_file(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonc", delete=False) as f:
+            json.dump({"whisper_model": "medium", "transcribe_runs": 7}, f)
+            f.flush()
+            cfg = load_config(f.name, {"whisper_model": "small"})
+            assert cfg.whisper_model == "small"
+            assert cfg.transcribe_runs == 7  # file value preserved
+
+    def test_override_without_file(self):
+        cfg = load_config("/nonexistent/path/config.jsonc", {"whisper_model": "tiny"})
+        assert cfg.whisper_model == "tiny"
+
+    def test_invalid_override_falls_back_to_default(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonc", delete=False) as f:
+            json.dump({"whisper_model": "medium"}, f)
+            f.flush()
+            cfg = load_config(f.name, {"sample_rate": "not_a_number"})
+            assert cfg.sample_rate == 44100  # default
+
+    def test_override_unknown_key_ignored(self):
+        cfg = load_config("/nonexistent/path/config.jsonc", {"not_a_key": 1})
+        assert cfg.whisper_model == "medium"

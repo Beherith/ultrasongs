@@ -176,12 +176,18 @@ class TestRunProcess:
             (kwargs["output_dir"] / "Test Song.zip").write_bytes(b"zip")
             return kwargs["output_dir"]
 
-        def fake_editor(txt_path, output_html=None, pitch_json_path=None,
+        def fake_editor(txt_path, output_html=None, output_json=None, pitch_json_path=None,
                         vocals_hint=None, embed_audio=False):
             calls.order.append("editor")
-            calls.kwargs["editor"] = {"pitch_json_path": pitch_json_path, "vocals_hint": vocals_hint}
+            calls.kwargs["editor"] = {
+                "pitch_json_path": pitch_json_path,
+                "vocals_hint": vocals_hint,
+                "output_json": output_json,
+            }
             assert output_html is not None
             output_html.write_text("<html></html>", encoding="utf-8")
+            assert output_json is not None
+            output_json.write_text("{}", encoding="utf-8")
             return output_html
 
         def fake_preview(txt_path, output_html=None, pitch_json_path=None):
@@ -215,6 +221,7 @@ class TestRunProcess:
         assert result.zip_path == run_dir / f"{safe}.zip"
         assert result.html_path == run_dir / f"{safe}.html"
         assert result.editor_path == run_dir / f"{safe}_editor.html"
+        assert result.editor_json_path == run_dir / f"{safe}_editor.json"
         assert result.temp_dir == tmp_path / "tmp"
         # BPM from the transcribe result (None) triggered detection
         assert calls.kwargs["generate"]["bpm"] == 120.0
@@ -239,12 +246,16 @@ class TestRunProcess:
         safe = "Tester - Test Song"
         run_dir = tmp_path / "out" / safe
         editor = run_dir / f"{safe}_editor.html"
+        editor_json = run_dir / f"{safe}_editor.json"
         assert editor.is_file()
+        assert editor_json.is_file()
         assert result.editor_path == editor
+        assert result.editor_json_path == editor_json
         assert calls.kwargs["editor"]["vocals_hint"] == f"{safe}_vocals.mp3"
         with zipfile.ZipFile(run_dir / f"{safe}.zip") as zf:
             names = set(zf.namelist())
         assert f"{safe}_editor.html" in names
+        assert f"{safe}_editor.json" in names
         assert f"{safe}.txt" in names
         assert f"{safe}.mp3" in names
         assert f"{safe}_vocals.mp3" in names

@@ -41,6 +41,7 @@ python -m cli <command> [options]
 | Flag | Description |
 |---|---|
 | `-c, --config <path>` | Path to `config.jsonc` (default: `cli/config.jsonc`) |
+| `-o, --override <spec>` | Override config keys (repeatable; takes precedence over `-c`). A JSON object (`'{"whisper_model": "small"}'`) or comma-separated `key=value` pairs (`transcribe_runs=5,whisper_model=small`) |
 | `-v, --verbose` | DEBUG logging |
 | `-q, --quiet` | WARNING and above only |
 
@@ -155,7 +156,7 @@ ULTRASONGS_WEB_PASSWORD=secret python -m cli web \
 
 ## Configuration
 
-Edit `cli/config.jsonc` (supports `//` and `/* */` comments):
+Edit `cli/config.jsonc` (supports `//` and `/* */` comments). Individual keys can be overridden on the command line with `-o/--override` (repeatable), e.g. `python -m cli -o transcribe_runs=5,whisper_model=small process ...`.
 
 | Key | Default | Description |
 |---|---|---|

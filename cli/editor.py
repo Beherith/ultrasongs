@@ -171,8 +171,9 @@ def generate_editor(
     pitch_json_path: str | Path | None = None,
     vocals_hint: str | Path | None = None,
     embed_audio: bool = False,
+    output_json: str | Path | None = None,
 ) -> Path:
-    """Generate the self-contained editor HTML; return the written path."""
+    """Generate the editor HTML and its matching JSON payload; return the HTML path."""
     txt_path = Path(txt_path)
     if not txt_path.exists():
         raise FileNotFoundError(f"Ultrastar file not found: {txt_path}")
@@ -192,6 +193,9 @@ def generate_editor(
     html = template.replace("__MAGMA__", magma_json).replace("__EDITOR_DATA__", data_json)
 
     out = Path(output_html) if output_html else txt_path.with_name(txt_path.stem + "_editor.html")
+    json_out = Path(output_json) if output_json else out.with_suffix(".json")
     out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html, encoding="utf-8")
+    json_out.write_text(data_json + "\n", encoding="utf-8")
     return out

@@ -15,7 +15,7 @@ User (CLI) → argparse → cli/__main__.py → pipeline stages → output/
 User (browser) → Flask/Dash → cli/web/jobs.py (FIFO queue) → cli/pipeline.run_process → web_jobs/<id>/output/
 ```
 
-- **CLI layer**: `argparse` subcommands (`process`, `import`, `diff`, `preview`, `lyrics`, `edit`, `web`), global flags `-c/--config`, `-v/--verbose`, `-q/--quiet`
+- **CLI layer**: `argparse` subcommands (`process`, `import`, `diff`, `preview`, `lyrics`, `edit`, `web`), global flags `-c/--config`, `-o/--override`, `-v/--verbose`, `-q/--quiet`
 - **Pipeline**: sequential stages, each a module in `cli/`; heavy ML imports are lazy-loaded inside functions
 - **Config**: `cli/config.jsonc` (JSON with comments), loaded into a frozen `Config` dataclass (`cli/config.py`); code-level fallback defaults live in the dataclass, invalid values fall back with a warning
 - **Logging**: `cli/logging_setup.py` — stdout handler, `[timestamp] [name] message` format
@@ -63,6 +63,7 @@ ULTRASONGS_WEB_PASSWORD=secret python -m cli web [--host 127.0.0.1] [--port 8030
 python -m cli -v process ...           # Verbose (DEBUG) logging
 python -m cli -q process ...           # Quiet (WARNING+) logging
 python -m cli -c path/to/config.jsonc  # Custom config file
+python -m cli -o transcribe_runs=5,whisper_model=small process ...   # Override config keys (repeatable; key=value pairs or a JSON object)
 ```
 
 Partial execution and resume:
@@ -96,7 +97,7 @@ Each processing run writes into its own per-song folder `<output_dir>/<artist> -
 
 - **Auth**: password from the `ULTRASONGS_WEB_PASSWORD` environment variable, falling back to a `ULTRASONGS_WEB_PASSWORD=...` entry in `./.env.local` (gitignored; env var wins) (constant-time compare, Flask session cookie). No TLS is provided — bind to `127.0.0.1` (default) or put a reverse proxy in front. `--no-auth` disables login but is rejected unless the host is `127.0.0.1`/`localhost`. Web server settings (host, port, `web_dir`, retention, upload cap, poll interval) live in `cli/web_config.jsonc` (`--web-config` to override).
 - **Queue**: one job at a time, FIFO (`cli/web/jobs.py`). Uploads are staged, validated (extension + size cap), then moved into the job dir. Each job gets `web_jobs/<id>/{upload,tmp,output}` plus a `job.json` manifest; jobs older than `job_retention_days` are pruned at startup and before each submission.
-- **UI**: one form (title/artist/lyrics + audio/video upload) plus an auto-generated settings accordion with one control per `config.jsonc` key (44), driven by `cli/web/settings_meta.py`. Jobs show live status, queue position, log tail, and download links (ZIP, note editor, HTML preview, stems) served from `/download/<job_id>/<file>`.
+- **UI**: one form (artist/title/lyrics + audio/video upload + lyrics `.txt` upload) plus an auto-generated settings accordion with one control per `config.jsonc` key (44), driven by `cli/web/settings_meta.py`. Artist field comes before title. Uploading a media file prefills empty artist/title fields from an `Artist - Title` file name (`split_filename_artist_title`, split on the first dash). Lyrics can be pasted (a `dcc.Textarea`) or uploaded as a `.txt` file (decoded utf-8, falling back to windows-1252); Ultrastar `.txt` lyrics also prefill empty title/artist via `lyrics_prefill`. Form text inputs are explicitly dark-styled (`CSS["input"]`) because the inherited page text color is light. Jobs show live status, queue position, log tail, and download links (ZIP, note editor, HTML preview, stems) served from `/download/<job_id>/<file>`.
 - **Per-job config**: form values override the base `Config` (revalidated via `config_from_dict`); the job's `temp_dir`/`output_dir` are forced to the job dir, and the ZIP includes intermediates.
 
 ## Code Conventions
@@ -165,7 +166,7 @@ The `process` subcommand runs these stages (`--stage` cuts off after the given s
 
 ## Configuration
 
-`cli/config.jsonc` (44 keys, supports `//` and `/* */` comments). Defaults below are the committed `config.jsonc` values; `cli/config.py` holds fallback defaults for missing/invalid keys.
+`cli/config.jsonc` (44 keys, supports `//` and `/* */` comments). Defaults below are the committed `config.jsonc` values; `cli/config.py` holds fallback defaults for missing/invalid keys. Individual keys can be overridden on the command line with `-o/--override` (repeatable): a JSON object or comma-separated `key=value` pairs, parsed by `cli.config.parse_config_overrides` and merged on top of the loaded file in `load_config()`.
 
 | Key | Default | Description |
 |---|---|---|
@@ -253,7 +254,7 @@ pytest cli/tests/
 |---|---|
 | `cli/tests/test_align.py` | `normalize_char()`, `phonetic_score()`, `smith_waterman()`, `align_lyrics()` |
 | `cli/tests/test_bpm.py` | `detect_bpm()`, per-chunk estimates, phase stability, `BpmResult` round-trip |
-| `cli/tests/test_config.py` | Defaults, frozen dataclass, JSONC loading, invalid-value fallback |
+| `cli/tests/test_config.py` | Defaults, frozen dataclass, JSONC loading, invalid-value fallback, `parse_config_overrides()`, `load_config()` overrides |
 | `cli/tests/test_config_dict.py` | `config_from_dict()` overrides, invalid-value fallback, `load_jsonc()` |
 | `cli/tests/test_consensus.py` | `word_similarity()`, transcription + timing consolidation |
 | `cli/tests/test_diff.py` | Identical files, BPM/beat tolerances, different titles |

@@ -59,6 +59,7 @@ def package_output(
             <name><ext>    (optional video, from video_path)
             <name>_vocals.mp3      (optional)
             <name>_accompaniment.mp3  (optional)
+            <name>_editor.html, <name>_editor.json  (when already generated)
             <name>.zip     (ZIP of all above plus extra_files under intermediates/)
 
     Args:

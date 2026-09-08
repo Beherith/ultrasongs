@@ -179,16 +179,56 @@ def config_from_dict(data: dict[str, Any], source_path: Path | None = None) -> C
     return Config(**kwargs)
 
 
-def load_config(config_path: str | None = None) -> Config:
-    """Load configuration from a JSONC file, falling back to defaults."""
+def parse_config_overrides(spec: str) -> dict[str, Any]:
+    """Parse a CLI override string into a dict.
+
+    Accepts either a JSON object (e.g. '{"whisper_model": "small"}') or
+    comma-separated key=value pairs (e.g. 'transcribe_runs=5,whisper_model=small').
+    Pair values are JSON-decoded when possible (so 5, true, and 1.5 keep their
+    types) and kept as raw strings otherwise.
+    """
+    text = spec.strip()
+    if not text:
+        return {}
+    if text.startswith("{"):
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            raise ValueError("JSON override must be an object")
+        return data
+    result: dict[str, Any] = {}
+    for part in text.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        key, sep, raw = part.partition("=")
+        key = key.strip()
+        raw = raw.strip()
+        if not sep or not key:
+            raise ValueError(f"invalid override {part!r}: expected key=value")
+        try:
+            result[key] = json.loads(raw)
+        except ValueError:
+            result[key] = raw
+    return result
+
+
+def load_config(config_path: str | None = None, overrides: dict[str, Any] | None = None) -> Config:
+    """Load configuration from a JSONC file, falling back to defaults.
+
+    ``overrides`` (e.g. from ``--override`` on the command line) is merged on
+    top of the loaded file before validation.
+    """
     if config_path is None:
         # Default: look next to this module
         default_path = Path(__file__).parent / "config.jsonc"
     else:
         default_path = Path(config_path)
 
-    if not default_path.exists():
-        return Config()
-
-    data: dict[str, Any] = load_jsonc(default_path)
-    return config_from_dict(data, default_path)
+    data: dict[str, Any] = {}
+    source_path: Path | None = None
+    if default_path.exists():
+        data = load_jsonc(default_path)
+        source_path = default_path
+    if overrides:
+        data.update(overrides)
+    return config_from_dict(data, source_path)

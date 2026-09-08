@@ -38,6 +38,7 @@ class ProcessResult:
     zip_path: Path | None = None
     html_path: Path | None = None
     editor_path: Path | None = None
+    editor_json_path: Path | None = None
     output_dir: Path | None = None
     temp_dir: Path | None = None
 
@@ -218,13 +219,15 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
         # The note editor is written before packaging so the ZIP includes it.
         pitch_json = config.temp_path / "whisperx_pitch.json"
         editor_path = run_dir / f"{safe_name}_editor.html"
+        editor_json_path = run_dir / f"{safe_name}_editor.json"
         generate_editor(
             txt_path,
             output_html=editor_path,
+            output_json=editor_json_path,
             pitch_json_path=pitch_json if pitch_json.exists() else None,
             vocals_hint=f"{safe_name}_vocals.mp3" if Path(result.vocals_path).exists() else None,
         )
-        logger.info(f"Note editor written to {editor_path}")
+        logger.info(f"Note editor written to {editor_path} with data at {editor_json_path}")
 
         extra_files = (
             collect_intermediates(config.temp_path, since_ts=run_started)
@@ -256,6 +259,7 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
             zip_path=run_dir / f"{safe_name}.zip",
             html_path=html_path,
             editor_path=editor_path,
+            editor_json_path=editor_json_path,
             output_dir=run_dir,
             temp_dir=config.temp_path,
         )

@@ -15,6 +15,7 @@ from cli.web.app import (
     load_web_config,
     lyrics_prefill,
     parse_setting_value,
+    split_filename_artist_title,
     validate_process_inputs,
 )
 from cli.web.jobs import JobManager
@@ -44,10 +45,32 @@ class TestLayout:
         assert expected <= ids
         assert len(expected) == 44
         # Core form controls exist
-        for cid in ("upload", "title", "artist", "lyrics", "process-btn",
-                    "reset-btn", "job-status", "job-log", "job-result",
-                    "upload-store", "active-job-store", "poll-interval"):
+        for cid in ("upload", "title", "artist", "lyrics", "lyrics-upload",
+                    "lyrics-info", "process-btn", "reset-btn", "job-status",
+                    "job-log", "job-result", "upload-store", "active-job-store",
+                    "poll-interval"):
             assert cid in ids, cid
+
+    def test_artist_column_before_title(self, tmp_path):
+        config = Config(temp_dir=str(tmp_path / "tmp"), output_dir=str(tmp_path / "out"))
+        manager = JobManager(web_dir=tmp_path / "jobs")
+        app = create_app(WebConfig(), config, manager, password=None)
+        order: list[str] = []
+
+        def _ordered(node):
+            cid = getattr(node, "id", None)
+            if cid is not None:
+                order.append(cid)
+            children = getattr(node, "children", None)
+            if children is None:
+                return
+            if not isinstance(children, (list, tuple)):
+                children = [children]
+            for child in children:
+                _ordered(child)
+
+        _ordered(app.layout)
+        assert order.index("artist") < order.index("title")
 
     def test_settings_cover_all_config_keys(self):
         keys = {m.key for m in settings_meta.SETTINGS}
@@ -128,6 +151,22 @@ class TestHelpers:
 
     def test_lyrics_prefill_plain_text_noop(self):
         assert lyrics_prefill("hello\nworld", "T", "A") == ("T", "A")
+
+    def test_split_filename_artist_title_spaced_dash(self):
+        assert split_filename_artist_title("The Band - Great Song.mp3") == ("The Band", "Great Song")
+
+    def test_split_filename_artist_title_inner_dash(self):
+        assert split_filename_artist_title("AC-DC - Thunderstruck.mp3") == ("AC-DC", "Thunderstruck")
+
+    def test_split_filename_artist_title_bare_dash(self):
+        assert split_filename_artist_title("Artist-Title.mp3") == ("Artist", "Title")
+
+    def test_split_filename_artist_title_no_dash(self):
+        assert split_filename_artist_title("JustASong.mp3") == ("", "")
+
+    def test_split_filename_artist_title_empty_side(self):
+        assert split_filename_artist_title("- Title.mp3") == ("", "")
+        assert split_filename_artist_title("Artist -.mp3") == ("", "")
 
 
 class TestLoadWebConfig:
@@ -275,9 +314,11 @@ class TestUploadCallback:
         app = create_app(WebConfig(), config, manager, password=None)
         cb = _find_callback(app, "upload_picked")
         content = "data:application/octet-stream;base64," + base64.b64encode(b"x").decode()
-        store, info = cb(content, "evil.exe")
+        store, info, title, artist = cb(content, "evil.exe", "", "")
+        assert store is no_update
         assert info is not None
         assert "Unsupported file type" in _text(info)
+        assert title is no_update and artist is no_update
 
     def test_accepts_mp3(self, tmp_path):
         config = Config(temp_dir=str(tmp_path / "tmp"), output_dir=str(tmp_path / "out"))
@@ -286,9 +327,66 @@ class TestUploadCallback:
         cb = _find_callback(app, "upload_picked")
         payload = b"ID3fake"
         content = "data:audio/mpeg;base64," + base64.b64encode(payload).decode()
-        store, info = cb(content, "song.mp3")
+        store, info, title, artist = cb(content, "song.mp3", "", "")
         assert store is not None
         assert store["name"] == "song.mp3"
         staged = Path(store["path"])
         assert staged.read_bytes() == payload
         assert staged.parent.name == webapp.STAGING_DIRNAME
+        assert title == "" and artist == ""  # no dash in name, nothing prefilled
+
+    def test_prefills_title_artist_from_filename(self, tmp_path):
+        config = Config(temp_dir=str(tmp_path / "tmp"), output_dir=str(tmp_path / "out"))
+        manager = _FakeManager(tmp_path / "jobs")
+        app = create_app(WebConfig(), config, manager, password=None)
+        cb = _find_callback(app, "upload_picked")
+        content = "data:audio/mpeg;base64," + base64.b64encode(b"x").decode()
+        store, info, title, artist = cb(content, "The Band - Great Song.mp3", "", "")
+        assert title == "Great Song"
+        assert artist == "The Band"
+
+    def test_keeps_existing_title_artist(self, tmp_path):
+        config = Config(temp_dir=str(tmp_path / "tmp"), output_dir=str(tmp_path / "out"))
+        manager = _FakeManager(tmp_path / "jobs")
+        app = create_app(WebConfig(), config, manager, password=None)
+        cb = _find_callback(app, "upload_picked")
+        content = "data:audio/mpeg;base64," + base64.b64encode(b"x").decode()
+        store, info, title, artist = cb(
+            content, "The Band - Great Song.mp3", "My Title", "My Artist")
+        assert title == "My Title"
+        assert artist == "My Artist"
+
+
+class TestLyricsFileCallback:
+    def _find(self, app):
+        return _find_callback(app, "lyrics_file_picked")
+
+    def _make_app(self, tmp_path):
+        config = Config(temp_dir=str(tmp_path / "tmp"), output_dir=str(tmp_path / "out"))
+        manager = _FakeManager(tmp_path / "jobs")
+        app = create_app(WebConfig(), config, manager, password=None)
+        return app
+
+    def test_loads_txt_file(self, tmp_path):
+        app = self._make_app(tmp_path)
+        cb = self._find(app)
+        text = "Hey you\nTurn around"
+        content = "data:text/plain;base64," + base64.b64encode(text.encode("utf-8")).decode()
+        lyrics, info = cb(content, "lyrics.txt")
+        assert lyrics == text
+        assert "lyrics.txt" in _text(info)
+
+    def test_loads_non_utf8_with_fallback(self, tmp_path):
+        app = self._make_app(tmp_path)
+        cb = self._find(app)
+        content = "data:text/plain;base64," + base64.b64encode("Café".encode("windows-1252")).decode()
+        lyrics, info = cb(content, "lyrics.txt")
+        assert lyrics == "Café"
+
+    def test_rejects_bad_extension(self, tmp_path):
+        app = self._make_app(tmp_path)
+        cb = self._find(app)
+        content = "data:application/pdf;base64," + base64.b64encode(b"%PDF").decode()
+        lyrics, info = cb(content, "lyrics.pdf")
+        assert lyrics is no_update
+        assert "Unsupported lyrics file type" in _text(info)

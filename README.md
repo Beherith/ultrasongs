@@ -86,6 +86,7 @@ Global flags:
 | Flag | Description |
 |---|---|
 | `-c, --config <path>` | Custom `config.jsonc` (default: `cli/config.jsonc`) |
+| `-o, --override <spec>` | Override config keys (repeatable; takes precedence over `-c`). A JSON object (`'{"whisper_model": "small"}'`) or comma-separated `key=value` pairs (`transcribe_runs=5,whisper_model=small`) |
 | `-v, --verbose` | DEBUG logging |
 | `-q, --quiet` | WARNING and above only |
 
@@ -111,6 +112,8 @@ python -m cli process ... --resume tmp/name_transcribe.json --stage align
 ## Configuration
 
 Edit `cli/config.jsonc` (supports `//` and `/* */` comments). 44 configuration keys covering GPU selection, model choices, pitch range, pause detection, BPM, note segmentation, output paths, and more. See the file for detailed per-key documentation.
+
+Individual keys can be overridden on the command line with `-o/--override` (repeatable), e.g. `python -m cli -o transcribe_runs=5,whisper_model=small process ...`.
 
 The web UI auto-generates a settings form from the same keys — no separate web config for pipeline options. Web server settings (host, port, job directory, retention, upload cap, poll interval) live in `cli/web_config.jsonc`.
 

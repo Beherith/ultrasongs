@@ -384,6 +384,18 @@
     document.getElementById("playBtn").innerHTML=play.active?"&#9632; Stop":"&#9654; Play";
     document.getElementById("undoBtn").disabled=!undoStack.length;
   }
+  function updateSelectionUi(){
+    for(const bar of svgEl.querySelectorAll(".note .bar")){
+      const g=bar.closest("[data-id]");
+      const n=g?notes.find(x=>x.id===+g.getAttribute("data-id")):null;
+      const selected=!!(n&&n.id===selectedId);
+      bar.classList.toggle("sel",selected);
+      bar.setAttribute("stroke",selected?"#ffffff":n&&n.type==="*"?"#ffd54a":"#4fc3f7");
+      bar.setAttribute("stroke-width",selected?"2":"0.8");
+    }
+    updateTransport(groups[currentPage]||[]);
+    updateToolbar();
+  }
 
   function updateLineSelect(){
     const sel=document.getElementById("lineSel");
@@ -500,7 +512,7 @@
   }
 
   // ── selection + drag ─────────────────────────────────────────────────────
-  function select(id){ selectedId=id; renderPage(); }
+  function select(id){ selectedId=id; updateSelectionUi(); }
   function prevNoteEndBeat(note){
     const idx=notes.findIndex(n=>n.id===note.id);
     for(let i=idx-1;i>=0;i--){ if(notes[i].type!=="-") return notes[i].start+notes[i].dur; }
@@ -520,7 +532,10 @@
     if(!note) return;
     const handle=e.target.getAttribute("data-handle")||"body";
     const now=performance.now();
-    if(handle==="body"&&lastTap&&lastTap.id===id&&now-lastTap.t<400&&Math.hypot(e.clientX-lastTap.x,e.clientY-lastTap.y)<8){
+    // Browsers do not consistently synthesize dblclick for touch input, so
+    // retain a small double-tap detector there. Mouse input uses the native
+    // dblclick event below, respecting the operating system's click timing.
+    if(e.pointerType==="touch"&&lastTap&&lastTap.id===id&&now-lastTap.t<400&&Math.hypot(e.clientX-lastTap.x,e.clientY-lastTap.y)<8){
       lastTap=null;
       selectedId=id;
       openLyricPopover(note);
@@ -532,7 +547,9 @@
     dragActive=true;
     drag={id,handle,p0:toSvgPoint(e),origStart:note.start,origDur:note.dur,origPitch:note.pitch,origEnd:note.start+note.dur};
     svgEl.setPointerCapture(e.pointerId);
-    renderPage();
+    // Do not replace the target between clicks; native dblclick requires the
+    // same DOM node to survive the complete click sequence.
+    updateSelectionUi();
     e.preventDefault();
   });
   svgEl.addEventListener("pointermove",e=>{
@@ -561,11 +578,25 @@
     const changed=!!(note && (note.start!==drag.origStart || note.dur!==drag.origDur || note.pitch!==drag.origPitch));
     drag=null; dragActive=false;
     try{ svgEl.releasePointerCapture(e.pointerId); }catch(_){}
-    if(!changed && undoStack.length) undoStack.pop(); // drop no-op snapshot
-    renderPage();
+    if(!changed){
+      if(undoStack.length) undoStack.pop(); // drop no-op snapshot
+      updateSelectionUi();
+    }else renderPage();
   }
   svgEl.addEventListener("pointerup",endDrag);
   svgEl.addEventListener("pointercancel",endDrag);
+  svgEl.addEventListener("dblclick",e=>{
+    // A render between clicks replaces the original SVG child, so fall back
+    // to the selected note if the browser targets their common SVG ancestor.
+    const g=e.target.closest("[data-id]");
+    const id=g?+g.getAttribute("data-id"):selectedId;
+    const note=notes.find(n=>n.id===id);
+    if(!note) return;
+    lastTap=null;
+    selectedId=id;
+    openLyricPopover(note);
+    e.preventDefault();
+  });
 
   // ── edit operations ──────────────────────────────────────────────────────
   function nextId(){ let m=0; for(const n of notes) if(n.id>m)m=n.id; return m+1; }

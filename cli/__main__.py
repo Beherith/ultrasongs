@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from cli.config import load_config
+from cli.config import load_config, parse_config_overrides
 from cli.logging_setup import setup_logging
 
 
@@ -17,6 +17,17 @@ def _build_parser() -> argparse.ArgumentParser:
         "-c", "--config",
         default=None,
         help="Path to config.jsonc file (default: cli/config.jsonc)",
+    )
+    parser.add_argument(
+        "-o", "--override",
+        action="append",
+        default=None,
+        metavar="SPEC",
+        help=(
+            "Override config.jsonc values (repeatable, takes precedence over -c). "
+            "A JSON object or comma-separated key=value pairs, e.g. "
+            "-o transcribe_runs=5,whisper_model=small or -o '{\"transcribe_runs\": 5}'"
+        ),
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -141,8 +152,15 @@ def main(argv: list[str] | None = None) -> int:
     # Setup logging before loading config
     setup_logging(verbose=args.verbose, quiet=args.quiet)
 
-    # Load configuration
-    config = load_config(args.config)
+    # Load configuration (with any --override values merged on top)
+    overrides: dict[str, object] = {}
+    for spec in args.override or []:
+        try:
+            overrides.update(parse_config_overrides(spec))
+        except ValueError as exc:
+            print(f"[cli] Error: invalid --override {spec!r}: {exc}", file=sys.stderr)
+            return 1
+    config = load_config(args.config, overrides or None)
 
     if args.command == "process":
         return _cmd_process(args, config)

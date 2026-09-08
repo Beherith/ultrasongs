@@ -229,6 +229,7 @@ class TestGenerateEditor:
         out = generate_editor(txt)
         assert out == txt.with_name("song_editor.html")
         assert out.exists()
+        assert txt.with_name("song_editor.json").exists()
 
     def test_substitutes_data(self, tmp_path):
         txt = _write_txt(tmp_path)
@@ -242,17 +243,38 @@ class TestGenerateEditor:
         m = re.search(r"window\.EDITOR_DATA = (.*?);</script>", html, re.DOTALL)
         assert m, "EDITOR_DATA script block not found"
         data = json.loads(m.group(1).replace("<\\/", "</"))
+        json_data = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+        assert json_data == data
         assert data["meta"]["title"] == "Test Song"
         assert data["pitchWords"] == []
         m2 = re.search(r"const MEGA=(\[\[.*?\]\]);", html, re.DOTALL)
         assert m2, "magma LUT not embedded"
         assert len(json.loads(m2.group(1))) == 64
 
+    def test_double_click_edits_lyrics_with_native_event(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        assert 'svgEl.addEventListener("dblclick",e=>' in html
+        assert 'const id=g?+g.getAttribute("data-id"):selectedId;' in html
+        assert "openLyricPopover(note);" in html
+        assert 'e.pointerType==="touch"&&lastTap' in html
+        pointerdown = html.split('svgEl.addEventListener("pointerdown",e=>', 1)[1].split(
+            'svgEl.addEventListener("pointermove",e=>', 1
+        )[0]
+        assert "updateSelectionUi();" in pointerdown
+        assert "renderPage();" not in pointerdown
+
     def test_output_path_honored(self, tmp_path):
         txt = _write_txt(tmp_path)
         target = tmp_path / "sub" / "custom.html"
         out = generate_editor(txt, output_html=target)
         assert out == target and out.exists()
+        assert target.with_suffix(".json").exists()
+
+    def test_json_output_path_honored(self, tmp_path):
+        txt = _write_txt(tmp_path)
+        target = tmp_path / "custom" / "payload.json"
+        generate_editor(txt, output_json=target)
+        assert json.loads(target.read_text(encoding="utf-8"))["meta"]["title"] == "Test Song"
 
     def test_embed_audio(self, tmp_path):
         txt = _write_txt(tmp_path)

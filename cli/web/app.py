@@ -123,6 +123,23 @@ def lyrics_prefill(lyrics: str, current_title: str, current_artist: str) -> tupl
     return title, artist
 
 
+LYRICS_UPLOAD_EXTENSIONS = {".txt"}
+LYRICS_MAX_BYTES = 10 * 1024 * 1024
+
+
+def split_filename_artist_title(filename: str) -> tuple[str, str]:
+    """Parse an 'artist - title' file name, splitting on the first dash."""
+    stem = Path(filename).stem
+    for sep in (" - ", "-"):
+        if sep not in stem:
+            continue
+        artist, _, title = stem.partition(sep)
+        artist, title = artist.strip(), title.strip()
+        if artist and title:
+            return artist, title
+    return "", ""
+
+
 # ── layout ───────────────────────────────────────────────────────────────────
 
 
@@ -140,14 +157,16 @@ def _setting_control(meta: settings_meta.SettingMeta, value) -> html.Div:
         control = dcc.Input(
             id=cid, type="number", value=value,
             min=meta.min_value, max=meta.max_value, step=meta.step,
+            style=CSS["input"],
         )
     elif meta.kind == "float":
         control = dcc.Input(
             id=cid, type="number", value=value,
             min=meta.min_value, max=meta.max_value, step=meta.step,
+            style=CSS["input"],
         )
     else:
-        control = dcc.Input(id=cid, type="text", value=value)
+        control = dcc.Input(id=cid, type="text", value=value, style=CSS["input"])
     label_text = meta.key
     if meta.kind == "select" and value == "":
         label_text = "(auto-detect)"
@@ -188,6 +207,12 @@ CSS = {
         "marginBottom": "18px", "border": "1px solid #2c3345",
     },
     "label": {"display": "block", "marginBottom": "6px", "fontSize": "14px", "color": "#9ca3af"},
+    "input": {
+        "background": "#11141b", "color": "#e5e7eb",
+        "border": "1px solid #3b4358", "borderRadius": "6px",
+        "padding": "6px 8px", "fontSize": "14px",
+        "width": "100%", "boxSizing": "border-box",
+    },
     "row": {"display": "flex", "gap": "16px"},
     "col": {"flex": "1"},
     "upload": {
@@ -244,15 +269,17 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
                 [
                     html.Div(
                         [
-                            html.Label("Title *", style=CSS["label"]),
-                            dcc.Input(id="title", type="text", placeholder="Song title"),
+                            html.Label("Artist *", style=CSS["label"]),
+                            dcc.Input(id="artist", type="text", placeholder="Artist name",
+                                      style=CSS["input"]),
                         ],
                         style=CSS["col"],
                     ),
                     html.Div(
                         [
-                            html.Label("Artist *", style=CSS["label"]),
-                            dcc.Input(id="artist", type="text", placeholder="Artist name"),
+                            html.Label("Title *", style=CSS["label"]),
+                            dcc.Input(id="title", type="text", placeholder="Song title",
+                                      style=CSS["input"]),
                         ],
                         style=CSS["col"],
                     ),
@@ -260,9 +287,27 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
                 style=CSS["row"],
             ),
             html.Div([
-                html.Label("Lyrics *", style=CSS["label"]),
-                html.Textarea(id="lyrics", rows=14,
-                              placeholder="Paste the song lyrics here (plain text or an Ultrastar .txt)"),
+                html.Div([
+                    html.Label("Lyrics *",
+                               style={**CSS["label"], "display": "inline",
+                                      "marginRight": "12px", "marginBottom": "0"}),
+                    dcc.Upload(
+                        id="lyrics-upload",
+                        children=html.Span(
+                            "or upload a lyrics .txt file",
+                            style={"color": "#7dd3fc", "fontSize": "13px",
+                                   "textDecoration": "underline", "cursor": "pointer"},
+                        ),
+                        style={"display": "inline-block", "marginBottom": "10px"},
+                        multiple=False,
+                    ),
+                ]),
+                html.Div(id="lyrics-info"),
+                dcc.Textarea(id="lyrics", rows=14,
+                             placeholder="Paste the song lyrics here (plain text or an Ultrastar .txt)",
+                             style={**CSS["input"],
+                                     "fontFamily": "ui-monospace, monospace",
+                                     "fontSize": "13px"}),
             ]),
             html.Div([
                 html.Button("Process", id="process-btn", n_clicks=0,
@@ -300,7 +345,6 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
 
     page = html.Div(
         [
-            html.H1("Ultrasongs", style={"fontSize": "26px", "margin": "0 0 18px"}),
             song_form,
             build_settings_section(pipeline_config),
             job_card,
@@ -378,34 +422,73 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
     @app.callback(
         Output("upload-store", "data"),
         Output("upload-info", "children"),
+        Output("title", "value"),
+        Output("artist", "value"),
         Input("upload", "contents"),
         State("upload", "filename"),
+        State("title", "value"),
+        State("artist", "value"),
     )
-    def upload_picked(contents: str | None, filename: str | None):
+    def upload_picked(contents: str | None, filename: str | None,
+                      title: str | None, artist: str | None):
         if not contents or not filename:
-            return None, None
+            return None, None, no_update, no_update
         suffix = Path(filename).suffix.lower()
         if suffix not in ALLOWED_UPLOAD_EXTENSIONS:
             return no_update, html.Div(
                 f"Unsupported file type '{suffix}'. Allowed: {', '.join(sorted(ALLOWED_UPLOAD_EXTENSIONS))}",
-                style=CSS["error"])
+                style=CSS["error"]), no_update, no_update
         b64 = contents.split(",", 1)[1]
         data = base64.b64decode(b64)
         if len(data) > manager.max_upload_bytes:
             return no_update, html.Div(
                 f"File too large ({len(data) // (1024 * 1024)} MB, "
-                f"limit {manager.max_upload_bytes // (1024 * 1024)} MB)", style=CSS["error"])
+                f"limit {manager.max_upload_bytes // (1024 * 1024)} MB)", style=CSS["error"]), no_update, no_update
         staging = manager.web_dir / STAGING_DIRNAME
         staging.mkdir(parents=True, exist_ok=True)
         staged = staging / f"{uuid.uuid4().hex[:12]}{suffix}"
         staged.write_bytes(data)
+        name_artist, name_title = split_filename_artist_title(filename)
+        if not (title or "").strip() and name_title:
+            title = name_title
+        if not (artist or "").strip() and name_artist:
+            artist = name_artist
         size_mb = len(data) / (1024 * 1024)
         return {"path": str(staged), "name": filename, "size": len(data)}, html.Div(
             [html.Span(f"{filename} ({size_mb:.1f} MB)",
                        style={"color": "#34d399", "fontSize": "14px"}),
-             html.A("remove", href="#", id="upload-clear",
-                    style={"marginLeft": "10px", "color": "#9ca3af",
-                           "fontSize": "13px", "textDecoration": "underline"})],
+              html.A("remove", href="#", id="upload-clear",
+                     style={"marginLeft": "10px", "color": "#9ca3af",
+                            "fontSize": "13px", "textDecoration": "underline"})],
+        ), title, artist
+
+    @app.callback(
+        Output("lyrics", "value"),
+        Output("lyrics-info", "children"),
+        Input("lyrics-upload", "contents"),
+        State("lyrics-upload", "filename"),
+        prevent_initial_call=True,
+    )
+    def lyrics_file_picked(contents: str | None, filename: str | None):
+        if not contents or not filename:
+            raise PreventUpdate
+        suffix = Path(filename).suffix.lower()
+        if suffix not in LYRICS_UPLOAD_EXTENSIONS:
+            return no_update, html.Div(
+                f"Unsupported lyrics file type '{suffix}'. Use a .txt file.",
+                style=CSS["error"])
+        data = base64.b64decode(contents.split(",", 1)[1])
+        if len(data) > LYRICS_MAX_BYTES:
+            return no_update, html.Div(
+                f"Lyrics file too large (limit {LYRICS_MAX_BYTES // (1024 * 1024)} MB).",
+                style=CSS["error"])
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            text = data.decode("windows-1252", errors="replace")
+        return text, html.Div(
+            f"Loaded {filename} ({len(data) // 1024} KB)",
+            style={"color": "#34d399", "fontSize": "13px", "marginBottom": "8px"},
         )
 
     @app.callback(
@@ -421,8 +504,8 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
         return None
 
     @app.callback(
-        Output("title", "value"),
-        Output("artist", "value"),
+        Output("title", "value", allow_duplicate=True),
+        Output("artist", "value", allow_duplicate=True),
         Input("lyrics", "value"),
         State("title", "value"),
         State("artist", "value"),
