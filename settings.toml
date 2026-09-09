@@ -1,0 +1,102 @@
+# UltraSongs default configuration.
+#
+# Resolution order (last value wins):
+# built-in defaults < this file < environment variables < safe per-run overrides.
+
+[ultrasongs]
+config_version = 1
+
+[ultrasongs.server]
+host = "127.0.0.1"
+port = 8050
+debug = true
+worker_backend = "threadpool"
+
+[ultrasongs.paths]
+temp_dir = "tmp"
+drafts_dir = "drafts"
+projects_dir = "projects"
+reports_dir = "reports"
+exports_dir = "exports"
+
+[ultrasongs.security]
+max_upload_megabytes = 1024
+max_concurrent_jobs = 1
+allowed_audio_extensions = [".mp3", ".wav", ".flac", ".m4a", ".ogg"]
+allowed_video_extensions = [".mp4", ".mkv", ".webm", ".mov", ".avi"]
+
+[ultrasongs.ffmpeg]
+executable = "ffmpeg"
+ffprobe_executable = "ffprobe"
+audio_codec = "libmp3lame"
+audio_bitrate_kbps = 128
+sample_rate_hz = 44100
+channels = 1
+timeout_seconds = 600
+
+[ultrasongs.transcription]
+engine = "faster-whisper"
+model = "medium"
+# language is omitted for automatic detection. Example: language = "en"
+beam_size = 5
+vad_filter = true
+device = "auto"
+compute_type = "auto"
+
+[ultrasongs.whisperx]
+model = "small"
+batch_size = 4
+device = "cpu"
+compute_type = "int8"
+python_executable = ".venv-whisperx/Scripts/python.exe"
+
+[ultrasongs.separation]
+model = "htdemucs"
+shifts = 1
+overlap = 0.25
+device = "auto"
+
+[ultrasongs.pitch]
+model = "full"
+sample_rate_hz = 16000
+hop_length = 160
+min_frequency_hz = 65.41
+max_frequency_hz = 1046.5
+batch_size = 2048
+confidence_thresholds = [0.5, 0.3, 0.1]
+device = "auto"
+
+[ultrasongs.pauses]
+frame_milliseconds = 25
+hop_milliseconds = 10
+threshold_ratio = 0.05
+minimum_duration_milliseconds = 400
+
+[ultrasongs.alignment]
+engine = "smith-waterman"
+match_score = 4.0
+gap_open_penalty = 4.0
+gap_extend_penalty = 0.5
+
+[ultrasongs.tempo]
+fallback_bpm = 120.0
+minimum_bpm = 40.0
+maximum_bpm = 240.0
+
+[ultrasongs.export]
+text_encoding = "utf-8"
+include_audio_in_zip = true
+bpm_decimal_places = 2
+
+[ultrasongs.validation]
+minimum_matched_notes = 1
+minimum_match_ratio = 0.5
+maximum_timing_rmse_ms = 500.0
+maximum_duration_rmse_ms = 500.0
+maximum_pitch_distance_semitones = 2.0
+
+[ultrasongs.report]
+include_pitch_frames = true
+include_pauses = true
+include_stem_links = true
+embed_audio = false

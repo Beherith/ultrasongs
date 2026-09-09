@@ -13,6 +13,7 @@
 
 # testing
 /coverage
+/.pytest_cache/
 
 # next.js
 /.next/
@@ -45,6 +46,9 @@ CLAUDE.md
 
 # drafts (local working files, audio, generated content)
 /drafts/
+/projects/
+/reports/
+/exports/
 
 # temp files
 /tmp/
@@ -71,4 +75,4 @@ cli/.pytest_cache/
 
 # Ralph Loop state
 .opencode/ralph-loop.local.md
-
+*.egg-info/
