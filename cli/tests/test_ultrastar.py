@@ -211,6 +211,26 @@ E
         assert notes[1].note_type == "-"
         assert notes[1].start_beat == 105
 
+    def test_preserves_trailing_word_space(self):
+        content = (
+            "#TITLE:Test\n#ARTIST:A\n#MP3:a.mp3\n#BPM:120\n#GAP:0\n"
+            "\n: 0 4 60 he \n: 4 4 62 llo\nE\n"
+        )
+        meta, notes = parse_ultrastar_txt(content)
+        assert notes[0].syllable == "he "
+        assert notes[1].syllable == "llo"
+
+    def test_preserves_trailing_word_space_crlf(self):
+        content = "#TITLE:Test\n#BPM:120\n\n: 0 4 60 he \r\n: 4 4 62 llo \r\nE\r\n"
+        _, notes = parse_ultrastar_txt(content)
+        assert notes[0].syllable == "he "
+        assert notes[1].syllable == "llo "
+
+    def test_preserves_leading_and_trailing_word_spaces(self):
+        content = "#BPM:120\n\n: 0 4 60  he \nE\n"
+        _, notes = parse_ultrastar_txt(content)
+        assert notes[0].syllable == " he "
+
     def test_comma_bpm(self):
         content = """#TITLE:Test
 #ARTIST:Artist

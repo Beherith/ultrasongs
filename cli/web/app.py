@@ -260,6 +260,11 @@ PILL_COLORS = {
 def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
     song_form = html.Div(
         [
+            html.Div([
+                html.Label("Convert any mp3 or video file to Ultrastar format. The uploaded files should be complete and of good quality. You can download MP3's off of YouTube with "),
+                html.A("https://cnvmp3.com/", href="https://cnvmp3.com/", style={"color": "#7dd3fc"}),
+            ]),
+
             dcc.Upload(
                 id="upload",
                 children=html.Div(
@@ -309,7 +314,7 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
                 ]),
                 html.Div(id="lyrics-info"),
                 dcc.Textarea(id="lyrics", rows=14,
-                             placeholder="Paste the song lyrics here (plain text or an Ultrastar .txt)",
+                             placeholder="Paste the song lyrics here (plain text or an Ultrastar .txt). The pasted lyrics are the gold standard, and should be complete and accurate.",
                              style={**CSS["input"],
                                      "fontFamily": "ui-monospace, monospace",
                                      "fontSize": "13px"}),

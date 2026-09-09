@@ -198,7 +198,7 @@ def parse_ultrastar_txt(content: str) -> tuple[UltrastarMeta, list[UltrastarNote
                 val = trimmed[colon + 1:].strip()
                 meta[key] = val
 
-        elif match := _NOTE_RE.match(trimmed):
+        elif match := _NOTE_RE.match(line.rstrip("\r")):
             notes.append(UltrastarNote(
                 note_type=match.group(1),
                 start_beat=int(match.group(2)),

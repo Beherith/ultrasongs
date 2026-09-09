@@ -62,7 +62,7 @@ SETTINGS: list[SettingMeta] = [
                 "Whisper ASR model size. medium balances accuracy and speed; large is slower and uses more VRAM.",
                 WHISPER_MODELS),
     SettingMeta("whisper_language", "select", GROUP_MODELS,
-                "Language hint (ISO-639-1). Empty lets Whisper auto-detect.",
+                "Choose language for transcription. Empty lets Whisper auto-detect.",
                 LANGUAGE_CHOICES),
     SettingMeta("faster_whisper_compute_type", "select", GROUP_MODELS,
                 "CTranslate2 compute type for standalone faster-whisper.", FW_COMPUTE_TYPES),

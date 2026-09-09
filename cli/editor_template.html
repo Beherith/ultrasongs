@@ -164,7 +164,12 @@
     </div>
   </div>
 
-<script>window.EDITOR_DATA = __EDITOR_DATA__;</script>
+<script>window.EDITOR_DATA = (function () {
+  try { return __EDITOR_DATA__; }
+  catch (e) {
+    return { srcName: "", rawHeader: [], meta: { title: "(empty)", artist: "", mp3: "", bpm: 120, gap: 0, video: null }, bpm: 120, gap: 0, beatMs: 125, pulseMs: 500, notes: [], pitchWords: [], audioHint: "", audioB64: "", audioMime: "" };
+  }
+})();</script>
 <script>
 (function () {
   "use strict";
@@ -834,11 +839,13 @@
         const colon=trimmed.indexOf(":");
         if(colon>0) meta[trimmed.slice(1,colon).toUpperCase()]=trimmed.slice(colon+1).trim();
       }else{
-        const m=/^\s*([:*])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$/.exec(trimmed);
+        const m=/^\s*([:*])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$/.exec(line);
         if(m) notes.push({type:m[1],start:+m[2],dur:+m[3],pitch:+m[4],syl:m[5]||""});
         else if(trimmed.startsWith("-")) addRestOrCorrupted(trimmed.slice(1).trim(),notes);
       }
     }
+    const minSingPitch=36;
+    for(const n of notes){ if(n.type!=="-") while(n.pitch<minSingPitch) n.pitch+=12; }
     const bpm=parseFloat((meta.BPM||"120").replace(/,/g,"."))||120;
     const gap=Math.trunc(parseFloat((meta.GAP||"0").replace(/,/g,".")))||0;
     return {rawHeader,meta,notes,bpm,gap};

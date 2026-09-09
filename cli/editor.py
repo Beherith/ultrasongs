@@ -16,21 +16,16 @@ from cli.ultrastar import parse_ultrastar_txt, read_text_fallback
 
 _TEMPLATE_PATH = Path(__file__).parent / "editor_template.html"
 
-# 64-entry magma colormap LUT (RGB 0-255), matching matplotlib's ``magma`` used by
-# the preview spectrograms. Embedded in the editor so the FFT background matches.
-_MAGMA_LUT = [
-    [0, 0, 4], [2, 1, 9], [3, 3, 18], [6, 5, 26], [10, 8, 34], [14, 11, 43], [19, 13, 52],
-    [24, 15, 61], [29, 17, 71], [34, 17, 80], [41, 17, 90], [47, 17, 99], [54, 16, 107],
-    [61, 15, 113], [68, 15, 118], [74, 16, 121], [82, 19, 124], [89, 21, 126], [95, 24, 127],
-    [101, 26, 128], [107, 29, 129], [114, 31, 129], [120, 34, 129], [126, 36, 130], [132, 38, 129],
-    [139, 41, 129], [145, 43, 129], [152, 45, 128], [158, 47, 127], [165, 49, 126], [171, 51, 124],
-    [178, 53, 123], [186, 56, 120], [192, 58, 118], [199, 61, 115], [205, 64, 113], [211, 67, 110],
-    [217, 70, 107], [223, 74, 104], [228, 79, 100], [233, 84, 98], [237, 90, 95], [241, 96, 93],
-    [244, 103, 92], [246, 110, 92], [248, 118, 92], [250, 125, 94], [251, 133, 96], [252, 142, 100],
-    [253, 150, 104], [254, 157, 108], [254, 165, 113], [254, 172, 118], [254, 180, 123], [254, 187, 129],
-    [254, 194, 135], [254, 202, 141], [254, 209, 148], [254, 216, 154], [253, 224, 161], [253, 231, 169],
-    [252, 238, 176], [252, 246, 184], [252, 253, 191],
-]
+# C2 (~65 Hz). The editor's pitch auto-zoom clamps its window, so notes below
+# this are drawn off-plot; sung notes are shifted up by whole octaves at load.
+MIN_SING_PITCH = 36
+
+
+def lift_pitch_to_c2(pitch: int) -> int:
+    """Shift a MIDI pitch up by whole octaves until it is at least C2 (36)."""
+    if pitch >= MIN_SING_PITCH:
+        return pitch
+    return pitch + ((MIN_SING_PITCH - pitch + 11) // 12) * 12
 
 
 def extract_raw_header(text: str) -> tuple[list[str], str]:
@@ -110,7 +105,12 @@ def build_payload(
     gap = meta.gap
     beat_ms = 60000.0 / bpm / 4
     pulse_ms = 60000.0 / bpm
-    notes_payload = [note_to_payload(n, i) for i, n in enumerate(notes)]
+    notes_payload = []
+    for i, n in enumerate(notes):
+        payload = note_to_payload(n, i)
+        if n.note_type != "-":
+            payload["pitch"] = lift_pitch_to_c2(n.pitch)
+        notes_payload.append(payload)
     pitch_words = load_pitch_words(pitch_path)
     return {
         "srcName": Path(txt_path).name,
@@ -189,8 +189,7 @@ def generate_editor(
 
     template = _TEMPLATE_PATH.read_text(encoding="utf-8")
     data_json = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
-    magma_json = json.dumps(_MAGMA_LUT)
-    html = template.replace("__MAGMA__", magma_json).replace("__EDITOR_DATA__", data_json)
+    html = template.replace("__EDITOR_DATA__", data_json)
 
     out = Path(output_html) if output_html else txt_path.with_name(txt_path.stem + "_editor.html")
     json_out = Path(output_json) if output_json else out.with_suffix(".json")

@@ -3,6 +3,7 @@
 import base64
 import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,8 @@ from cli.editor import (
     serialize_editor_txt,
 )
 from cli.ultrastar import parse_ultrastar_txt
+
+_TEMPLATE = Path(__file__).resolve().parents[1] / "editor_template.html"
 
 HEADER = (
     "#TITLE:Test Song\n"
@@ -171,6 +174,40 @@ class TestBuildPayload:
         assert payload["audioHint"] == "vocals.mp3"
 
 
+class TestBuildPayloadSyllableSpaces:
+    def test_preserves_syllable_word_spaces(self, tmp_path):
+        txt = _write_txt(tmp_path, "#BPM:120\n\n: 0 4 60 he \n: 4 4 62  llo\nE\n")
+        payload = build_payload(txt, None, "")
+        assert payload["notes"][0]["syl"] == "he "
+        assert payload["notes"][1]["syl"] == " llo"
+
+
+class TestBuildPayloadPitchLift:
+    def test_lifts_notes_below_c2_by_whole_octaves(self, tmp_path):
+        txt = _write_txt(
+            tmp_path,
+            "#TITLE:Low\n#ARTIST:A\n#MP3:a.mp3\n#BPM:120\n#GAP:0\n"
+            "\n: 0 4 12 a\n: 4 4 21 b\n: 8 4 35 c\n: 12 4 36 d\nE\n",
+        )
+        payload = build_payload(txt, None, "")
+        assert [n["pitch"] for n in payload["notes"]] == [36, 45, 47, 36]
+
+    def test_rest_notes_keep_zero_pitch(self, tmp_path):
+        txt = _write_txt(tmp_path, "#BPM:120\n\n: 0 4 12 a\n- 8\n: 12 4 36 b\nE\n")
+        payload = build_payload(txt, None, "")
+        dash = next(n for n in payload["notes"] if n["type"] == "-")
+        assert dash["pitch"] == 0 and dash["dur"] == 0
+        assert [n["pitch"] for n in payload["notes"] if n["type"] != "-"] == [36, 36]
+
+    def test_js_loader_preserves_word_spaces_and_lifts_low_pitch(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        parse_body = html.split("function parseUltrastarTxt(content){", 1)[1].split("\n  }", 1)[0]
+        assert ".exec(line)" in parse_body
+        assert ".exec(trimmed)" not in parse_body
+        assert "minSingPitch=36" in parse_body
+        assert "while(n.pitch<minSingPitch) n.pitch+=12" in parse_body
+
+
 class TestSerializeEditorTxt:
     def test_round_trip_preserves_notes(self):
         meta, notes = _parse(CONTENT)
@@ -201,6 +238,15 @@ class TestSerializeEditorTxt:
         payload_notes2 = [note_to_payload(n, i) for i, n in enumerate(_parse(once)[1])]
         twice = serialize_editor_txt(raw2, payload_notes2)
         assert once == twice
+
+    def test_round_trip_preserves_trailing_word_space(self):
+        text = "#BPM:120\n\n: 0 4 60 he \n: 4 4 62 llo\nE\n"
+        raw, _ = extract_raw_header(text)
+        payload_notes = [note_to_payload(n, i) for i, n in enumerate(_parse(text)[1])]
+        serialized = serialize_editor_txt(raw, payload_notes)
+        assert ": 0 4 60 he " in serialized
+        _, notes2 = _parse(serialized)
+        assert [n.syllable for n in notes2] == ["he ", "llo"]
 
     def test_gold_and_line_break_survive(self):
         raw, _ = extract_raw_header(CONTENT)
@@ -240,9 +286,11 @@ class TestGenerateEditor:
         assert "EDITOR_DATA" in html
         assert "Test Song" in html
         assert "#COVER:test.jpg" in html
-        m = re.search(r"window\.EDITOR_DATA = (.*?);</script>", html, re.DOTALL)
+        m = re.search(r"window\.EDITOR_DATA = \(function \(\) \{", html)
         assert m, "EDITOR_DATA script block not found"
-        data = json.loads(m.group(1).replace("<\\/", "</"))
+        mj = re.search(r"try \{ return (.*); \}\n\s*catch", html)
+        assert mj, "embedded EDITOR_DATA payload not found"
+        data = json.loads(mj.group(1).replace("<\\/", "</"))
         json_data = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
         assert json_data == data
         assert data["meta"]["title"] == "Test Song"
@@ -250,6 +298,16 @@ class TestGenerateEditor:
         m2 = re.search(r"const MEGA=(\[\[.*?\]\]);", html, re.DOTALL)
         assert m2, "magma LUT not embedded"
         assert len(json.loads(m2.group(1))) == 64
+
+    def test_template_standalone_fallback(self):
+        tpl = _TEMPLATE.read_text(encoding="utf-8")
+        assert "window.EDITOR_DATA = (function () {" in tpl
+        assert "try { return __EDITOR_DATA__; }" in tpl
+        fallback = tpl.split("catch (e) {", 1)[1].split("})();", 1)[0]
+        assert "title: \"(empty)\"" in fallback
+        assert "bpm: 120" in fallback and "gap: 0" in fallback
+        assert "notes: []" in fallback and "rawHeader: []" in fallback
+        assert 'audioB64: ""' in fallback
 
     def test_double_click_edits_lyrics_with_native_event(self, tmp_path):
         html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
