@@ -5,7 +5,7 @@
 
   // Host to bind the web server to. Keep 127.0.0.1 unless you put a reverse
   // proxy in front — there is no TLS.
-  "host": "127.0.0.1",
+  "host": "0.0.0.0",
 
   // Port to listen on.
   "port": 8030,

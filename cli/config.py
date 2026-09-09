@@ -47,12 +47,8 @@ class Config:
     gap_lead_in_ms: int = 500
     linebreak_beat_offset: int = 4
     beat_resolution_multiplier: int = 2
-    activity_quiet_confidence: float = 0.2
-    activity_voiced_confidence: float = 0.5
-    activity_noise_percentile: float = 0.9
-    activity_noise_fallback_percentile: float = 0.1
-    activity_signal_percentile: float = 0.5
-    activity_signal_fallback_percentile: float = 0.75
+    activity_noise_percentile: float = 0.1
+    activity_signal_percentile: float = 0.75
     activity_threshold_ratio: float = 0.2
     note_min_confidence: float = 0.3
     note_fallback_confidence: float = 0.5
@@ -114,12 +110,8 @@ def config_from_dict(data: dict[str, Any], source_path: Path | None = None) -> C
         "gap_lead_in_ms": int,
         "linebreak_beat_offset": int,
         "beat_resolution_multiplier": int,
-        "activity_quiet_confidence": float,
-        "activity_voiced_confidence": float,
         "activity_noise_percentile": float,
-        "activity_noise_fallback_percentile": float,
         "activity_signal_percentile": float,
-        "activity_signal_fallback_percentile": float,
         "activity_threshold_ratio": float,
         "note_min_confidence": float,
         "note_fallback_confidence": float,

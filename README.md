@@ -111,7 +111,7 @@ python -m cli process ... --resume tmp/name_transcribe.json --stage align
 
 ## Configuration
 
-Edit `cli/config.jsonc` (supports `//` and `/* */` comments). 44 configuration keys covering GPU selection, model choices, pitch range, pause detection, BPM, note segmentation, output paths, and more. See the file for detailed per-key documentation.
+Edit `cli/config.jsonc` (supports `//` and `/* */` comments). 40 configuration keys covering GPU selection, model choices, pitch range, pause detection, BPM, note segmentation, output paths, and more. See the file for detailed per-key documentation.
 
 Individual keys can be overridden on the command line with `-o/--override` (repeatable), e.g. `python -m cli -o transcribe_runs=5,whisper_model=small process ...`.
 

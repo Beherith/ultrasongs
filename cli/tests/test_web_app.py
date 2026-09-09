@@ -43,7 +43,7 @@ class TestLayout:
         expected = {webapp.SETTING_ID.format(key=m.key) for m in settings_meta.SETTINGS}
         ids = set(nodes)
         assert expected <= ids
-        assert len(expected) == 44
+        assert len(expected) == 40
         # Core form controls exist
         for cid in ("upload", "title", "artist", "lyrics", "lyrics-upload",
                     "lyrics-info", "process-btn", "reset-btn", "job-status",

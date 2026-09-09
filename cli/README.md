@@ -151,7 +151,7 @@ ULTRASONGS_WEB_PASSWORD=secret python -m cli web \
 
 - **Auth:** password from the `ULTRASONGS_WEB_PASSWORD` environment variable, or from a `ULTRASONGS_WEB_PASSWORD=...` entry in `./.env.local` (gitignored; env var wins) (Flask session cookie, constant-time compare). No TLS is provided — bind to `127.0.0.1` (default) or use a reverse proxy. `--no-auth` is rejected unless the host is `127.0.0.1`/`localhost`.
 - **Queue:** one job at a time, FIFO. Each job gets `web_jobs/<job_id>/{upload,tmp,output}` + a `job.json` manifest; jobs older than `job_retention_days` are pruned at startup and before each submission.
-- **Settings:** the form auto-generates one control per `config.jsonc` key (44). Values override the base config for that job only.
+- **Settings:** the form auto-generates one control per `config.jsonc` key (40). Values override the base config for that job only.
 - **Server settings** (host, port, `web_dir`, retention, upload cap, poll interval) live in `cli/web_config.jsonc`.
 
 ## Configuration
@@ -184,12 +184,8 @@ Edit `cli/config.jsonc` (supports `//` and `/* */` comments). Individual keys ca
 | `gap_lead_in_ms` | `500` | Milliseconds before first note for `#GAP` |
 | `linebreak_beat_offset` | `4` | Beats before next note for line breaks |
 | `beat_resolution_multiplier` | `2` | Scales exported BPM for a finer Ultrastar beat grid |
-| `activity_quiet_confidence` | `0.2` | Min CREPE confidence for "quiet" frames in activity threshold |
-| `activity_voiced_confidence` | `0.5` | Min CREPE confidence for "voiced" frames in activity threshold |
-| `activity_noise_percentile` | `0.9` | Percentile of quiet frames for noise floor |
-| `activity_noise_fallback_percentile` | `0.1` | Percentile of all frames for noise floor fallback |
-| `activity_signal_percentile` | `0.5` | Percentile of voiced frames for signal level |
-| `activity_signal_fallback_percentile` | `0.75` | Percentile of all frames for signal fallback |
+| `activity_noise_percentile` | `0.1` | Percentile of all-frame amplitudes for noise floor |
+| `activity_signal_percentile` | `0.75` | Percentile of all-frame amplitudes for signal level |
 | `activity_threshold_ratio` | `0.2` | Fraction of (signal - noise) added to noise floor |
 | `note_min_confidence` | `0.3` | Min CREPE confidence for vocal activity in note segmentation |
 | `note_fallback_confidence` | `0.5` | Fallback confidence when no frame meets `note_min_confidence` |

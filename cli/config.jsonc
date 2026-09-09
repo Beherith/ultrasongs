@@ -164,33 +164,21 @@
   // give finer note placement but larger beat counts and file sizes.
   "beat_resolution_multiplier": 2,
 
-  // Vocal activity threshold: minimum CREPE confidence for a frame to count as
-  // "quiet" when estimating the song's noise floor.
-  "activity_quiet_confidence": 0.2,
+  // Percentile of all-frame amplitudes used as the noise floor for the activity
+  // threshold (0.1 = 10th percentile). Pure amplitude percentiles are used (not
+  // CREPE confidence) so the gate stays valid when confidence and loudness
+  // disagree.
+  "activity_noise_percentile": 0.1,
 
-  // Vocal activity threshold: minimum CREPE confidence for a frame to count as
-  // "voiced" when estimating the song's signal level.
-  "activity_voiced_confidence": 0.5,
-
-  // Percentile of quiet frames used as the noise floor level (0.9 = 90th percentile).
-  // Only used when some frames fall below activity_quiet_confidence.
-  "activity_noise_percentile": 0.9,
-
-  // Percentile of all frames used as the noise floor when no quiet frames exist.
-  "activity_noise_fallback_percentile": 0.1,
-
-  // Percentile of voiced frames used as the signal level (0.5 = median).
-  // Only used when some frames reach activity_voiced_confidence.
-  "activity_signal_percentile": 0.5,
-
-  // Percentile of all frames used as the signal level when no voiced frames exist.
-  "activity_signal_fallback_percentile": 0.75,
+  // Percentile of all-frame amplitudes used as the signal level for the activity
+  // threshold (0.75 = 75th percentile, typical singing energy).
+  "activity_signal_percentile": 0.75,
 
   // Fraction of the (signal - noise) range added to the noise floor to form the
   // amplitude activity threshold. 0.2 keeps the threshold close to the noise
   // floor, so soft singing is still detected. Increase (e.g., 0.4) to trim more
   // instrumental bleed out of notes; decrease (e.g., 0.1) to keep softer onsets.
-  "activity_threshold_ratio": 0.12,
+  "activity_threshold_ratio": 0.35,
 
   // Minimum CREPE confidence for a frame to count as vocal activity when
   // trimming/splitting notes within a syllable.
@@ -233,7 +221,7 @@
    // Hz) as the background of the amplitude panel. This is for debugging only:
    // it can be slow and produces many PNG files, so keep it false during normal
    // use.
-   "note_segment_plots": true,
+   "note_segment_plots": false,
 
    // FFmpeg audio bitrate for the extracted MP3.
   // 128kbps is sufficient for pitch detection, BPM analysis, and transcription

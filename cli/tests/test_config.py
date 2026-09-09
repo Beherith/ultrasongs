@@ -34,12 +34,8 @@ class TestConfigDefaults:
         assert cfg.gap_lead_in_ms == 500
         assert cfg.linebreak_beat_offset == 4
         assert cfg.beat_resolution_multiplier == 2
-        assert cfg.activity_quiet_confidence == 0.2
-        assert cfg.activity_voiced_confidence == 0.5
-        assert cfg.activity_noise_percentile == 0.9
-        assert cfg.activity_noise_fallback_percentile == 0.1
-        assert cfg.activity_signal_percentile == 0.5
-        assert cfg.activity_signal_fallback_percentile == 0.75
+        assert cfg.activity_noise_percentile == 0.1
+        assert cfg.activity_signal_percentile == 0.75
         assert cfg.activity_threshold_ratio == 0.2
         assert cfg.note_min_confidence == 0.3
         assert cfg.note_fallback_confidence == 0.5

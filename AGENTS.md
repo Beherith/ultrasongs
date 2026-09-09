@@ -97,7 +97,7 @@ Each processing run writes into its own per-song folder `<output_dir>/<artist> -
 
 - **Auth**: password from the `ULTRASONGS_WEB_PASSWORD` environment variable, falling back to a `ULTRASONGS_WEB_PASSWORD=...` entry in `./.env.local` (gitignored; env var wins) (constant-time compare, Flask session cookie). No TLS is provided — bind to `127.0.0.1` (default) or put a reverse proxy in front. `--no-auth` disables login but is rejected unless the host is `127.0.0.1`/`localhost`. Web server settings (host, port, `web_dir`, retention, upload cap, poll interval) live in `cli/web_config.jsonc` (`--web-config` to override).
 - **Queue**: one job at a time, FIFO (`cli/web/jobs.py`). Uploads are staged, validated (extension + size cap), then moved into the job dir. Each job gets `web_jobs/<id>/{upload,tmp,output}` plus a `job.json` manifest; jobs older than `job_retention_days` are pruned at startup and before each submission.
-- **UI**: one form (artist/title/lyrics + audio/video upload + lyrics `.txt` upload) plus an auto-generated settings accordion with one control per `config.jsonc` key (44), driven by `cli/web/settings_meta.py`. Artist field comes before title. Uploading a media file prefills empty artist/title fields from an `Artist - Title` file name (`split_filename_artist_title`, split on the first dash). Lyrics can be pasted (a `dcc.Textarea`) or uploaded as a `.txt` file (decoded utf-8, falling back to windows-1252); Ultrastar `.txt` lyrics also prefill empty title/artist via `lyrics_prefill`. Form text inputs are explicitly dark-styled (`CSS["input"]`) because the inherited page text color is light. Jobs show live status, queue position, log tail, and download links (ZIP, note editor, HTML preview, stems) served from `/download/<job_id>/<file>`.
+- **UI**: one form (artist/title/lyrics + audio/video upload + lyrics `.txt` upload) plus an auto-generated settings accordion with one control per `config.jsonc` key (40), driven by `cli/web/settings_meta.py`. Artist field comes before title. Uploading a media file prefills empty artist/title fields from an `Artist - Title` file name (`split_filename_artist_title`, split on the first dash). Lyrics can be pasted (a `dcc.Textarea`) or uploaded as a `.txt` file (decoded utf-8, falling back to windows-1252); Ultrastar `.txt` lyrics also prefill empty title/artist via `lyrics_prefill`. Form text inputs are explicitly dark-styled (`CSS["input"]`) because the inherited page text color is light. Jobs show live status, queue position, log tail, and download links (ZIP, note editor, HTML preview, stems) served from `/download/<job_id>/<file>`.
 - **Per-job config**: form values override the base `Config` (revalidated via `config_from_dict`); the job's `temp_dir`/`output_dir` are forced to the job dir, and the ZIP includes intermediates.
 
 ## Code Conventions
@@ -166,7 +166,7 @@ The `process` subcommand runs these stages (`--stage` cuts off after the given s
 
 ## Configuration
 
-`cli/config.jsonc` (44 keys, supports `//` and `/* */` comments). Defaults below are the committed `config.jsonc` values; `cli/config.py` holds fallback defaults for missing/invalid keys. Individual keys can be overridden on the command line with `-o/--override` (repeatable): a JSON object or comma-separated `key=value` pairs, parsed by `cli.config.parse_config_overrides` and merged on top of the loaded file in `load_config()`.
+`cli/config.jsonc` (40 keys, supports `//` and `/* */` comments). Defaults below are the committed `config.jsonc` values; `cli/config.py` holds fallback defaults for missing/invalid keys. Individual keys can be overridden on the command line with `-o/--override` (repeatable): a JSON object or comma-separated `key=value` pairs, parsed by `cli.config.parse_config_overrides` and merged on top of the loaded file in `load_config()`.
 
 | Key | Default | Description |
 |---|---|---|
@@ -194,12 +194,8 @@ The `process` subcommand runs these stages (`--stage` cuts off after the given s
 | `gap_lead_in_ms` | `500` | Fallback lead-in before first note for `#GAP` |
 | `linebreak_beat_offset` | `4` | Beats before next note for line breaks |
 | `beat_resolution_multiplier` | `2` | Scales exported BPM for a finer Ultrastar beat grid |
-| `activity_quiet_confidence` | `0.2` | Min CREPE confidence for "quiet" frames in activity threshold |
-| `activity_voiced_confidence` | `0.5` | Min CREPE confidence for "voiced" frames in activity threshold |
-| `activity_noise_percentile` | `0.9` | Percentile of quiet frames for noise floor |
-| `activity_noise_fallback_percentile` | `0.1` | Percentile of all frames for noise floor fallback |
-| `activity_signal_percentile` | `0.5` | Percentile of voiced frames for signal level |
-| `activity_signal_fallback_percentile` | `0.75` | Percentile of all frames for signal fallback |
+| `activity_noise_percentile` | `0.1` | Percentile of all-frame amplitudes for noise floor |
+| `activity_signal_percentile` | `0.75` | Percentile of all-frame amplitudes for signal level |
 | `activity_threshold_ratio` | `0.2` | Fraction of (signal - noise) added to noise floor |
 | `note_min_confidence` | `0.3` | Min CREPE confidence for vocal activity in note segmentation |
 | `note_fallback_confidence` | `0.5` | Fallback confidence when no frame meets the activity threshold |
@@ -267,7 +263,7 @@ pytest cli/tests/
 | `cli/tests/test_syllabify.py` | `split_word()`, `syllabify_line()`, multi-language, unsupported |
 | `cli/tests/test_transcribe_alignment.py` | CREPE/band-energy frame-count parity, exact frame alignment (incl. real torchcrepe) |
 | `cli/tests/test_ultrastar.py` | `ms_to_beats()`, `build_ultrastar_txt()`, `parse_ultrastar_txt()`, `extract_lyrics_from_ultrastar()`, round-trip |
-| `cli/tests/test_web_app.py` | Layout generation (all 44 controls), input validation, config-override flow, process/upload callbacks |
+| `cli/tests/test_web_app.py` | Layout generation (all 40 controls), input validation, config-override flow, process/upload callbacks |
 | `cli/tests/test_web_auth.py` | Flask `test_client`: anon redirect, wrong/right password, logout, `--no-auth` host guard |
 | `cli/tests/test_web_jobs.py` | submit→running→succeeded/failed, FIFO ordering, log-handler capture, retention pruning, `snapshot()` shape |
 | `cli/tests/test_whisperx_transcribe.py` | Word/character extraction, artifact filters, model loading (monkeypatched), alignment-model caching, faster-whisper paths, Windows DLL registration |

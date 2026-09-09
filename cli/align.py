@@ -473,14 +473,14 @@ def _percentile(values: list[float], fraction: float) -> float:
 
 
 def _activity_threshold(frames: list[PitchFrame], config: Config) -> float:
-    """Estimate a song-relative energy threshold from quiet and voiced frames."""
+    """Estimate a song-relative energy threshold from amplitude percentiles.
+
+    Uses pure amplitude percentiles over all frames (not CREPE confidence) so the
+    gate stays valid even when pitch confidence is uncorrelated with loudness.
+    """
     amplitudes = [f.amplitude for f in frames]
-    quiet = [f.amplitude for f in frames if f.confidence < config.activity_quiet_confidence]
-    voiced = [f.amplitude for f in frames if f.confidence >= config.activity_voiced_confidence]
-    noise = _percentile(quiet, config.activity_noise_percentile) \
-        if quiet else _percentile(amplitudes, config.activity_noise_fallback_percentile)
-    signal = _percentile(voiced, config.activity_signal_percentile) \
-        if voiced else _percentile(amplitudes, config.activity_signal_fallback_percentile)
+    noise = _percentile(amplitudes, config.activity_noise_percentile)
+    signal = _percentile(amplitudes, config.activity_signal_percentile)
     return noise + max(0.0, signal - noise) * config.activity_threshold_ratio
 
 
