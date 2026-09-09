@@ -184,3 +184,4 @@ class UltrastarMeta:
     video: str | None = None
     vocals: str | None = None       # filename within output package
     instrumental: str | None = None # filename within output package
+    cover: str | None = None        # filename within output package

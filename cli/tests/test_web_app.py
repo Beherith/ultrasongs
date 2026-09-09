@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from dash import no_update
+from dash.exceptions import PreventUpdate
 from cli.config import Config
 from cli.web import app as webapp
 from cli.web import settings_meta
@@ -46,8 +47,9 @@ class TestLayout:
         assert len(expected) == 40
         # Core form controls exist
         for cid in ("upload", "title", "artist", "lyrics", "lyrics-upload",
-                    "lyrics-info", "process-btn", "reset-btn", "job-status",
-                    "job-log", "job-result", "upload-store", "active-job-store",
+                    "lyrics-info", "cover-upload", "cover-info", "process-btn",
+                    "reset-btn", "job-status", "job-log", "job-result",
+                    "upload-store", "cover-store", "active-job-store",
                     "poll-interval"):
             assert cid in ids, cid
 
@@ -238,8 +240,8 @@ class _FakeManager:
         self.max_upload_bytes = int(max_upload_mb * 1024 * 1024)
         self.submitted = []
 
-    def submit(self, req, upload_bytes, upload_name):
-        self.submitted.append((req, upload_bytes, upload_name))
+    def submit(self, req, upload_bytes, upload_name, cover_bytes=None, cover_name=None):
+        self.submitted.append((req, upload_bytes, upload_name, cover_bytes, cover_name))
         return _FakeJob()
 
     def job(self, job_id):
@@ -282,7 +284,8 @@ class TestProcessClickCallback:
         staged = tmp_path / "staged.mp3"
         staged.write_bytes(b"x")
         upload_info = {"path": str(staged), "name": "song.mp3", "size": 1}
-        job_id, error = cb(1, upload_info, "", "Artist", "lyrics", *self._setting_values(tmp_path))
+        job_id, error = cb(1, upload_info, "", "Artist", "lyrics", None,
+                           *self._setting_values(tmp_path))
         assert job_id is no_update
         assert "title" in _text(error)
         assert manager.submitted == []
@@ -290,7 +293,8 @@ class TestProcessClickCallback:
     def test_rejects_missing_upload_without_submitting(self, tmp_path):
         app, manager = self._make_app(tmp_path)
         cb = _find_callback(app, "process_click")
-        job_id, error = cb(1, None, "Title", "Artist", "lyrics", *self._setting_values(tmp_path))
+        job_id, error = cb(1, None, "Title", "Artist", "lyrics", None,
+                           *self._setting_values(tmp_path))
         assert error is not None
         assert "upload" in _text(error)
         assert manager.submitted == []
@@ -301,17 +305,18 @@ class TestProcessClickCallback:
         staged = tmp_path / "staged.mp3"
         staged.write_bytes(b"ID3data")
         upload_info = {"path": str(staged), "name": "song.mp3", "size": 7}
-        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey you",
+        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey you", None,
                            *self._setting_values(tmp_path))
         assert error is None
         assert job_id == "fakejob123"
         assert len(manager.submitted) == 1
-        req, upload_bytes, name = manager.submitted[0]
+        req, upload_bytes, name, cover_bytes, cover_name = manager.submitted[0]
         assert req.title == "Title"
         assert req.artist == "Artist"
         assert req.lyrics_text == "Hey you"
         assert upload_bytes == b"ID3data"
         assert name == "song.mp3"
+        assert cover_bytes is None and cover_name is None
         assert not staged.exists()  # staging cleaned up
 
     def test_invalid_setting_value_rejected(self, tmp_path):
@@ -324,9 +329,43 @@ class TestProcessClickCallback:
         # whisperx_batch_size is index 5 in SETTINGS
         idx = [m.key for m in settings_meta.SETTINGS].index("whisperx_batch_size")
         values[idx] = "0"
-        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey", *values)
+        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey", None, *values)
         assert error is not None
         assert "Invalid setting" in _text(error)
+        assert manager.submitted == []
+
+    def test_submits_valid_job_with_cover(self, tmp_path):
+        app, manager = self._make_app(tmp_path)
+        cb = _find_callback(app, "process_click")
+        staged = tmp_path / "staged.mp3"
+        staged.write_bytes(b"ID3data")
+        upload_info = {"path": str(staged), "name": "song.mp3", "size": 7}
+        cover = tmp_path / "staged_cover.jpg"
+        cover.write_bytes(b"jpegdata")
+        cover_info = {"path": str(cover), "name": "cover.jpg", "size": 8}
+        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey you", cover_info,
+                           *self._setting_values(tmp_path))
+        assert error is None
+        assert job_id == "fakejob123"
+        assert len(manager.submitted) == 1
+        req, upload_bytes, name, cover_bytes, cover_name = manager.submitted[0]
+        assert upload_bytes == b"ID3data"
+        assert cover_bytes == b"jpegdata"
+        assert cover_name == "cover.jpg"
+        assert not staged.exists()
+        assert not cover.exists()  # cover staging cleaned up
+
+    def test_missing_cover_file_rejected(self, tmp_path):
+        app, manager = self._make_app(tmp_path)
+        cb = _find_callback(app, "process_click")
+        staged = tmp_path / "staged.mp3"
+        staged.write_bytes(b"ID3data")
+        upload_info = {"path": str(staged), "name": "song.mp3", "size": 7}
+        cover_info = {"path": str(tmp_path / "gone.jpg"), "name": "gone.jpg", "size": 8}
+        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey you", cover_info,
+                           *self._setting_values(tmp_path))
+        assert job_id is no_update
+        assert "missing" in _text(error)
         assert manager.submitted == []
 
 
@@ -413,3 +452,61 @@ class TestLyricsFileCallback:
         lyrics, info = cb(content, "lyrics.pdf")
         assert lyrics is no_update
         assert "Unsupported lyrics file type" in _text(info)
+
+
+class TestCoverFileCallback:
+    def _find(self, app, name):
+        return _find_callback(app, name)
+
+    def _make_app(self, tmp_path):
+        config = Config(temp_dir=str(tmp_path / "tmp"), output_dir=str(tmp_path / "out"))
+        manager = _FakeManager(tmp_path / "jobs")
+        app = create_app(WebConfig(), config, manager, password=None)
+        return app
+
+    def test_accepts_jpeg(self, tmp_path):
+        app = self._make_app(tmp_path)
+        cb = self._find(app, "cover_picked")
+        payload = b"\xff\xd8\xffjpegdata"
+        content = "data:image/jpeg;base64," + base64.b64encode(payload).decode()
+        store, info = cb(content, "cover.jpeg")
+        assert store is not None
+        assert store["name"] == "cover.jpeg"
+        staged = Path(store["path"])
+        assert staged.read_bytes() == payload
+        assert staged.parent.name == webapp.STAGING_DIRNAME
+        assert "cover.jpeg" in _text(info)
+
+    def test_accepts_jpg(self, tmp_path):
+        app = self._make_app(tmp_path)
+        cb = self._find(app, "cover_picked")
+        content = "data:image/jpeg;base64," + base64.b64encode(b"x").decode()
+        store, info = cb(content, "cover.jpg")
+        assert store is not None
+        assert store["name"] == "cover.jpg"
+
+    def test_rejects_bad_extension(self, tmp_path):
+        app = self._make_app(tmp_path)
+        cb = self._find(app, "cover_picked")
+        content = "data:image/png;base64," + base64.b64encode(b"png").decode()
+        store, info = cb(content, "cover.png")
+        assert store is no_update
+        assert "Unsupported cover image type" in _text(info)
+
+    def test_cleared_removes_staged_file(self, tmp_path):
+        app = self._make_app(tmp_path)
+        picked = self._find(app, "cover_picked")
+        cleared = self._find(app, "cover_cleared")
+        content = "data:image/jpeg;base64," + base64.b64encode(b"x").decode()
+        store, info = picked(content, "cover.jpg")
+        staged = Path(store["path"])
+        assert staged.is_file()
+        result = cleared(1, store)
+        assert result is None
+        assert not staged.exists()
+
+    def test_cleared_noop_without_clicks(self, tmp_path):
+        app = self._make_app(tmp_path)
+        cleared = self._find(app, "cover_cleared")
+        with pytest.raises(PreventUpdate):
+            cleared(0, None)

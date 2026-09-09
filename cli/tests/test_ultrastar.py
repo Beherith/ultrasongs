@@ -47,6 +47,21 @@ class TestBuildUltrastarTxt:
         txt = build_ultrastar_txt(notes, meta)
         assert "#VIDEO:test.mp4" in txt
 
+    def test_with_cover(self):
+        meta = UltrastarMeta(title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500,
+                             cover="test_cover.jpeg")
+        notes = []
+        txt = build_ultrastar_txt(notes, meta)
+        header = txt.split("\n\n")[0].split("\n")
+        assert header == [
+            "#TITLE:Test",
+            "#ARTIST:Artist",
+            "#MP3:test.mp3",
+            "#COVER:test_cover.jpeg",
+            "#BPM:120.00",
+            "#GAP:500",
+        ]
+
     def test_with_stems(self):
         meta = UltrastarMeta(
             title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500,
@@ -149,6 +164,33 @@ E
         meta, notes = parse_ultrastar_txt(content)
         assert meta.vocals == "test_vocals.mp3"
         assert meta.instrumental == "test_accompaniment.mp3"
+
+    def test_with_cover(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#COVER:test_cover.jpeg
+#BPM:120.00
+#GAP:500
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.cover == "test_cover.jpeg"
+
+    def test_without_cover(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:120.00
+#GAP:500
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.cover is None
 
     def test_without_stems(self):
         content = """#TITLE:Test
@@ -430,6 +472,7 @@ class TestRoundTrip:
             video="r.mp4",
             vocals="r_vocals.mp3",
             instrumental="r_accompaniment.mp3",
+            cover="r_cover.jpeg",
         )
         original_notes = [
             UltrastarNote(note_type=":", start_beat=0, duration=8, pitch=64, syllable="hello"),
@@ -447,6 +490,7 @@ class TestRoundTrip:
         assert parsed_meta.video == original_meta.video
         assert parsed_meta.vocals == original_meta.vocals
         assert parsed_meta.instrumental == original_meta.instrumental
+        assert parsed_meta.cover == original_meta.cover
         assert len(parsed_notes) == len(original_notes)
 
         for i, (orig, parsed) in enumerate(zip(original_notes, parsed_notes)):

@@ -28,6 +28,7 @@ def _make_request(tmp: Path) -> ProcessRequest:
         lyrics_text="Hello",
         input_path=tmp / "orig.mp3",
         video_path=None,
+        cover_path=None,
         config=config,
         output_dir=tmp / "req_out",
     )
@@ -58,6 +59,46 @@ class TestSubmitValidation:
         manager = JobManager(web_dir=tmp_path / "jobs")
         with pytest.raises(ValueError, match="Unsupported file type"):
             manager.submit(_make_request(tmp_path), b"x", "noext")
+
+    def test_rejects_bad_cover_extension(self, tmp_path):
+        manager = JobManager(web_dir=tmp_path / "jobs")
+        with pytest.raises(ValueError, match="Unsupported cover file type"):
+            manager.submit(_make_request(tmp_path), b"x", "song.mp3",
+                           cover_bytes=b"png", cover_name="cover.png")
+
+    def test_rejects_oversized_cover(self, tmp_path):
+        manager = JobManager(web_dir=tmp_path / "jobs", max_upload_mb=1)
+        with pytest.raises(ValueError, match="Cover too large"):
+            manager.submit(_make_request(tmp_path), b"x", "song.mp3",
+                           cover_bytes=b"x" * (2 * 1024 * 1024), cover_name="cover.jpg")
+
+
+class TestSubmitCover:
+    def test_submit_stores_cover_in_upload_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cli.pipeline.run_process", lambda req: ProcessResult(ok=True))
+        manager = JobManager(web_dir=tmp_path / "jobs")
+        manager.start()
+        try:
+            job = manager.submit(_make_request(tmp_path), b"ID3data", "song.mp3",
+                                 cover_bytes=b"jpegdata", cover_name="Album Cover.JPG")
+            assert job.status == STATUS_QUEUED
+            cover = job.dir / "upload" / "cover.jpg"
+            assert cover.is_file()
+            assert cover.read_bytes() == b"jpegdata"
+            assert job.request.cover_path == cover
+        finally:
+            manager.stop()
+
+    def test_submit_without_cover(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cli.pipeline.run_process", lambda req: ProcessResult(ok=True))
+        manager = JobManager(web_dir=tmp_path / "jobs")
+        manager.start()
+        try:
+            job = manager.submit(_make_request(tmp_path), b"ID3data", "song.mp3")
+            assert job.request.cover_path is None
+            assert not (job.dir / "upload" / "cover.jpg").exists()
+        finally:
+            manager.stop()
 
 
 class TestJobLifecycle:

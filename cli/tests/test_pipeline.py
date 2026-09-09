@@ -128,6 +128,7 @@ def _make_request(tmp: Path, input_name: str = "song.mp3", **overrides) -> Proce
         lyrics_text="Hello World",
         input_path=input_path,
         video_path=None,
+        cover_path=None,
         config=config,
         output_dir=tmp / "out",
     )
@@ -329,6 +330,23 @@ class TestRunProcess:
         run_process(req)
         assert calls.kwargs["generate"]["video_filename"] == "Tester - Test Song.mov"
         assert calls.kwargs["package"]["video_path"] == video
+
+    def test_cover_filename_and_path(self, monkeypatch, tmp_path):
+        calls = _Calls()
+        self._patch_stages(monkeypatch, tmp_path, calls)
+        cover = tmp_path / "cover.jpeg"
+        cover.write_bytes(b"jpeg")
+        run_process(_make_request(tmp_path, cover_path=cover))
+        safe = "Tester - Test Song"
+        assert calls.kwargs["generate"]["cover_filename"] == f"{safe}_cover.jpeg"
+        assert calls.kwargs["package"]["cover_path"] == cover
+
+    def test_missing_cover_file_ignored(self, monkeypatch, tmp_path):
+        calls = _Calls()
+        self._patch_stages(monkeypatch, tmp_path, calls)
+        run_process(_make_request(tmp_path, cover_path=tmp_path / "nope.jpeg"))
+        assert calls.kwargs["generate"]["cover_filename"] is None
+        assert calls.kwargs["package"]["cover_path"] is None
 
     def test_stage_extract_only(self, monkeypatch, tmp_path):
         calls = _Calls()

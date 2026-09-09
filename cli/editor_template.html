@@ -109,7 +109,7 @@
   <div class="transport" id="transport"></div>
 
   <div class="help">
-    Drag a note up/down = pitch, left/right = start &middot; drag an edge = duration &middot; double-click = edit lyric &middot;
+    Drag a note up/down = pitch, left/right = start &middot; drag an edge = duration &middot; double-click = edit lyric (empty canvas = insert <i>~</i> note) &middot;
     <kbd>Space</kbd> play &middot; <kbd>&#8592;</kbd>/<kbd>&#8594;</kbd> line &middot; <kbd>S</kbd> split &middot; <kbd>M</kbd> merge &middot;
     <kbd>G</kbd> gold &middot; <kbd>L</kbd> lyric &middot; <kbd>Del</kbd> delete &middot; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &middot; <kbd>Ctrl</kbd>+<kbd>S</kbd> download &middot;
     toolbar: <b>Load Ultrastar .txt</b> reloads a saved song &middot; <b>Load pitch JSON</b> swaps the pitch overlay &middot;
@@ -603,12 +603,53 @@
     const g=e.target.closest("[data-id]");
     const id=g?+g.getAttribute("data-id"):selectedId;
     const note=notes.find(n=>n.id===id);
-    if(!note) return;
-    lastTap=null;
-    selectedId=id;
-    openLyricPopover(note);
+    if(note){
+      lastTap=null;
+      selectedId=id;
+      openLyricPopover(note);
+      e.preventDefault();
+      return;
+    }
+    if(g) return;
+    insertNoteAt(e);
     e.preventDefault();
   });
+  function insertNoteAt(e){
+    const p=toSvgPoint(e);
+    if(p.x<PAD_L||p.x>PAD_L+PLOT_W||p.y<PAD_T||p.y>PAD_T+PLOT_H) return;
+    const ms=cur.t0+(p.x-PAD_L)/PLOT_W*(cur.t1-cur.t0);
+    const midi=clamp(Math.round(cur.hi-(p.y-PAD_T)/PLOT_H*(cur.hi-cur.lo)),MIDI_MIN,MIDI_MAX);
+    const start=Math.max(0,msToBeat(ms));
+    let line=null;
+    for(const g of computeGroups(notes)){
+      let a=Infinity,z=-Infinity;
+      for(const n of g){ if(n.start<a)a=n.start; if(n.start+n.dur>z)z=n.start+n.dur; }
+      if(start>=a&&start<=z){ line=g; break; }
+    }
+    pushUndo();
+    const nn={id:nextId(),type:":",start,dur:1,pitch:midi,syl:"~"};
+    if(line){
+      let prev=null,nextN=null;
+      for(const n of line){
+        if(nextN) break;
+        if(n.start>nn.start) nextN=n;
+        else prev=n;
+      }
+      if(prev&&prev.start+prev.dur>nn.start) nn.start=prev.start+prev.dur;
+      if(nextN) nn.dur=Math.max(1,nextN.start-nn.start);
+      const base=notes.findIndex(n=>n.id===line[0].id);
+      let insIdx=base+line.length;
+      for(let i=0;i<line.length;i++){ if(line[i].start>nn.start){ insIdx=base+i; break; } }
+      notes.splice(insIdx,0,nn);
+    } else {
+      let nextIdx=-1;
+      for(let i=0;i<notes.length;i++){ if(notes[i].type!=="-"&&notes[i].start>start){ nextIdx=i; break; } }
+      if(nextIdx>=0) notes.splice(nextIdx,0,nn,{type:"-",start:notes[nextIdx].start,dur:0,pitch:0,syl:""});
+      else notes.push({type:"-",start,dur:0,pitch:0,syl:""},nn);
+    }
+    selectedId=nn.id;
+    renderPage();
+  }
 
   // ── edit operations ──────────────────────────────────────────────────────
   function nextId(){ let m=0; for(const n of notes) if(n.id>m)m=n.id; return m+1; }

@@ -67,6 +67,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Artist name (default: #ARTIST tag of the lyrics file, if it is an Ultrastar .txt)",
     )
     proc.add_argument("--video", default=None, help="Optional video file")
+    proc.add_argument(
+        "--cover",
+        default=None,
+        help="Optional JPEG album cover image (packaged into the output and referenced as #COVER)",
+    )
     proc.add_argument("--output", default=None, help="Output directory (overrides config)")
     proc.add_argument(
         "--stage",
@@ -224,6 +229,7 @@ def _cmd_process(args: argparse.Namespace, config: "Config") -> int:  # type: ig
         lyrics_text=lyrics_text,
         input_path=mp3_path,
         video_path=Path(args.video) if args.video else None,
+        cover_path=Path(args.cover) if args.cover else None,
         config=config,
         output_dir=Path(args.output) if args.output else config.output_path,
         stage=args.stage,

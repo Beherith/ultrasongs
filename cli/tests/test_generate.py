@@ -169,6 +169,33 @@ class TestGenerateUltrastar:
         )
         assert "#VIDEO:test.mp4" in txt
 
+    def test_cover_filename(self):
+        syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            cover_filename="test_cover.jpeg",
+            config=Config(),
+        )
+        assert "#COVER:test_cover.jpeg" in txt
+
+    def test_without_cover(self):
+        syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            config=Config(),
+        )
+        assert "#COVER:" not in txt
+
     def test_stem_filenames(self):
         syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
         txt = generate_ultrastar(

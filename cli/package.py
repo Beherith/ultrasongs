@@ -47,6 +47,7 @@ def package_output(
     video_path: Path | None = None,
     vocals_path: Path | None = None,
     accompaniment_path: Path | None = None,
+    cover_path: Path | None = None,
     extra_files: Sequence[Path] = (),
     intermediates_prefix: str = "intermediates",
 ) -> Path:
@@ -59,6 +60,7 @@ def package_output(
             <name><ext>    (optional video, from video_path)
             <name>_vocals.mp3      (optional)
             <name>_accompaniment.mp3  (optional)
+            <name>_cover<ext>      (optional cover image, from cover_path)
             <name>_editor.html, <name>_editor.json  (when already generated)
             <name>.zip     (ZIP of all above plus extra_files under intermediates/)
 
@@ -70,6 +72,7 @@ def package_output(
         video_path: Optional video file.
         vocals_path: Optional vocals stem.
         accompaniment_path: Optional accompaniment stem.
+        cover_path: Optional cover image (copied to <name>_cover<ext>).
         extra_files: Optional intermediate files, written into the ZIP under
             intermediates/<name>.
         intermediates_prefix: ZIP directory for extra_files.
@@ -101,6 +104,11 @@ def package_output(
         acc_out = output_dir / f"{name}_accompaniment.mp3"
         shutil.copy2(accompaniment_path, acc_out)
         logger.info(f"Copied: {acc_out}")
+
+    if cover_path and Path(cover_path).exists():
+        cover_out = output_dir / f"{name}_cover{Path(cover_path).suffix.lower()}"
+        shutil.copy2(cover_path, cover_out)
+        logger.info(f"Copied: {cover_out}")
 
     # Create ZIP
     zip_path = output_dir / f"{name}.zip"

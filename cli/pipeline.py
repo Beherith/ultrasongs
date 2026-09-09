@@ -23,6 +23,7 @@ class ProcessRequest:
     lyrics_text: str
     input_path: Path
     video_path: Path | None
+    cover_path: Path | None
     config: Config
     output_dir: Path
     stage: str = "all"
@@ -195,6 +196,12 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
     if stage in ("generate", "all"):
         logger.info("Step 5/5: Generating Ultrastar file…")
         safe_name = sanitize_output_name(artist, title)
+        cover_path = Path(req.cover_path) if req.cover_path else None
+        cover_filename = (
+            f"{safe_name}_cover{cover_path.suffix.lower()}"
+            if cover_path is not None and cover_path.is_file()
+            else None
+        )
         txt_content = generate_ultrastar(
             aligned_syllables=aligned,
             bpm=bpm_result.bpm,
@@ -206,6 +213,7 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
             video_filename=f"{safe_name}{video_path.suffix.lower()}" if video_path else None,
             vocals_filename=f"{safe_name}_vocals.mp3" if Path(result.vocals_path).exists() else None,
             instrumental_filename=f"{safe_name}_accompaniment.mp3" if Path(result.accompaniment_path).exists() else None,
+            cover_filename=cover_filename,
             config=config,
         )
         logger.info("Step 5/5: Ultrastar file generated")
@@ -242,6 +250,7 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
             video_path=video_path,
             vocals_path=Path(result.vocals_path),
             accompaniment_path=Path(result.accompaniment_path),
+            cover_path=cover_path if cover_filename else None,
             extra_files=extra_files,
         )
         logger.info(f"Output packaged to {run_dir}")

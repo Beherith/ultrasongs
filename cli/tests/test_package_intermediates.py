@@ -113,6 +113,39 @@ class TestPackageOutputZip:
             "intermediates/align_debug.json",
         }
 
+    def test_cover_copied_and_zipped(self, tmp_path: Path):
+        out = tmp_path / "out"
+        mp3 = _make_mp3(tmp_path / "song.mp3")
+        cover = tmp_path / "album_cover.jpg"
+        cover.write_bytes(b"jpegdata")
+        package_output(
+            txt_content="#TITLE: T\n",
+            mp3_path=mp3,
+            output_dir=out,
+            name="T",
+            cover_path=cover,
+        )
+        cover_out = out / "T_cover.jpg"
+        assert cover_out.is_file()
+        assert cover_out.read_bytes() == b"jpegdata"
+        with zipfile.ZipFile(out / "T.zip") as zf:
+            names = set(zf.namelist())
+        assert names == {"T.txt", "T.mp3", "T_cover.jpg"}
+
+    def test_missing_cover_file_skipped(self, tmp_path: Path):
+        out = tmp_path / "out"
+        mp3 = _make_mp3(tmp_path / "song.mp3")
+        package_output(
+            txt_content="#TITLE: T\n",
+            mp3_path=mp3,
+            output_dir=out,
+            name="T",
+            cover_path=tmp_path / "ghost.jpg",
+        )
+        with zipfile.ZipFile(out / "T.zip") as zf:
+            names = set(zf.namelist())
+        assert names == {"T.txt", "T.mp3"}
+
     def test_missing_extra_file_skipped(self, tmp_path: Path):
         out = tmp_path / "out"
         mp3 = _make_mp3(tmp_path / "song.mp3")

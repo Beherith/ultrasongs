@@ -321,6 +321,14 @@ class TestGenerateEditor:
         assert "updateSelectionUi();" in pointerdown
         assert "renderPage();" not in pointerdown
 
+    def test_double_click_empty_canvas_inserts_note(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        assert "function insertNoteAt(e){" in html
+        assert "insertNoteAt(e);" in html
+        assert "if(g) return;" in html
+        assert "clamp(Math.round(cur.hi-(p.y-PAD_T)/PLOT_H*(cur.hi-cur.lo)),MIDI_MIN,MIDI_MAX)" in html
+        assert 'const nn={id:nextId(),type:":",start,dur:1,pitch:midi,syl:"~"};' in html
+
     def test_add_remove_line_buttons(self, tmp_path):
         html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
         assert 'id="addLineBtn"' in html

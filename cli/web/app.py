@@ -20,7 +20,7 @@ from cli.config import Config, config_from_dict, load_jsonc
 from cli.logging_setup import get_logger
 from cli.pipeline import ProcessRequest, prepare_lyrics_input
 from cli.web import auth, settings_meta
-from cli.web.jobs import ALLOWED_UPLOAD_EXTENSIONS, JobManager
+from cli.web.jobs import ALLOWED_UPLOAD_EXTENSIONS, COVER_UPLOAD_EXTENSIONS, JobManager
 
 logger = get_logger("cli.web.app")
 
@@ -128,6 +128,8 @@ def lyrics_prefill(lyrics: str, current_title: str, current_artist: str) -> tupl
 
 LYRICS_UPLOAD_EXTENSIONS = {".txt"}
 LYRICS_MAX_BYTES = 10 * 1024 * 1024
+
+COVER_MAX_BYTES = 10 * 1024 * 1024
 
 
 def split_filename_artist_title(filename: str) -> tuple[str, str]:
@@ -319,6 +321,24 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
                                      "fontFamily": "ui-monospace, monospace",
                                      "fontSize": "13px"}),
             ]),
+            html.Div([
+                html.Div([
+                    html.Label("Cover art (optional)",
+                               style={**CSS["label"], "display": "inline",
+                                      "marginRight": "12px", "marginBottom": "0"}),
+                    dcc.Upload(
+                        id="cover-upload",
+                        children=html.Span(
+                            "or upload a JPEG cover image",
+                            style={"color": "#7dd3fc", "fontSize": "13px",
+                                   "textDecoration": "underline", "cursor": "pointer"},
+                        ),
+                        style={"display": "inline-block", "marginBottom": "10px"},
+                        multiple=False,
+                    ),
+                ]),
+                html.Div(id="cover-info"),
+            ]),
             html.Div(
                 [_setting_control(
                     settings_meta.SETTINGS_BY_KEY["whisper_language"],
@@ -375,6 +395,7 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
         [
             page,
             dcc.Store(id="upload-store"),
+            dcc.Store(id="cover-store"),
             dcc.Store(id="active-job-store"),
             dcc.Interval(id="poll-interval", interval=web_cfg.poll_interval_s * 1000),
         ],
@@ -521,6 +542,50 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
         return None
 
     @app.callback(
+        Output("cover-store", "data"),
+        Output("cover-info", "children"),
+        Input("cover-upload", "contents"),
+        State("cover-upload", "filename"),
+        prevent_initial_call=True,
+    )
+    def cover_picked(contents: str | None, filename: str | None):
+        if not contents or not filename:
+            raise PreventUpdate
+        suffix = Path(filename).suffix.lower()
+        if suffix not in COVER_UPLOAD_EXTENSIONS:
+            return no_update, html.Div(
+                f"Unsupported cover image type '{suffix or filename}'. Use a .jpg or .jpeg file.",
+                style=CSS["error"])
+        data = base64.b64decode(contents.split(",", 1)[1])
+        if len(data) > COVER_MAX_BYTES:
+            return no_update, html.Div(
+                f"Cover image too large (limit {COVER_MAX_BYTES // (1024 * 1024)} MB).",
+                style=CSS["error"])
+        staging = manager.web_dir / STAGING_DIRNAME
+        staging.mkdir(parents=True, exist_ok=True)
+        staged = staging / f"{uuid.uuid4().hex[:12]}{suffix}"
+        staged.write_bytes(data)
+        return {"path": str(staged), "name": filename, "size": len(data)}, html.Div(
+            [html.Span(f"{filename} ({len(data) // 1024} KB)",
+                       style={"color": "#34d399", "fontSize": "13px"}),
+              html.A("remove", href="#", id="cover-clear",
+                     style={"marginLeft": "10px", "color": "#9ca3af",
+                            "fontSize": "13px", "textDecoration": "underline"})],
+        )
+
+    @app.callback(
+        Output("cover-store", "data", allow_duplicate=True),
+        Input("cover-clear", "n_clicks"),
+        State("cover-store", "data"),
+        prevent_initial_call=True,
+    )
+    def cover_cleared(n_clicks, store):
+        if not n_clicks or store is None:
+            raise PreventUpdate
+        _remove_staged(store)
+        return None
+
+    @app.callback(
         Output("title", "value", allow_duplicate=True),
         Output("artist", "value", allow_duplicate=True),
         Input("lyrics", "value"),
@@ -556,10 +621,11 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
         State("title", "value"),
         State("artist", "value"),
         State("lyrics", "value"),
+        State("cover-store", "data"),
         *[State(SETTING_ID.format(key=m.key), "value") for m in settings_meta.SETTINGS],
         prevent_initial_call=True,
     )
-    def process_click(n_clicks, upload_info, title, artist, lyrics, *setting_values):
+    def process_click(n_clicks, upload_info, title, artist, lyrics, cover_info, *setting_values):
         if not n_clicks:
             raise PreventUpdate
         title = (title or "").strip()
@@ -579,6 +645,15 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
 
         lyrics_text, _ = prepare_lyrics_input(lyrics)
         base_dir = Path(upload_info["path"])
+        cover_bytes = None
+        cover_name = None
+        if cover_info:
+            cover_file = Path(cover_info["path"])
+            if not cover_file.is_file():
+                return no_update, html.Div(
+                    "Cover image is missing. Please upload it again.", style=CSS["error"])
+            cover_bytes = cover_file.read_bytes()
+            cover_name = cover_info["name"]
         try:
             upload_bytes = base_dir.read_bytes()
             req = ProcessRequest(
@@ -587,15 +662,18 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
                 lyrics_text=lyrics_text,
                 input_path=base_dir,
                 video_path=None,
+                cover_path=None,
                 config=job_config,
                 output_dir=Path(job_config.output_dir),
                 include_intermediates=True,
             )
-            job = manager.submit(req, upload_bytes, Path(upload_info["name"]).name)
+            job = manager.submit(req, upload_bytes, Path(upload_info["name"]).name,
+                                 cover_bytes=cover_bytes, cover_name=cover_name)
         except ValueError as exc:
             return no_update, html.Div(str(exc), style=CSS["error"])
         finally:
             _remove_staged(upload_info)
+            _remove_staged(cover_info)
         logger.info(f"Job {job.id} submitted from web: {title!r}")
         return job.id, None
 

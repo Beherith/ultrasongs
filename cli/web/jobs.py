@@ -22,6 +22,8 @@ ALLOWED_UPLOAD_EXTENSIONS = {
     ".mp4", ".mkv", ".webm", ".mov", ".avi",
 }
 
+COVER_UPLOAD_EXTENSIONS = {".jpg", ".jpeg"}
+
 STATUS_QUEUED = "queued"
 STATUS_RUNNING = "running"
 STATUS_SUCCEEDED = "succeeded"
@@ -128,8 +130,14 @@ class JobManager:
 
     # ── submission ─────────────────────────────────────────────────────────
 
-    def submit(self, req: ProcessRequest, upload_bytes: bytes, upload_name: str) -> Job:
-        """Create the job directory, store the upload, and enqueue the job."""
+    def submit(self, req: ProcessRequest, upload_bytes: bytes, upload_name: str,
+               cover_bytes: bytes | None = None, cover_name: str | None = None) -> Job:
+        """Create the job directory, store the upload, and enqueue the job.
+
+        ``cover_bytes``/``cover_name`` optionally carry a JPEG album cover,
+        stored in the job's upload dir and wired into the request as
+        ``cover_path``.
+        """
         suffix = Path(upload_name).suffix.lower()
         if suffix not in ALLOWED_UPLOAD_EXTENSIONS:
             raise ValueError(f"Unsupported file type: '{suffix or upload_name}'")
@@ -138,6 +146,19 @@ class JobManager:
                 f"Upload too large: {len(upload_bytes) / (1024 * 1024):.0f} MB "
                 f"(limit {self.max_upload_bytes / (1024 * 1024):.0f} MB)"
             )
+        cover_path: Path | None = None
+        if cover_bytes is not None:
+            cover_suffix = Path(cover_name or "").suffix.lower()
+            if cover_suffix not in COVER_UPLOAD_EXTENSIONS:
+                raise ValueError(
+                    f"Unsupported cover file type: '{cover_suffix or cover_name}' "
+                    f"(use a .jpg or .jpeg)"
+                )
+            if len(cover_bytes) > self.max_upload_bytes:
+                raise ValueError(
+                    f"Cover too large: {len(cover_bytes) / (1024 * 1024):.0f} MB "
+                    f"(limit {self.max_upload_bytes / (1024 * 1024):.0f} MB)"
+                )
 
         self.prune_old_jobs()
 
@@ -154,6 +175,10 @@ class JobManager:
             (job.dir / sub).mkdir(parents=True, exist_ok=True)
         job.upload_path.write_bytes(upload_bytes)
 
+        if cover_bytes is not None:
+            cover_path = job.dir / "upload" / f"cover{cover_suffix}"
+            cover_path.write_bytes(cover_bytes)
+
         job.request = dataclasses.replace(
             req,
             config=dataclasses.replace(
@@ -163,6 +188,7 @@ class JobManager:
             ),
             output_dir=job.output_dir,
             input_path=job.upload_path,
+            cover_path=cover_path,
         )
         job.write_manifest()
 
