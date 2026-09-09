@@ -53,6 +53,23 @@ class TestAuthGuard:
         assert "/login" in resp.headers["Location"]
         assert client.get("/").status_code == 302
 
+    @pytest.mark.parametrize(
+        "path",
+        ["/_dash-update-component", "/_dash-layout", "/_dash-dependencies"],
+    )
+    def test_dash_data_endpoints_require_auth(self, path):
+        # These would let an anonymous caller invoke callbacks / read the app
+        # layout if the "/_dash" prefix were ever exempted from the guard.
+        client = _app("secret").test_client()
+        resp = client.get(path)
+        assert resp.status_code == 302
+        assert "/login" in resp.headers["Location"]
+
+    def test_dash_component_suites_stay_public(self):
+        client = _app("secret").test_client()
+        resp = client.get("/_dash-component-suites/dash/dash-renderer.js")
+        assert resp.status_code != 302
+
 
 class TestNoAuth:
     def test_no_password_allows_anonymous(self):

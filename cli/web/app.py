@@ -29,6 +29,9 @@ STAGING_DIRNAME = "staging"
 SETTING_ID = "setting-{key}"
 SOURCE_URL = "https://github.com/Beherith/ultrasongs"
 
+# Settings rendered in the main form instead of the collapsed settings section.
+FORM_SETTING_KEYS = frozenset({"whisper_language"})
+
 
 @dataclass(frozen=True)
 class WebConfig:
@@ -185,6 +188,8 @@ def build_settings_section(config: Config) -> html.Details:
     """Collapsible, grouped settings section (one control per config key)."""
     groups: "OrderedDict[str, list[html.Div]]" = OrderedDict()
     for meta in settings_meta.SETTINGS:
+        if meta.key in FORM_SETTING_KEYS:
+            continue
         groups.setdefault(meta.group, []).append(_setting_control(meta, getattr(config, meta.key)))
     children = []
     for group_name, controls in groups.items():
@@ -309,6 +314,13 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
                                      "fontFamily": "ui-monospace, monospace",
                                      "fontSize": "13px"}),
             ]),
+            html.Div(
+                [_setting_control(
+                    settings_meta.SETTINGS_BY_KEY["whisper_language"],
+                    pipeline_config.whisper_language,
+                )],
+                style={"marginBottom": "14px"},
+            ),
             html.Div([
                 html.Button("Process", id="process-btn", n_clicks=0,
                             style={"background": "#2563eb", "color": "white",

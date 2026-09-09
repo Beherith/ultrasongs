@@ -263,6 +263,23 @@ class TestGenerateEditor:
         assert "updateSelectionUi();" in pointerdown
         assert "renderPage();" not in pointerdown
 
+    def test_add_remove_line_buttons(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        assert 'id="addLineBtn"' in html
+        assert 'id="delLineBtn"' in html
+        assert "function addLine(){" in html
+        assert "function removeLine(){" in html
+        assert 'syl:"New Line"' in html
+        assert 'document.getElementById("addLineBtn").onclick=addLine;' in html
+        assert 'document.getElementById("delLineBtn").onclick=removeLine;' in html
+
+    def test_load_vocals_button(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        assert 'id="vocalsBtn"' in html
+        assert 'id="vocalsInput"' in html
+        assert 'document.getElementById("vocalsBtn").onclick=()=>vocalsInput.click();' in html
+        assert 'vocalsInput.onchange=e=>{ onFile(e.target.files[0]); e.target.value=""; };' in html
+
     def test_output_path_honored(self, tmp_path):
         txt = _write_txt(tmp_path)
         target = tmp_path / "sub" / "custom.html"

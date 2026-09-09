@@ -107,8 +107,9 @@ def install_auth(server: "Flask", password: str | None) -> None:
     def _is_public(path: str) -> bool:
         if path in ("/login", "/logout"):
             return True
-        # Dash internal endpoints and assets
-        return path.startswith(("/_dash", "/assets/", "/favicon", "/_favicon"))
+        # Static bundles only - the login page needs no Dash JS, so callback/layout
+        # endpoints like /_dash-update-component must stay behind the session check.
+        return path.startswith(("/_dash-component-suites/", "/assets/", "/favicon", "/_favicon"))
 
     if password is not None:
 

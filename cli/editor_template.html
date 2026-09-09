@@ -21,12 +21,13 @@
   button:disabled { opacity: 0.35; cursor: default; }
   button.primary { background: #e94560; border-color: #e94560; color: #fff; }
   button.primary:hover { background: #ff5c77; }
+  #playBtn { min-width: 128px; }
   .sep { width: 1px; height: 22px; background: #2a5a8a; margin: 0 2px; }
   .stage { padding: 14px 16px 4px; }
   .plotwrap { position: relative; width: 100%; }
   #plot { width: 100%; height: auto; display: block; touch-action: none; position: relative; z-index: 1; }
   #fft { position: absolute; left: 4.375%; top: 4.16667%; width: 93.75%; height: 86.66667%; opacity: 1.0; z-index: 0; pointer-events: none; }
-  select#lineSel { background: #0f3460; color: #cde; border: 1px solid #2a5a8a; border-radius: 5px; padding: 5px 8px; font-size: 13px; max-width: 340px; }
+  select#lineSel { background: #0f3460; color: #cde; border: 1px solid #2a5a8a; border-radius: 5px; padding: 5px 8px; font-size: 13px; max-width: 510px; }
   .metro { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #9aa; }
   input[type=range] { accent-color: #e94560; width: 110px; }
   .lyricline { font-size: 15px; padding: 8px 16px 2px; min-height: 26px; }
@@ -65,7 +66,7 @@
     <button id="playBtn" class="primary" title="Play / stop line (Space)">&#9654; Play</button>
     <span class="metro" title="Vocals audio volume">Vocals <input type="range" id="vocalsVol" min="0" max="100" value="100"><span id="vocalsVolVal">100</span></span>
     <span class="metro" title="MIDI note volume">Notes <input type="range" id="notesVol" min="0" max="100" value="100"><span id="notesVolVal">100</span></span>
-    <span class="metro" title="Metronome volume">Metro <input type="range" id="metroVol" min="0" max="100" value="80"><span id="metroVolVal">80</span></span>
+    <span class="metro" title="Metronome volume">Metronome <input type="range" id="metroVol" min="0" max="100" value="20"><span id="metroVolVal">20</span></span>
   </div>
 
   <div class="toolbar">
@@ -74,15 +75,19 @@
     <button id="delBtn" title="Delete selected (Del)">Delete</button>
     <button id="goldBtn" title="Toggle gold note (G)">Gold</button>
     <button id="lyricBtn" title="Edit lyric (L / double-click)">Lyric</button>
+    <button id="addLineBtn" title="Insert a new lyric line after the current one, with a single &lsquo;New Line&rsquo; note at its start">+ Line</button>
+    <button id="delLineBtn" title="Remove the entire current lyric line">&minus; Line</button>
     <span class="sep"></span>
     <button id="undoBtn" title="Undo (Ctrl+Z)">&#8630; Undo</button>
     <span class="sep"></span>
-    <button id="txtBtn" title="Load a saved Ultrastar .txt (replaces the current song: notes, header, BPM/GAP)">Load .txt</button>
+    <button id="txtBtn" title="Load a saved Ultrastar .txt (replaces the current song: notes, header, BPM/GAP)">Load Ultrastar .txt</button>
     <input type="file" id="txtInput" accept=".txt,text/plain" hidden>
     <button id="pitchBtn" title="Load a whisperx_pitch.json to replace the pitch overlay (whisper words + CREPE dots)">Load pitch JSON</button>
     <input type="file" id="pitchInput" accept=".json,application/json" hidden>
+    <button id="vocalsBtn" title="Load a vocals audio file, replacing the current one and recalculating the FFT background">Load vocals</button>
+    <input type="file" id="vocalsInput" accept="audio/*" hidden>
     <span class="sep"></span>
-    <button id="saveBtn" class="primary" title="Download .txt (Ctrl+S)">Download .txt</button>
+    <button id="saveBtn" class="primary" title="Download Ultrastar .txt (Ctrl+S)">Download Ultrastar .txt</button>
     <span class="chip" id="lineInd"></span>
   </div>
 
@@ -107,7 +112,8 @@
     Drag a note up/down = pitch, left/right = start &middot; drag an edge = duration &middot; double-click = edit lyric &middot;
     <kbd>Space</kbd> play &middot; <kbd>&#8592;</kbd>/<kbd>&#8594;</kbd> line &middot; <kbd>S</kbd> split &middot; <kbd>M</kbd> merge &middot;
     <kbd>G</kbd> gold &middot; <kbd>L</kbd> lyric &middot; <kbd>Del</kbd> delete &middot; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &middot; <kbd>Ctrl</kbd>+<kbd>S</kbd> download &middot;
-    toolbar: <b>Load .txt</b> reloads a saved song &middot; <b>Load pitch JSON</b> swaps the pitch overlay
+    toolbar: <b>Load Ultrastar .txt</b> reloads a saved song &middot; <b>Load pitch JSON</b> swaps the pitch overlay &middot;
+    <b>+ Line</b>/<b>&minus; Line</b> add/remove entire lyric lines &middot; <b>Load vocals</b> swaps the audio track (FFT + playback)
   </div>
 
   <div class="legend">
@@ -379,6 +385,7 @@
     document.getElementById("delBtn").disabled=!sel;
     document.getElementById("goldBtn").disabled=!sel;
     document.getElementById("lyricBtn").disabled=!sel;
+    document.getElementById("delLineBtn").disabled=!groups.length;
     document.getElementById("prevBtn").disabled=currentPage<=0;
     document.getElementById("nextBtn").disabled=currentPage>=groups.length-1;
     document.getElementById("playBtn").innerHTML=play.active?"&#9632; Stop":"&#9654; Play";
@@ -650,6 +657,51 @@
     const n=notes.find(x=>x.id===selectedId); if(!n) return;
     pushUndo();
     n.type=n.type==="*"?":":"*";
+    renderPage();
+  }
+  function addLine(){
+    const pageNotes=groups[currentPage]||[];
+    pushUndo();
+    const newNote={id:nextId(),type:":",start:0,dur:4,pitch:60,syl:"New Line"};
+    if(!pageNotes.length){
+      notes.unshift(newNote);
+    } else {
+      const last=pageNotes[pageNotes.length-1];
+      const lastIdx=notes.findIndex(n=>n.id===last.id);
+      const endBeat=last.start+last.dur;
+      newNote.pitch=last.pitch;
+      let nextIdx=-1;
+      for(let i=lastIdx+1;i<notes.length;i++){ if(notes[i].type!=="-"){ nextIdx=i; break; } }
+      if(nextIdx>=0){
+        let dashBeat=endBeat;
+        for(let i=lastIdx+1;i<notes.length;i++){
+          if(notes[i].type!=="-") break;
+          dashBeat=notes[i].start;
+          break;
+        }
+        newNote.start=dashBeat;
+        newNote.dur=Math.max(1,Math.min(4,notes[nextIdx].start-dashBeat));
+        notes.splice(nextIdx,0,newNote,{type:"-",start:notes[nextIdx].start,dur:0,pitch:0,syl:""});
+      } else {
+        newNote.start=endBeat;
+        notes.splice(lastIdx+1,0,{type:"-",start:endBeat,dur:0,pitch:0,syl:""},newNote);
+      }
+    }
+    selectedId=newNote.id;
+    if(pageNotes.length) currentPage+=1;
+    renderPage();
+  }
+  function removeLine(){
+    const pageNotes=groups[currentPage]||[];
+    if(!pageNotes.length) return;
+    pushUndo();
+    const ids=new Set(pageNotes.map(n=>n.id));
+    let lo=notes.length, hi=-1;
+    notes.forEach((n,i)=>{ if(ids.has(n.id)){ if(i<lo)lo=i; if(i>hi)hi=i; } });
+    notes.splice(lo,hi-lo+1);
+    if(hi+1<notes.length&&notes[hi+1].type==="-") notes.splice(hi+1,1);
+    else if(lo-1>=0&&notes[lo-1].type==="-") notes.splice(lo-1,1);
+    selectedId=null;
     renderPage();
   }
 
@@ -934,6 +986,8 @@
   document.getElementById("delBtn").onclick=deleteNote;
   document.getElementById("goldBtn").onclick=toggleGold;
   document.getElementById("lyricBtn").onclick=()=>{ const n=notes.find(x=>x.id===selectedId); if(n) openLyricPopover(n); };
+  document.getElementById("addLineBtn").onclick=addLine;
+  document.getElementById("delLineBtn").onclick=removeLine;
   document.getElementById("undoBtn").onclick=undo;
   const txtInput=document.getElementById("txtInput");
   document.getElementById("txtBtn").onclick=()=>txtInput.click();
@@ -941,6 +995,9 @@
   const pitchInput=document.getElementById("pitchInput");
   document.getElementById("pitchBtn").onclick=()=>pitchInput.click();
   pitchInput.onchange=e=>{ loadPitchFile(e.target.files[0]); e.target.value=""; };
+  const vocalsInput=document.getElementById("vocalsInput");
+  document.getElementById("vocalsBtn").onclick=()=>vocalsInput.click();
+  vocalsInput.onchange=e=>{ onFile(e.target.files[0]); e.target.value=""; };
   document.getElementById("saveBtn").onclick=downloadTxt;
 
   const drop=document.getElementById("drop"), fileInput=document.getElementById("fileInput");

@@ -72,6 +72,29 @@ class TestLayout:
         _ordered(app.layout)
         assert order.index("artist") < order.index("title")
 
+    def test_language_selector_shown_once_above_process_button(self, tmp_path):
+        config = Config(temp_dir=str(tmp_path / "tmp"), output_dir=str(tmp_path / "out"))
+        manager = JobManager(web_dir=tmp_path / "jobs")
+        app = create_app(WebConfig(), config, manager, password=None)
+        order: list[str] = []
+
+        def _ordered(node):
+            cid = getattr(node, "id", None)
+            if cid is not None:
+                order.append(cid)
+            children = getattr(node, "children", None)
+            if children is None:
+                return
+            if not isinstance(children, (list, tuple)):
+                children = [children]
+            for child in children:
+                _ordered(child)
+
+        _ordered(app.layout)
+        cid = webapp.SETTING_ID.format(key="whisper_language")
+        assert order.count(cid) == 1
+        assert order.index(cid) < order.index("process-btn")
+
     def test_settings_cover_all_config_keys(self):
         keys = {m.key for m in settings_meta.SETTINGS}
         config_keys = {f.name for f in Config.__dataclass_fields__.values()
