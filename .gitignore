@@ -57,4 +57,22 @@ CLAUDE.md
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+
+# CLI-specific
+cli/__pycache__/
+cli/.pytest_cache/
+
+# Add ./output/ directory to gitignore for intermediate output files
+/output/
+
+# Web UI job directories
+/web_jobs/
+
+# TEst Songs
+/songs/
+
+
+# Ralph Loop state
+.opencode/ralph-loop.local.md
 *.egg-info/

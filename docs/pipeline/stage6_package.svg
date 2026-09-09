@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="800" viewBox="0 0 1100 800" font-family="Segoe UI, Arial, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="1100" height="800" fill="#f8fafc"/>
+
+  <text x="40" y="48" font-size="26" font-weight="bold" fill="#0f172a">Stage 6 — Package</text>
+  <text x="40" y="74" font-size="15" fill="#475569">cli/package.py · package_output(txt_content, mp3_path, output_dir, title, video?, vocals?, accompaniment?)</text>
+  <text x="40" y="96" font-size="13" font-style="italic" fill="#64748b">Assemble the player-ready folder: song file + audio + stems + one-click ZIP</text>
+
+  <!-- inputs -->
+  <rect x="60" y="120" width="380" height="260" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="80" y="148" font-size="14" font-weight="bold" fill="#0f172a">Artifacts coming in</text>
+  <g font-size="12">
+    <rect x="80" y="164" width="340" height="34" rx="8" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="96" y="186" fill="#14532d">.txt content (in memory, from Stage 5)</text>
+    <rect x="80" y="206" width="340" height="34" rx="8" fill="#f1f5f9" stroke="#cbd5e1"/>
+    <text x="96" y="228" fill="#334155">tmp/song.mp3  (normalized audio, Stage 1)</text>
+    <rect x="80" y="248" width="340" height="34" rx="8" fill="#f5f3ff" stroke="#c4b5fd"/>
+    <text x="96" y="270" fill="#4c1d95">tmp/song_vocals.mp3  (Stage 2 stem)</text>
+    <rect x="80" y="290" width="340" height="34" rx="8" fill="#f5f3ff" stroke="#c4b5fd"/>
+    <text x="96" y="312" fill="#4c1d95">tmp/song_accompaniment.mp3  (Stage 2)</text>
+    <rect x="80" y="332" width="340" height="34" rx="8" fill="#fffbeb" stroke="#fde68a"/>
+    <text x="96" y="354" fill="#92400e">optional: --video file (kept under its own name)</text>
+  </g>
+
+  <!-- actions -->
+  <rect x="480" y="120" width="300" height="260" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="500" y="148" font-size="14" font-weight="bold" fill="#0f172a">What it does</text>
+  <circle cx="516" cy="178" r="9" fill="#22c55e"/><text x="516" y="182" font-size="11" fill="#fff" text-anchor="middle">1</text>
+  <text x="534" y="183" font-size="12.5" fill="#334155">mkdir output/ (config.output_dir, ./output)</text>
+  <circle cx="516" cy="210" r="9" fill="#22c55e"/><text x="516" y="214" font-size="11" fill="#fff" text-anchor="middle">2</text>
+  <text x="534" y="215" font-size="12.5" fill="#334155">write &lt;title&gt;.txt (UTF-8)</text>
+  <circle cx="516" cy="242" r="9" fill="#22c55e"/><text x="516" y="246" font-size="11" fill="#fff" text-anchor="middle">3</text>
+  <text x="534" y="247" font-size="12.5" fill="#334155">copy MP3 → &lt;title&gt;.mp3 (shutil.copy2)</text>
+  <circle cx="516" cy="274" r="9" fill="#94a3b8"/><text x="516" y="278" font-size="11" fill="#fff" text-anchor="middle">4</text>
+  <text x="534" y="279" font-size="12.5" fill="#334155">optional: copy video (original filename)</text>
+  <circle cx="516" cy="306" r="9" fill="#22c55e"/><text x="516" y="310" font-size="11" fill="#fff" text-anchor="middle">5</text>
+  <text x="534" y="311" font-size="12.5" fill="#334155">copy stems → vocals.mp3 / accompaniment.mp3</text>
+  <circle cx="516" cy="338" r="9" fill="#22c55e"/><text x="516" y="342" font-size="11" fill="#fff" text-anchor="middle">6</text>
+  <text x="534" y="343" font-size="12.5" fill="#334155">zip every file except .zip → &lt;title&gt;.zip (DEFLATED)</text>
+  <line x1="440" y1="250" x2="478" y2="250" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+  <line x1="780" y1="250" x2="818" y2="250" stroke="#475569" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- output tree -->
+  <rect x="820" y="120" width="240" height="260" rx="10" fill="#0f172a"/>
+  <text x="840" y="148" font-size="13" font-weight="bold" fill="#4ade80" font-family="Consolas, monospace">output/</text>
+  <text x="840" y="178" font-size="12.5" fill="#e2e8f0" font-family="Consolas, monospace">├─ Test Song.txt</text>
+  <text x="840" y="204" font-size="12.5" fill="#e2e8f0" font-family="Consolas, monospace">├─ Test Song.mp3</text>
+  <text x="840" y="230" font-size="12.5" fill="#e2e8f0" font-family="Consolas, monospace">├─ Test Song.mp4</text>
+  <text x="840" y="256" font-size="12.5" fill="#e2e8f0" font-family="Consolas, monospace">├─ vocals.mp3</text>
+  <text x="840" y="282" font-size="12.5" fill="#e2e8f0" font-family="Consolas, monospace">├─ accompaniment.mp3</text>
+  <text x="840" y="308" font-size="12.5" fill="#4ade80" font-family="Consolas, monospace">└─ Test Song.zip</text>
+  <text x="840" y="336" font-size="10.5" fill="#64748b">(video line only when given)</text>
+  <text x="840" y="354" font-size="10.5" fill="#64748b">(zip contains all of the above)</text>
+
+  <!-- notes -->
+  <rect x="60" y="420" width="1000" height="120" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="80" y="448" font-size="14" font-weight="bold" fill="#0f172a">Notes</text>
+  <text x="80" y="474" font-size="12.5" fill="#334155">• Filenames come from --title (title.txt / title.mp3 / title.zip); stems get the fixed names vocals.mp3 and accompaniment.mp3.</text>
+  <text x="80" y="498" font-size="12.5" fill="#334155">• The .txt's #MP3 header points at &lt;title&gt;.mp3, so the folder is drop-in for Ultrastar Deluxe: just open the .txt.</text>
+  <text x="80" y="522" font-size="12.5" fill="#334155">• The ZIP is the shareable artifact — one file you can hand to a friend with an Ultrastar client.</text>
+
+  <!-- same for import -->
+  <rect x="60" y="572" width="1000" height="100" rx="10" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+  <text x="80" y="600" font-size="14" font-weight="bold" fill="#1d4ed8">Same packaging path for "ultrasongs import"</text>
+  <text x="80" y="626" font-size="12.5" fill="#1e40af">import --txt song.txt --mp3 song.mp3 parses the existing .txt (cli/ultrastar.py), rebuilds it canonically,</text>
+  <text x="80" y="648" font-size="12.5" fill="#1e40af">and runs the identical package_output() so imported songs land in the same output/ layout as generated ones.</text>
+
+  <text x="60" y="724" font-size="12.5" fill="#64748b">tmp/ still holds intermediates (stems, transcribe JSON, pitch JSON, debug files) for --resume, --stage and re-runs.</text>
+</svg>

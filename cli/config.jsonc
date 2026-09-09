@@ -1,0 +1,258 @@
+{
+  // Device for GPU-accelerated models (Demucs, torchcrepe, WhisperX).
+  // "auto" (default) — uses CUDA if available, otherwise CPU.
+  // "cuda" — force GPU. If CUDA is not available, falls back to CPU with a warning.
+  // "cpu" — force CPU (useful for debugging or when GPU causes issues).
+  "device": "auto",
+
+  // ASR backend. "faster-whisper" uses the hybrid pipeline: multi-pass
+  // faster-whisper consensus, alignment to the supplied lyrics, pause-delimited
+  // vocal/lyric chunks, then WhisperX forced alignment for exact timestamps.
+  // "whisperx" keeps the legacy WhisperX batched/VAD transcription path.
+  "transcription_backend": "faster-whisper",
+
+  // Whisper ASR model used by either transcription backend.
+  // Options: "tiny", "base", "small", "medium", "large"
+  // "medium" is the default — it offers the best balance of transcription accuracy
+  // and processing speed. Use "large" for harder-to-understand audio (heavy accents,
+  // fast singing, overlapping vocals) at the cost of significantly slower runtime
+  // and higher VRAM usage (~10GB). Use "small" or "base" for faster processing on
+  // clean audio or limited hardware.
+  // Larger models also seem to hallucinate WAY more than the medium one
+  "whisper_model": "medium",
+
+  // Language hint for Whisper transcription and WhisperX forced alignment.
+  // When set (e.g., "en", "de", "es"), ASR skips auto-detection and uses
+  // the specified language model directly. This improves transcription speed and
+  // accuracy for known-language songs. Set to "" (empty string) to let Whisper
+  // auto-detect the language, which is useful for multilingual songs or when
+  // the language is unknown. Note: forcing the wrong language will produce
+  // garbled transcription.
+  //
+  // Selectable codes (102, from the Whisper model tokenizer). WhisperX forced
+  // alignment supports all of these except "om" (oromo) and "or" (odia), which
+  // have no wav2vec2 alignment model:
+  //   af=afrikaans  am=amharic  ar=arabic  as=assamese  az=azerbaijani  ba=bashkir  be=belarusian
+  //   bg=bulgarian  bn=bengali  bo=tibetan  br=breton  bs=bosnian  ca=catalan  cs=czech  cy=welsh
+  //   da=danish  de=german  el=greek  en=english  es=spanish  et=estonian  eu=basque  fa=persian
+  //   fi=finnish  fo=faroese  fr=french  gl=galician  gu=gujarati  ha=hausa  haw=hawaiian  he=hebrew
+  //   hi=hindi  hr=croatian  ht=haitian creole  hu=hungarian  hy=armenian  id=indonesian  is=icelandic
+  //   it=italian  ja=japanese  jw=javanese  ka=georgian  kk=kazakh  km=khmer  kn=kannada  ko=korean
+  //   la=latin  lb=luxembourgish  ln=lingala  lo=lao  lt=lithuanian  lv=latvian  mg=malagasy  mi=maori
+  //   mk=macedonian  ml=malayalam  mn=mongolian  mr=marathi  ms=malay  mt=maltese  my=myanmar
+  //   ne=nepali  nl=dutch  nn=nynorsk  no=norwegian  oc=occitan  om=oromo  or=odia (oriya)  pa=punjabi
+  //   pl=polish  ps=pashto  pt=portuguese  ro=romanian  ru=russian  sa=sanskrit  sd=sindhi  si=sinhala
+  //   sk=slovak  sl=slovenian  sn=shona  so=somali  sq=albanian  sr=serbian  su=sundanese  sv=swedish
+  //   sw=swahili  ta=tamil  te=telugu  tg=tajik  th=thai  tk=turkmen  tl=tagalog  tr=turkish  tt=tatar
+  //   uk=ukrainian  ur=urdu  uz=uzbek  vi=vietnamese  yi=yiddish  yo=yoruba  yue=cantonese  zh=chinese
+  "whisper_language": "en",
+
+  // CTranslate2 compute type for the standalone faster-whisper backend.
+  "faster_whisper_compute_type": "auto",
+
+  // Number of audio chunks WhisperX transcribes in one inference batch.
+  // Reduce this if the ASR model runs out of VRAM; increase it for more throughput.
+  "whisperx_batch_size": 8,
+
+  // CTranslate2 compute type used by WhisperX. "default" selects float16 on
+  // CUDA and float32 on CPU. Other supported values include "float16",
+  // "float32", and "int8".
+  "whisperx_compute_type": "default",
+
+  // Optional wav2vec2 forced-alignment model name. Leave empty to let WhisperX
+  // choose its language-specific default model.
+  "whisperx_align_model": "",
+
+  // How WhisperX fills timestamps for characters the alignment model cannot
+  // align directly: "nearest", "linear", or "ignore".
+  "whisperx_interpolate_method": "linear",
+
+  // Split the authoritative lyrics and vocal waveform at detected silences
+  // strictly longer than this before WhisperX forced alignment. Each cut is
+  // placed at the silence midpoint so no sung audio is removed.
+  "whisperx_chunk_pause_ms": 1000,
+
+  // Number of WhisperX forced-alignment passes over every lyric/audio chunk.
+  // Must be a positive odd number so each word has an unambiguous median
+  // timing candidate. This is independent of the faster-whisper pass count.
+  "whisperx_align_runs": 5,
+
+  // Number of independent separation + transcription passes to run and
+  // consolidate. Demucs and faster-whisper are not fully deterministic, so a single
+  // run can recognize slightly different words from another. Each pass runs
+  // Demucs on the source audio, then transcribes that pass's vocals with
+  // the selected ASR backend. The passes are aligned to each other with
+  // Smith-Waterman and a per-word majority vote produces a single consensus.
+  // In the default hybrid path, WhisperX runs only once afterward on the
+  // authoritative lyric chunks. Set to 1 for a single fast pass (no
+  // consolidation). Higher values multiply the Demucs + ASR runtime.
+  "transcribe_runs": 7,
+
+  // Demucs source separation model.
+  // "htdemucs" (Hybrid Transformer) is the default — it produces the highest
+  // quality vocal/instrumental splits. Alternatives like "hdemucs" (older hybrid
+  // model) or "mdx" variants are lighter but less accurate. A better separation
+  // directly improves pitch detection and transcription quality.
+  "demucs_model": "htdemucs",
+
+  // Audio sample rate for internal processing.
+  // 44100 Hz (CD quality) is the standard for audio work and matches what Demucs
+  // outputs. Lower rates lose fidelity; higher rates add no benefit for singing
+  // and only increase memory usage and processing time.
+  "sample_rate": 44100,
+
+  // Pitch detection range in Hz. Covers roughly C2 to C6.
+  // Most singing voices fall within this range. Lowering pitch_min_hz below ~50Hz
+  // or raising pitch_max_hz above ~1200Hz will rarely help and may increase false
+  // detections from instrumental content that leaked through separation.
+  "pitch_min_hz": 65.41,
+  "pitch_max_hz": 1046.5,
+
+  // torchcrepe analysis hop length in milliseconds.
+  // 10ms means ~100 pitch analysis frames per second. Smaller values (e.g., 5ms)
+  // give finer resolution but roughly double the runtime. Larger values (e.g., 20ms)
+  // are faster but may miss short pitch transitions and syllable boundaries.
+  "crepe_hop_ms": 10,
+
+  // Frequency band (in Hz) used to compute the per-frame vocal loudness /
+  // amplitude proxy during pitch analysis. The band-limited RMS energy is
+  // derived from an FFT of each frame and restricted to this range, then
+  // normalized to [0, 1] across the song.
+  //
+  // The band should cover the fundamental and the upper harmonics/formants of
+  // a sung voice. The lower bound (60 Hz) sits just below the lowest expected
+  // pitch. The upper bound (4000 Hz) is what matters: the harmonics of a sung
+  // note and the formants that carry perceived loudness extend well past
+  // 1 kHz, so a lower ceiling systematically under-measures higher (e.g.
+  // female) voices. Lower the upper bound (e.g. 1000) only if you want to
+  // emphasize low energy and ignore brightness.
+  "band_energy_min_hz": 60.0,
+  "band_energy_max_hz": 4000.0,
+
+  // Pause detection: minimum silence duration in milliseconds.
+  // 400ms is long enough to skip inter-word gaps (typically 50-200ms) while still
+  // catching meaningful pauses between phrases. Increase this if the pipeline is
+  // splitting lines too aggressively; decrease it if it's merging lines that should
+  // be separate.
+  "pause_min_silence_ms": 400,
+
+  // Pause detection: RMS energy threshold as a percentage of the 95th percentile.
+  // Frames with energy below (threshold_pct / 100) * p95_rms are considered silent.
+  // 5% works well for most songs. Songs with very quiet verses may need a higher
+  // value (10-15%) to avoid treating soft singing as silence. Very loud, dense
+  // tracks may benefit from a lower value (2-3%).
+  "pause_threshold_pct": 5,
+
+  // Gap lead-in: fallback for Ultrastar's #GAP when no first beat was detected.
+  // #GAP is the offset in ms from the start of the audio to the song's first
+  // beat, which anchors the Ultrastar beat grid. Normal operation uses the
+  // first beat detected by librosa (BpmResult.first_beat_ms). Only when that
+  // detection is unavailable does #GAP fall back to (first note time - this
+  // value), i.e. 500ms of lead-in before the first sung note.
+  "gap_lead_in_ms": 500,
+
+  // Line break offset: number of beats before the next note to insert a line break.
+  // 4 beats corresponds to one full measure in 4/4 time (the most common meter).
+  // Ultrastar uses line breaks to separate lyric lines on screen. If line breaks
+  // appear too early or too late, adjust this value. For songs in 3/4 time, try 3.
+  "linebreak_beat_offset": 4,
+
+  // Beat resolution multiplier: scales the exported BPM to a finer Ultrastar
+  // beat grid. The exported file's BPM is bpm * multiplier, which keeps the
+  // song timing unchanged while reducing per-beat duration (e.g., from ~125 ms
+  // to ~62 ms per beat at 120 BPM with a value of 2). Higher values (e.g., 4)
+  // give finer note placement but larger beat counts and file sizes.
+  "beat_resolution_multiplier": 2,
+
+  // Percentile of all-frame amplitudes used as the noise floor for the activity
+  // threshold (0.1 = 10th percentile). Pure amplitude percentiles are used (not
+  // CREPE confidence) so the gate stays valid when confidence and loudness
+  // disagree.
+  "activity_noise_percentile": 0.1,
+
+  // Percentile of all-frame amplitudes used as the signal level for the activity
+  // threshold (0.75 = 75th percentile, typical singing energy).
+  "activity_signal_percentile": 0.75,
+
+  // Fraction of the (signal - noise) range added to the noise floor to form the
+  // amplitude activity threshold. 0.2 keeps the threshold close to the noise
+  // floor, so soft singing is still detected. Increase (e.g., 0.4) to trim more
+  // instrumental bleed out of notes; decrease (e.g., 0.1) to keep softer onsets.
+  "activity_threshold_ratio": 0.35,
+
+  // Minimum CREPE confidence for a frame to count as vocal activity when
+  // trimming/splitting notes within a syllable.
+  "note_min_confidence": 0.3,
+
+  // Minimum CREPE confidence used as a fallback when no frame meets
+  // note_min_confidence and the activity amplitude threshold.
+  "note_fallback_confidence": 0.5,
+
+  // Maximum gap in milliseconds between active frames that is still treated as
+  // one continuous sung sound. Short confidence/energy dropouts up to this
+  // length do not split a note.
+  "note_dropout_gap_ms": 50,
+
+  // Median filter window size (in frames) used to smooth pitch before detecting
+  // sustained pitch changes. 5 frames removes vibrato/jitter while preserving
+  // real note transitions.
+  "note_smooth_window": 5,
+
+  // Maximum pitch difference in semitones that is kept within a single note.
+  // Larger values merge more gradual pitch drift; smaller values split notes
+  // more aggressively.
+  "note_pitch_tolerance": 1,
+
+  // Minimum duration in milliseconds for a pitch-change segment. Shorter
+  // segments are detection noise and are merged into the neighboring note.
+  "note_min_duration_ms": 60,
+
+  // Assumed frame spacing in milliseconds as a fallback when computing note end
+  // times from fewer than two active frames. Normally the actual spacing of the
+  // CREPE frames (crepe_hop_ms) is used.
+   "note_frame_step_ms": 10,
+
+   // Enable per-syllable diagnostic plots during alignment. When true, every
+   // invocation of the note-segmentation step writes a detailed matplotlib
+   // figure to <temp>/note_segments_plots/. Each figure shows the raw pitch
+   // frames, confidence/amplitude against their thresholds, the vocal islands,
+   // the smoothed median pitch, the pitch-change splits, the final notes, and a
+   // full decision/reasoning log. It also renders an FFT spectrogram (50-5000
+   // Hz) as the background of the amplitude panel. This is for debugging only:
+   // it can be slow and produces many PNG files, so keep it false during normal
+   // use.
+   "note_segment_plots": false,
+
+   // FFmpeg audio bitrate for the extracted MP3.
+  // 128kbps is sufficient for pitch detection, BPM analysis, and transcription
+  // without wasting disk space on intermediate files. Using a higher bitrate
+  // (e.g., "192k" or "256k") won't improve results meaningfully but will increase
+  // temp file sizes and I/O time.
+  "ffmpeg_audio_bitrate": "256k",
+
+  // Output directory for generated Ultrastar song files and ZIP packages.
+  "output_dir": "./output",
+
+  // Temporary directory for intermediate files (extracted audio, Demucs stems,
+  // pitch data, etc.). This directory is populated during processing and can be
+  // safely deleted afterward. Make sure it has enough free space — a single song
+  // can produce 50-200MB of temp data depending on length.
+  "temp_dir": "./tmp",
+
+  // Enable debug JSON output during lyric alignment.
+  // When true, the alignment step writes a detailed JSON file to the temp directory
+  // showing the Levenshtein matrix, syllable-to-word mapping, and timing decisions.
+  // Useful for diagnosing alignment issues. Keep false during normal use to avoid
+  // cluttering the temp directory.
+  "debug_alignment": true,
+
+  // Use the Demucs accompaniment (instrumental) track for BPM detection instead of
+  // the full mixed audio. BPM detection on the full mix works well for most songs
+  // since drums and bass carry the beat. However, some songs have vocals that are
+  // so dominant (e.g., heavy reverb, lead vocal panning, vocal percussion) that
+  // they interfere with tempo detection. In those cases, set this to true to run
+  // BPM detection on the instrumental stem instead. Note: this requires the
+  // transcription step (which runs Demucs) to complete before BPM detection, so it
+  // has no extra overhead beyond the Demucs pass already needed for transcription.
+  "bpm_use_accompaniment": true
+}

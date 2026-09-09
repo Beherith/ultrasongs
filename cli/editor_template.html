@@ -1,0 +1,989 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ultrastar Note Editor</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #1a1a2e; color: #e6e6f0; font: 14px/1.4 system-ui, sans-serif; }
+  .bar { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; padding: 10px 16px; background: #16213e; border-bottom: 1px solid #0f3460; }
+  .bar h1 { font-size: 16px; margin: 0; }
+  .chip { font-size: 12px; color: #9aa; }
+  .chip.ok { color: #7ee787; }
+  .chip.err { color: #ff6b81; }
+  a.chip { color: #4fc3f7; text-decoration: none; margin-left: auto; }
+  a.chip:hover { text-decoration: underline; }
+  .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 8px 16px; background: #14203a; border-bottom: 1px solid #0f3460; }
+  button { background: #0f3460; color: #cde; border: 1px solid #2a5a8a; border-radius: 5px; padding: 5px 11px; font-size: 13px; cursor: pointer; }
+  button:hover:not(:disabled) { background: #164a7a; }
+  button:disabled { opacity: 0.35; cursor: default; }
+  button.primary { background: #e94560; border-color: #e94560; color: #fff; }
+  button.primary:hover { background: #ff5c77; }
+  .sep { width: 1px; height: 22px; background: #2a5a8a; margin: 0 2px; }
+  .stage { padding: 14px 16px 4px; }
+  .plotwrap { position: relative; width: 100%; }
+  #plot { width: 100%; height: auto; display: block; touch-action: none; position: relative; z-index: 1; }
+  #fft { position: absolute; left: 4.375%; top: 4.16667%; width: 93.75%; height: 86.66667%; opacity: 1.0; z-index: 0; pointer-events: none; }
+  select#lineSel { background: #0f3460; color: #cde; border: 1px solid #2a5a8a; border-radius: 5px; padding: 5px 8px; font-size: 13px; max-width: 340px; }
+  .metro { display: flex; gap: 6px; align-items: center; font-size: 12px; color: #9aa; }
+  input[type=range] { accent-color: #e94560; width: 110px; }
+  .lyricline { font-size: 15px; padding: 8px 16px 2px; min-height: 26px; }
+  .lyric-line { display: block; }
+  .lyric-time { color: #e94560; font-family: ui-monospace, monospace; font-size: 12px; margin-right: 3px; }
+  .transport { display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; padding: 8px 16px 16px; font-size: 13px; color: #9aa; }
+  .transport b { color: #cde; font-weight: 600; }
+  .note .bar { cursor: grab; }
+  .note .bar.active { filter: brightness(1.6); }
+  .note text { user-select: none; pointer-events: none; }
+  .drop { border: 2px dashed #2a5a8a; border-radius: 10px; padding: 22px; text-align: center; color: #9aa; margin: 14px 16px; cursor: pointer; }
+  .drop.over { border-color: #4fc3f7; background: #16213e; }
+  .drop b { color: #cde; }
+  .lyric-pop { position: fixed; z-index: 50; background: #0d1b2e; color: #fff; border: 1px solid #4fc3f7; border-radius: 4px; padding: 4px 6px; font: 13px ui-monospace, monospace; min-width: 120px; }
+  .help { font-size: 12px; color: #667; padding: 0 16px 10px; }
+  kbd { background: #0f3460; border-radius: 3px; padding: 1px 5px; font-family: ui-monospace, monospace; color: #cde; }
+  .legend { display: flex; gap: 10px 26px; flex-wrap: wrap; padding: 0 16px 16px; border-top: 1px solid #0f3460; }
+  .lg { display: flex; gap: 9px; align-items: center; max-width: 340px; font-size: 12px; color: #9aa; }
+  .lg svg { flex: none; }
+  .lg b { color: #cde; font-weight: 600; }
+</style>
+</head>
+<body>
+  <div class="bar">
+    <h1 id="title">Loading&hellip;</h1>
+    <span class="chip" id="meta"></span>
+    <span class="chip" id="audioChip"></span>
+    <span class="chip" id="pitchChip"></span>
+    <a class="chip" href="https://github.com/Beherith/ultrasongs" target="_blank" rel="noopener" title="Ultrasongs source code on GitHub">Source</a>
+  </div>
+
+  <div class="toolbar">
+    <button id="prevBtn" title="Previous line (Left / PageUp)">&#9664; Prev</button>
+    <select id="lineSel" title="Jump to line"></select>
+    <button id="nextBtn" title="Next line (Right / PageDown)">Next &#9654;</button>
+    <button id="playBtn" class="primary" title="Play / stop line (Space)">&#9654; Play</button>
+    <span class="metro" title="Vocals audio volume">Vocals <input type="range" id="vocalsVol" min="0" max="100" value="100"><span id="vocalsVolVal">100</span></span>
+    <span class="metro" title="MIDI note volume">Notes <input type="range" id="notesVol" min="0" max="100" value="100"><span id="notesVolVal">100</span></span>
+    <span class="metro" title="Metronome volume">Metro <input type="range" id="metroVol" min="0" max="100" value="80"><span id="metroVolVal">80</span></span>
+  </div>
+
+  <div class="toolbar">
+    <button id="splitBtn" title="Split selected (S)">Split</button>
+    <button id="mergeBtn" title="Merge selected with next (M)">Merge</button>
+    <button id="delBtn" title="Delete selected (Del)">Delete</button>
+    <button id="goldBtn" title="Toggle gold note (G)">Gold</button>
+    <button id="lyricBtn" title="Edit lyric (L / double-click)">Lyric</button>
+    <span class="sep"></span>
+    <button id="undoBtn" title="Undo (Ctrl+Z)">&#8630; Undo</button>
+    <span class="sep"></span>
+    <button id="txtBtn" title="Load a saved Ultrastar .txt (replaces the current song: notes, header, BPM/GAP)">Load .txt</button>
+    <input type="file" id="txtInput" accept=".txt,text/plain" hidden>
+    <button id="pitchBtn" title="Load a whisperx_pitch.json to replace the pitch overlay (whisper words + CREPE dots)">Load pitch JSON</button>
+    <input type="file" id="pitchInput" accept=".json,application/json" hidden>
+    <span class="sep"></span>
+    <button id="saveBtn" class="primary" title="Download .txt (Ctrl+S)">Download .txt</button>
+    <span class="chip" id="lineInd"></span>
+  </div>
+
+  <div class="drop" id="drop">
+    <b>Drop the vocals audio here</b> (or click to browse) to enable the FFT background + playback.<br>
+    <span id="dropHint" style="font-size:12px"></span>
+    <input type="file" id="fileInput" accept="audio/*" hidden>
+  </div>
+
+  <div class="stage">
+    <div class="plotwrap" id="plotwrap">
+      <svg id="plot" viewBox="0 0 1280 480" preserveAspectRatio="xMidYMid meet"></svg>
+      <canvas id="fft"></canvas>
+    </div>
+  </div>
+
+  <div class="lyricline" id="lyricline"></div>
+
+  <div class="transport" id="transport"></div>
+
+  <div class="help">
+    Drag a note up/down = pitch, left/right = start &middot; drag an edge = duration &middot; double-click = edit lyric &middot;
+    <kbd>Space</kbd> play &middot; <kbd>&#8592;</kbd>/<kbd>&#8594;</kbd> line &middot; <kbd>S</kbd> split &middot; <kbd>M</kbd> merge &middot;
+    <kbd>G</kbd> gold &middot; <kbd>L</kbd> lyric &middot; <kbd>Del</kbd> delete &middot; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &middot; <kbd>Ctrl</kbd>+<kbd>S</kbd> download &middot;
+    toolbar: <b>Load .txt</b> reloads a saved song &middot; <b>Load pitch JSON</b> swaps the pitch overlay
+  </div>
+
+  <div class="legend">
+    <div class="lg">
+      <svg width="96" height="36" viewBox="0 0 96 36" aria-hidden="true">
+        <rect width="96" height="36" rx="3" fill="#0a0a14"/>
+        <text x="48" y="18" fill="#4caf50" font-size="11" font-style="italic" opacity="0.85" text-anchor="middle">sing</text>
+        <line x1="22" y1="26" x2="74" y2="26" stroke="#4caf50" stroke-width="1.2" opacity="0.6"/>
+        <polygon points="16,26 22,22.5 22,29.5" fill="#4caf50" opacity="0.6"/>
+        <polygon points="80,26 74,22.5 74,29.5" fill="#4caf50" opacity="0.6"/>
+      </svg>
+      <span><b>Whisper word</b> &mdash; a word the ASR actually heard in the vocals, with its forced-alignment start/end (arrows). Drag notes so they sit under the word they sing. <i>Load pitch JSON</i> in the toolbar swaps in a different <code>whisperx_pitch.json</code> overlay.</span>
+    </div>
+    <div class="lg">
+      <svg width="96" height="36" viewBox="0 0 96 36" aria-hidden="true">
+        <rect width="96" height="36" rx="3" fill="#0a0a14"/>
+        <circle cx="16" cy="21" r="3" fill="rgb(40,200,60)" opacity="0.85"/>
+        <circle cx="32" cy="15" r="3" fill="rgb(148,209,30)" opacity="1"/>
+        <circle cx="48" cy="19" r="3" fill="rgb(255,220,0)" opacity="0.55"/>
+        <circle cx="64" cy="12" r="3" fill="rgb(238,130,20)" opacity="1"/>
+        <circle cx="80" cy="22" r="3" fill="rgb(230,40,40)" opacity="0.3"/>
+      </svg>
+      <span><b>CREPE pitch dot</b> &mdash; one per pitch-detected audio frame (y = detected pitch). Color = loudness (green quiet &#8594; red loud); transparency = pitch confidence, so faint dots are less trustworthy.</span>
+    </div>
+    <div class="lg">
+      <svg width="96" height="36" viewBox="0 0 96 36" aria-hidden="true">
+        <defs>
+          <linearGradient id="lgmag" x1="0" y1="1" x2="0" y2="0">
+            <stop offset="0" stop-color="rgb(0,0,4)"/>
+            <stop offset="0.5" stop-color="rgb(47,17,99)"/>
+            <stop offset="1" stop-color="rgb(186,56,120)"/>
+          </linearGradient>
+        </defs>
+        <rect width="96" height="36" rx="3" fill="url(#lgmag)" opacity="0.55"/>
+        <ellipse cx="32" cy="21" rx="13" ry="5" fill="rgb(254,180,123)" opacity="0.7"/>
+        <ellipse cx="68" cy="12" rx="10" ry="4" fill="rgb(254,216,154)" opacity="0.6"/>
+      </svg>
+      <span><b>FFT background</b> &mdash; live spectrogram of the dropped vocals, one row per semitone: dark = quiet, bright red = energy. It appears only after loading audio.</span>
+    </div>
+    <div class="lg">
+      <svg width="96" height="36" viewBox="0 0 96 36" aria-hidden="true">
+        <rect width="96" height="36" rx="3" fill="#0a0a14"/>
+        <line x1="28" y1="4" x2="28" y2="32" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+        <line x1="48" y1="4" x2="48" y2="32" stroke="rgba(255,255,255,0.35)" stroke-width="2"/>
+        <line x1="68" y1="4" x2="68" y2="32" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      </svg>
+      <span><b>Beat grid</b> &mdash; one vertical line per beat (quarter note); the brighter, thicker line marks every 4th beat (the bar line the metronome accents).</span>
+    </div>
+  </div>
+
+<script>window.EDITOR_DATA = __EDITOR_DATA__;</script>
+<script>
+(function () {
+  "use strict";
+  const D = window.EDITOR_DATA;
+  if (!D) { document.getElementById("title").textContent = "No editor data"; return; }
+
+  // ── layout constants ─────────────────────────────────────────────────────
+  const W=1280, H=480, PAD_L=56, PAD_R=24, PAD_T=20, PAD_B=44;
+  const PLOT_W=W-PAD_L-PAD_R, PLOT_H=H-PAD_T-PAD_B;
+  const MARGIN_L_MS=200, MARGIN_R_MS=400, MIDI_MIN=24, MIDI_MAX=96;
+  const N_FFT=2048, FFT_SIZE=4096, HOP=512;
+  let BPM=D.bpm, GAP=D.gap, BEAT_MS=D.beatMs, PULSE_MS=D.pulseMs;
+  const MEGA=[[0,0,4],[2,1,9],[3,3,18],[6,5,26],[10,8,34],[14,11,43],[19,13,52],[24,15,61],[29,17,71],[34,17,80],[41,17,90],[47,17,99],[54,16,107],[61,15,113],[68,15,118],[74,16,121],[82,19,124],[89,21,126],[95,24,127],[101,26,128],[107,29,129],[114,31,129],[120,34,129],[126,36,130],[132,38,129],[139,41,129],[145,43,129],[152,45,128],[158,47,127],[165,49,126],[171,51,124],[178,53,123],[186,56,120],[192,58,118],[199,61,115],[205,64,113],[211,67,110],[217,70,107],[223,74,104],[228,79,100],[233,84,98],[237,90,95],[241,96,93],[244,103,92],[246,110,92],[248,118,92],[250,125,94],[251,133,96],[252,142,100],[253,150,104],[254,157,108],[254,165,113],[254,172,118],[254,180,123],[254,187,129],[254,194,135],[254,202,141],[254,209,148],[254,216,154],[253,224,161],[253,231,169],[252,238,176],[252,246,184],[252,253,191]];
+  const NOTE_NAMES=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+
+  // ── state ────────────────────────────────────────────────────────────────
+  let notes=D.notes.slice();
+  let groups=[];
+  let currentPage=0;
+  let selectedId=null;
+  let undoStack=[];
+  let cur={t0:GAP,t1:GAP+250,lo:48,hi:72};
+  let dragActive=false;
+  let drag=null;
+  let lastTap=null;
+  let lastFftKey="";
+  let lyricInput=null;
+  const audio={ctx:null,buffer:null,master:null,error:null};
+  const play={active:false,t0ctx:0,lineStartMs:0,lineEndMs:0,sources:[],rafId:0,playheadMs:null};
+
+  // ── element refs ─────────────────────────────────────────────────────────
+  const svgEl=document.getElementById("plot");
+  const fftEl=document.getElementById("fft");
+  const lyricEl=document.getElementById("lyricline");
+  const transportEl=document.getElementById("transport");
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+  const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
+  const startMsOf=n=>GAP+n.start*BEAT_MS;
+  const endMsOf=n=>GAP+(n.start+n.dur)*BEAT_MS;
+  function pitchToNote(p){ return NOTE_NAMES[((p%12)+12)%12]+(Math.floor(p/12)-1); }
+  function msToSec(ms){ return (ms/1000).toFixed(2)+"s"; }
+  function beatToMs(beat){ return GAP+beat*BEAT_MS; }
+  function msToBeat(ms){ return Math.round((ms-GAP)/BEAT_MS); }
+  function ampColor(amp,aMin,aMax){
+    let t=(aMax<=aMin)?0.5:clamp((amp-aMin)/(aMax-aMin),0,1);
+    let r,g,b;
+    if(t<0.5){ r=Math.round(40+t*2*215); g=Math.round(200+t*2*20); b=Math.round(60-t*2*60); }
+    else{ r=Math.round(255-(t-0.5)*2*25); g=Math.round(220-(t-0.5)*2*180); b=Math.round(0+(t-0.5)*2*40); }
+    return `rgb(${r},${g},${b})`;
+  }
+  function magma(t){
+    t=clamp(t,0,1)*(MEGA.length-1);
+    const i=Math.floor(t), f=t-i, a=MEGA[i], b=MEGA[Math.min(MEGA.length-1,i+1)];
+    return [Math.round(a[0]+(b[0]-a[0])*f),Math.round(a[1]+(b[1]-a[1])*f),Math.round(a[2]+(b[2]-a[2])*f)];
+  }
+  const esc=s=>String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+
+  function computeGroups(ns){
+    const gs=[]; let c=[];
+    for(const n of ns){
+      if(n.type==="-"){ if(c.length){ gs.push(c); c=[]; } }
+      else c.push(n);
+    }
+    if(c.length) gs.push(c);
+    return gs;
+  }
+  function verseTextLive(pageNotes){
+    let words=[], pending="";
+    const fw=()=>{ if(pending){ words.push(pending); pending=""; } };
+    for(const n of pageNotes){
+      const raw=n.syl; if(!raw) continue;
+      const syl=raw.trim(); if(!syl||syl==="~") continue;
+      if(raw.startsWith(" ")) fw();
+      pending+=syl;
+      if(raw.endsWith(" ")) fw();
+    }
+    fw();
+    return words.join(" ");
+  }
+  function noteWindow(pageNotes){
+    const cs=[],ce=[];
+    for(const n of pageNotes){ cs.push(startMsOf(n)); ce.push(endMsOf(n)); }
+    if(!cs.length) return {t0:GAP,t1:GAP+250};
+    return {t0:Math.max(0,Math.min(...cs)-MARGIN_L_MS), t1:Math.max(GAP+250,Math.max(...ce)+MARGIN_R_MS)};
+  }
+  let lastRefKey="", lastRef=null;
+  function getRef(pageNotes){
+    const key=currentPage+"|"+cur.t0+"|"+cur.t1;
+    if(key===lastRefKey&&lastRef) return lastRef;
+    const words=[], frames=[];
+    for(const pw of (D.pitchWords||[])){
+      if(pw.start_ms<=cur.t1&&pw.end_ms>=cur.t0) words.push({word:pw.word,start_ms:pw.start_ms,end_ms:pw.end_ms,midi:pw.midi});
+      for(const f of pw.frames) if(f.t_ms>=cur.t0&&f.t_ms<=cur.t1) frames.push(f);
+    }
+    let aMin=Infinity,aMax=-Infinity;
+    for(const f of frames){ if(f.amp<aMin)aMin=f.amp; if(f.amp>aMax)aMax=f.amp; }
+    if(!isFinite(aMin)){ aMin=0; aMax=1; }
+    lastRefKey=key;
+    return (lastRef={words,frames,ampMin:aMin,ampMax:aMax});
+  }
+  function midiWindow(pageNotes){
+    let lo=Infinity,hi=-Infinity;
+    for(const n of pageNotes){ if(n.pitch<lo)lo=n.pitch; if(n.pitch>hi)hi=n.pitch; }
+    if(!isFinite(lo)) return {lo:48,hi:72};
+    if(hi-lo<=24){
+      let mid=Math.round((lo+hi)/2), wl=mid-12, wh=mid+12;
+      if(wl>lo){ wl=lo; wh=wl+24; }
+      if(wh<hi){ wh=hi; wl=wh-24; }
+      wl=clamp(wl,MIDI_MIN,MIDI_MAX-24); wh=wl+24;
+      return {lo:wl,hi:wh};
+    }
+    return {lo,hi};
+  }
+  const tx=ms=>PAD_L+(ms-cur.t0)/(cur.t1-cur.t0)*PLOT_W;
+  const ty=m=>PAD_T+(cur.hi-m)/(cur.hi-cur.lo)*PLOT_H;
+  function toSvgPoint(e){
+    const pt=svgEl.createSVGPoint(); pt.x=e.clientX; pt.y=e.clientY;
+    return pt.matrixTransform(svgEl.getScreenCTM().inverse());
+  }
+
+  // ── SVG rendering ────────────────────────────────────────────────────────
+  function buildSvg(pageNotes,ref){
+    const tRange=cur.t1-cur.t0, pRange=cur.hi-cur.lo;
+    const bar_h=Math.max(PLOT_H/(pRange+1)*0.7,8);
+    let s="";
+    // beat grid
+    const firstB=Math.max(0,Math.ceil((cur.t0-GAP)/PULSE_MS));
+    const lastB=Math.floor((cur.t1-GAP)/PULSE_MS);
+    for(let i=firstB;i<=lastB;i++){
+      const x=tx(GAP+i*PULSE_MS);
+      const down=(i%4===0);
+      s+=`<line x1="${x.toFixed(1)}" y1="${PAD_T}" x2="${x.toFixed(1)}" y2="${PAD_T+PLOT_H}" stroke="${down?'rgba(255,255,255,0.35)':'rgba(255,255,255,0.12)'}" stroke-width="${down?1.5:0.8}"/>`;
+    }
+    // pitch grid + labels
+    for(let m=cur.lo;m<=cur.hi;m++){
+      const y=ty(m);
+      const isC=(m%12===0);
+      s+=`<line x1="${PAD_L}" y1="${y.toFixed(1)}" x2="${PAD_L+PLOT_W}" y2="${y.toFixed(1)}" stroke="${isC?'rgba(255,255,255,0.7)':'#2a2a4a'}" stroke-width="${isC?1:0.5}"/>`;
+      s+=`<text x="${PAD_L-4}" y="${(y+3).toFixed(1)}" fill="${isC?'#fff':'#666'}" font-size="8" font-family="monospace" text-anchor="end">${pitchToNote(m)}</text>`;
+    }
+    // time axis
+    const step=tRange>20000?5000:tRange>8000?2000:tRange>3000?1000:500;
+    for(let t=Math.ceil(cur.t0/step)*step;t<=cur.t1;t+=step){
+      const x=tx(t);
+      s+=`<line x1="${x.toFixed(1)}" y1="${PAD_T+PLOT_H}" x2="${x.toFixed(1)}" y2="${PAD_T+PLOT_H+4}" stroke="#555" stroke-width="0.5"/>`;
+      s+=`<text x="${x.toFixed(1)}" y="${H-4}" fill="#666" font-size="8" text-anchor="middle">${(t/1000).toFixed(1)}s</text>`;
+    }
+    // note bars
+    for(const n of pageNotes){
+      const x=tx(startMsOf(n)), w=Math.max(tx(endMsOf(n))-x,2), y=ty(n.pitch);
+      const gold=n.type==="*";
+      const fill=gold?"rgba(232,190,60,0.7)":"rgba(15,52,96,0.7)", stroke=gold?"#ffd54a":"#4fc3f7", tfill=gold?"#1a1a2e":"#cde";
+      const sel=n.id===selectedId;
+      const label=(n.syl.trim()||"&nbsp;");
+      const fs=Math.max(7,Math.min(12,w/(Math.max(1,n.syl.trim().length)*0.55)));
+      const hy=y-4, hh=bar_h+8;
+      s+=`<g class="note" data-id="${n.id}">`;
+      s+=`<rect class="bar${sel?" sel":""}" data-handle="body" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${w.toFixed(1)}" height="${bar_h.toFixed(1)}" rx="2" fill="${fill}" stroke="${sel?"#ffffff":stroke}" stroke-width="${sel?2:0.8}"/>`;
+      s+=`<rect data-handle="left" x="${(x-4).toFixed(1)}" y="${hy.toFixed(1)}" width="8" height="${hh.toFixed(1)}" fill="transparent" style="cursor:ew-resize"/>`;
+      s+=`<rect data-handle="right" x="${(x+w-4).toFixed(1)}" y="${hy.toFixed(1)}" width="8" height="${hh.toFixed(1)}" fill="transparent" style="cursor:ew-resize"/>`;
+      s+=`<text x="${(x+w/2).toFixed(1)}" y="${(y+bar_h/2).toFixed(1)}" fill="${tfill}" font-size="${fs.toFixed(1)}" text-anchor="middle" dominant-baseline="central">${esc(label)}</text>`;
+      s+=`<title>${esc(n.syl)} (${pitchToNote(n.pitch)}) ${msToSec(startMsOf(n))} +${(n.dur*BEAT_MS).toFixed(0)}ms</title>`;
+      s+=`</g>`;
+    }
+    // whisper word labels
+    for(const w of ref.words){
+      const x1=tx(w.start_ms), x2=tx(w.end_ms), xm=(x1+x2)/2;
+      if(x2<PAD_L||x1>PAD_L+PLOT_W) continue;
+      const bw=Math.max(x2-x1,1);
+      const fs=Math.max(6,Math.min(9,bw/(Math.max(1,w.word.length)*0.55)));
+      const yLabel=PAD_T+PLOT_H-8;
+      s+=`<text x="${xm.toFixed(1)}" y="${yLabel}" fill="#4caf50" font-size="${fs.toFixed(1)}" font-style="italic" opacity="0.85" text-anchor="middle">${esc(w.word)}</text>`;
+      s+=`<line x1="${x1.toFixed(1)}" y1="${(yLabel+4).toFixed(1)}" x2="${x2.toFixed(1)}" y2="${(yLabel+4).toFixed(1)}" stroke="#4caf50" stroke-width="1.2" opacity="0.5"/>`;
+      s+=`<polygon points="${(x1-5).toFixed(1)},${(yLabel+4).toFixed(1)} ${x1.toFixed(1)},${(yLabel+1).toFixed(1)} ${x1.toFixed(1)},${(yLabel+7).toFixed(1)}" fill="#4caf50" opacity="0.5"/>`;
+      s+=`<polygon points="${(x2+5).toFixed(1)},${(yLabel+4).toFixed(1)} ${x2.toFixed(1)},${(yLabel+1).toFixed(1)} ${x2.toFixed(1)},${(yLabel+7).toFixed(1)}" fill="#4caf50" opacity="0.5"/>`;
+    }
+    // pitch dots
+    for(const f of ref.frames){
+      if(f.t_ms<cur.t0||f.t_ms>cur.t1||f.m<cur.lo||f.m>cur.hi) continue;
+      s+=`<circle cx="${tx(f.t_ms).toFixed(1)}" cy="${ty(f.m).toFixed(1)}" r="2.5" fill="${ampColor(f.amp,ref.ampMin,ref.ampMax)}" opacity="${Math.max(0.15,f.conf).toFixed(2)}"/>`;
+    }
+    // axes
+    s+=`<line x1="${PAD_L}" y1="${PAD_T}" x2="${PAD_L}" y2="${PAD_T+PLOT_H}" stroke="#555" stroke-width="1"/>`;
+    s+=`<line x1="${PAD_L}" y1="${PAD_T+PLOT_H}" x2="${PAD_L+PLOT_W}" y2="${PAD_T+PLOT_H}" stroke="#555" stroke-width="1"/>`;
+    s+=`<text x="${PAD_L+PLOT_W/2}" y="${H-4}" fill="#888" font-size="9" text-anchor="middle">time &#8594;</text>`;
+    s+=`<text x="8" y="${PAD_T+PLOT_H/2}" fill="#888" font-size="9" text-anchor="middle" transform="rotate(-90 8 ${PAD_T+PLOT_H/2})">pitch &#8593;</text>`;
+    // playhead
+    s+=`<line id="playhead" x1="0" y1="${PAD_T}" x2="0" y2="${PAD_T+PLOT_H}" stroke="#ffd54a" stroke-width="1.5" style="display:none"/>`;
+    return s;
+  }
+  function buildLyricLine(pageNotes){
+    if(!pageNotes.length) return `<span class="chip">&#8212;</span>`;
+    let s=`<span class="lyric-line">`;
+    for(const n of pageNotes){
+      const conf=`<span class="lyric-time">[${msToSec(startMsOf(n))}]</span>`;
+      s+=`${conf}${esc(n.syl.trim()||"~")}`;
+    }
+    return s+`</span>`;
+  }
+
+  function updateTransport(pageNotes){
+    const sel=notes.find(n=>n.id===selectedId);
+    const ph=play.playheadMs!=null?`Playhead <b>${msToSec(play.playheadMs)}</b>`:``;
+    const selTxt=sel?`Selected <b>${esc(sel.syl.trim()||"~")}</b> ${pitchToNote(sel.pitch)} @ ${msToSec(startMsOf(sel))} (${sel.dur} beats, ${sel.type})`:`Selected <b>&mdash;</b>`;
+    transportEl.innerHTML=
+      `Line <b>${currentPage+1}/${groups.length||0}</b> &nbsp; ${selTxt} &nbsp; ${ph}`+
+      ` &nbsp; BPM <b>${BPM}</b> &middot; GAP <b>${GAP}ms</b> &middot; beat <b>${BEAT_MS.toFixed(1)}ms</b>`;
+    document.getElementById("lineInd").textContent=`line ${currentPage+1}/${groups.length||0}`;
+  }
+  function updateToolbar(){
+    const sel=notes.find(n=>n.id===selectedId);
+    const idx=sel?notes.findIndex(n=>n.id===sel.id):-1;
+    let nextSung=null;
+    if(idx>=0){ for(let i=idx+1;i<notes.length;i++){ if(notes[i].type!=="-"){ nextSung=notes[i]; break; } } }
+    document.getElementById("splitBtn").disabled=!canSplit(sel);
+    document.getElementById("mergeBtn").disabled=!(sel&&nextSung);
+    document.getElementById("delBtn").disabled=!sel;
+    document.getElementById("goldBtn").disabled=!sel;
+    document.getElementById("lyricBtn").disabled=!sel;
+    document.getElementById("prevBtn").disabled=currentPage<=0;
+    document.getElementById("nextBtn").disabled=currentPage>=groups.length-1;
+    document.getElementById("playBtn").innerHTML=play.active?"&#9632; Stop":"&#9654; Play";
+    document.getElementById("undoBtn").disabled=!undoStack.length;
+  }
+  function updateSelectionUi(){
+    for(const bar of svgEl.querySelectorAll(".note .bar")){
+      const g=bar.closest("[data-id]");
+      const n=g?notes.find(x=>x.id===+g.getAttribute("data-id")):null;
+      const selected=!!(n&&n.id===selectedId);
+      bar.classList.toggle("sel",selected);
+      bar.setAttribute("stroke",selected?"#ffffff":n&&n.type==="*"?"#ffd54a":"#4fc3f7");
+      bar.setAttribute("stroke-width",selected?"2":"0.8");
+    }
+    updateTransport(groups[currentPage]||[]);
+    updateToolbar();
+  }
+
+  function updateLineSelect(){
+    const sel=document.getElementById("lineSel");
+    sel.innerHTML="";
+    for(let i=0;i<groups.length;i++){
+      const opt=document.createElement("option");
+      opt.value=String(i);
+      let label=verseTextLive(groups[i]).trim();
+      if(label.length>36) label=label.slice(0,36)+"…";
+      opt.textContent=(i+1)+(label?" — "+label:"");
+      sel.appendChild(opt);
+    }
+    sel.value=String(currentPage);
+  }
+  function renderPage(){
+    groups=computeGroups(notes);
+    if(currentPage>=groups.length) currentPage=Math.max(0,groups.length-1);
+    const pageNotes=groups[currentPage]||[];
+    updateLineSelect();
+    if(!dragActive){
+      const tw=noteWindow(pageNotes), mw=midiWindow(pageNotes);
+      cur={t0:tw.t0,t1:tw.t1,lo:mw.lo,hi:mw.hi};
+    }
+    const ref=getRef(pageNotes);
+    svgEl.innerHTML=buildSvg(pageNotes,ref);
+    lyricEl.innerHTML=buildLyricLine(pageNotes);
+    updateTransport(pageNotes);
+    updateToolbar();
+    const key=currentPage+"|"+cur.t0+"|"+cur.t1+"|"+cur.lo+"|"+cur.hi;
+    if(key!==lastFftKey){ lastFftKey=key; drawFFT(); }
+  }
+
+  // ── FFT / STFT background ────────────────────────────────────────────────
+  function fft(re,im){
+    const n=re.length;
+    for(let i=1,j=0;i<n;i++){
+      let bit=n>>1;
+      for(; j&bit; bit>>=1) j^=bit;
+      j^=bit;
+      if(i<j){ let t=re[i];re[i]=re[j];re[j]=t; let u=im[i];im[i]=im[j];im[j]=u; }
+    }
+    for(let len=2;len<=n;len<<=1){
+      const ang=-2*Math.PI/len, wRe=Math.cos(ang), wIm=Math.sin(ang);
+      for(let i=0;i<n;i+=len){
+        let cRe=1,cIm=0;
+        for(let k=0;k<len/2;k++){
+          const uRe=re[i+k], uIm=im[i+k];
+          const vr=re[i+k+len/2]*cRe-im[i+k+len/2]*cIm;
+          const vi=re[i+k+len/2]*cIm+im[i+k+len/2]*cRe;
+          re[i+k]=uRe+vr; im[i+k]=uIm+vi;
+          re[i+k+len/2]=uRe-vr; im[i+k+len/2]=uIm-vi;
+          const nr=cRe*wRe-cIm*wIm, ni=cRe*wIm+cIm*wRe; cRe=nr; cIm=ni;
+        }
+      }
+    }
+  }
+  function drawFFT(){
+    const ctx2=fftEl.getContext("2d");
+    fftEl.width=PLOT_W; fftEl.height=PLOT_H;
+    const lo=cur.lo, hi=cur.hi, nRows=hi-lo+1;
+    if(!audio.buffer){ ctx2.fillStyle="#0a0a14"; ctx2.fillRect(0,0,PLOT_W,PLOT_H); return; }
+    const sr=audio.buffer.sampleRate, ch=audio.buffer.numberOfChannels, full=audio.buffer.length;
+    const s0=Math.max(0,Math.floor(cur.t0/1000*sr)), s1=Math.min(full,Math.ceil(cur.t1/1000*sr));
+    const segLen=Math.max(0,s1-s0);
+    const nFrames=1+Math.max(0,Math.floor((segLen-N_FFT)/HOP));
+    if(segLen<N_FFT||nFrames<=0){ ctx2.fillStyle="#0a0a14"; ctx2.fillRect(0,0,PLOT_W,PLOT_H); return; }
+    const seg=new Float32Array(segLen);
+    if(ch===1){ const d=audio.buffer.getChannelData(0); for(let i=0;i<segLen;i++) seg[i]=d[s0+i]; }
+    else{ for(let i=0;i<segLen;i++){ let s=0; for(let c=0;c<ch;c++) s+=audio.buffer.getChannelData(c)[s0+i]; seg[i]=s/ch; } }
+    const hann=new Float32Array(N_FFT);
+    for(let i=0;i<N_FFT;i++) hann[i]=0.5-0.5*Math.cos(2*Math.PI*i/(N_FFT-1));
+    const binHz=sr/FFT_SIZE;
+    const binRange=[];
+    for(let m=lo;m<=hi;m++){
+      const fLo=440*Math.pow(2,(m-0.5-69)/12), fHi=440*Math.pow(2,(m+0.5-69)/12);
+      binRange.push([Math.floor(fLo/binHz),Math.ceil(fHi/binHz)]);
+    }
+    const re=new Float64Array(FFT_SIZE), im=new Float64Array(FFT_SIZE);
+    const energies=new Float64Array(nRows*nFrames);
+    let frame=0;
+    for(let s=0;s+N_FFT<=segLen;s+=HOP){
+      for(let k=0;k<N_FFT;k++){ re[k]=seg[s+k]*hann[k]; im[k]=0; }
+      for(let k=N_FFT;k<FFT_SIZE;k++){ re[k]=0; im[k]=0; }
+      fft(re,im);
+      for(let r=0;r<nRows;r++){
+        const b0=binRange[r][0], b1=Math.min(binRange[r][1],FFT_SIZE/2);
+        let e=0;
+        for(let b=b0;b<=b1;b++) e+=Math.sqrt(re[b]*re[b]+im[b]*im[b]);
+        energies[r*nFrames+frame]=e;
+      }
+      frame++;
+    }
+    const nUsed=frame;
+    const db=new Float64Array(nRows*nUsed);
+    for(let i=0;i<nRows*nUsed;i++) db[i]=20*Math.log10(energies[i]+1e-7);
+    const sorted=Array.from(db).sort((a,b)=>a-b);
+    const floor=sorted[Math.floor(0.05*sorted.length)], top=sorted[Math.floor(0.995*sorted.length)];
+    const range=(top-floor)||1;
+    const off=document.createElement("canvas"); off.width=PLOT_W; off.height=nRows;
+    const octx=off.getContext("2d"), img=octx.createImageData(PLOT_W,nRows);
+    for(let y=0;y<nRows;y++){
+      const r=nRows-1-y; // top of canvas = highest midi, matching ty()
+      for(let x=0;x<PLOT_W;x++){
+        const fx=x/PLOT_W*nUsed, f0=Math.floor(fx), f1=Math.min(nUsed-1,f0+1), fr=fx-f0;
+        const v=db[r*nUsed+f0]*(1-fr)+db[r*nUsed+f1]*fr;
+        const [r2,g2,b2]=magma((v-floor)/range);
+        const idx=(y*PLOT_W+x)*4;
+        img.data[idx]=r2; img.data[idx+1]=g2; img.data[idx+2]=b2; img.data[idx+3]=255;
+      }
+    }
+    octx.putImageData(img,0,0);
+    ctx2.imageSmoothingEnabled=true;
+    ctx2.drawImage(off,0,0,PLOT_W,nRows,0,0,PLOT_W,PLOT_H);
+  }
+
+  // ── selection + drag ─────────────────────────────────────────────────────
+  function select(id){ selectedId=id; updateSelectionUi(); }
+  function prevNoteEndBeat(note){
+    const idx=notes.findIndex(n=>n.id===note.id);
+    for(let i=idx-1;i>=0;i--){ if(notes[i].type!=="-") return notes[i].start+notes[i].dur; }
+    return 0;
+  }
+  function nextNoteStartBeat(note){
+    const idx=notes.findIndex(n=>n.id===note.id);
+    for(let i=idx+1;i<notes.length;i++){ if(notes[i].type!=="-") return notes[i].start; }
+    return Infinity;
+  }
+  svgEl.addEventListener("pointerdown",e=>{
+    if(lyricInput) return;
+    const g=e.target.closest("[data-id]");
+    if(!g){ if(selectedId!=null) select(null); lastTap=null; return; }
+    const id=+g.getAttribute("data-id");
+    const note=notes.find(n=>n.id===id);
+    if(!note) return;
+    const handle=e.target.getAttribute("data-handle")||"body";
+    const now=performance.now();
+    // Browsers do not consistently synthesize dblclick for touch input, so
+    // retain a small double-tap detector there. Mouse input uses the native
+    // dblclick event below, respecting the operating system's click timing.
+    if(e.pointerType==="touch"&&lastTap&&lastTap.id===id&&now-lastTap.t<400&&Math.hypot(e.clientX-lastTap.x,e.clientY-lastTap.y)<8){
+      lastTap=null;
+      selectedId=id;
+      openLyricPopover(note);
+      return;
+    }
+    lastTap={id,x:e.clientX,y:e.clientY,t:now};
+    pushUndo();
+    selectedId=id;
+    dragActive=true;
+    drag={id,handle,p0:toSvgPoint(e),origStart:note.start,origDur:note.dur,origPitch:note.pitch,origEnd:note.start+note.dur};
+    svgEl.setPointerCapture(e.pointerId);
+    // Do not replace the target between clicks; native dblclick requires the
+    // same DOM node to survive the complete click sequence.
+    updateSelectionUi();
+    e.preventDefault();
+  });
+  svgEl.addEventListener("pointermove",e=>{
+    if(!drag) return;
+    const p=toSvgPoint(e), dx=p.x-drag.p0.x, dy=p.y-drag.p0.y;
+    const note=notes.find(n=>n.id===drag.id);
+    if(!note) return;
+    const tScale=(cur.t1-cur.t0)/PLOT_W/BEAT_MS, pScale=(cur.hi-cur.lo)/PLOT_H;
+    if(drag.handle==="body"){
+      const dBeats=Math.round(dx*tScale), dMidi=Math.round(-dy*pScale);
+      note.start=clamp(drag.origStart+dBeats,prevNoteEndBeat(note),nextNoteStartBeat(note)-1);
+      note.pitch=clamp(drag.origPitch+dMidi,cur.lo,cur.hi);
+    }else if(drag.handle==="right"){
+      const dBeats=Math.round(dx*tScale);
+      note.dur=clamp(drag.origDur+dBeats,1,nextNoteStartBeat(note)-note.start);
+    }else if(drag.handle==="left"){
+      const dBeats=Math.round(dx*tScale);
+      const ns=clamp(drag.origStart+dBeats,prevNoteEndBeat(note),drag.origEnd-1);
+      note.start=ns; note.dur=drag.origEnd-ns;
+    }
+    renderPage();
+  });
+  function endDrag(e){
+    if(!drag) return;
+    const note=notes.find(n=>n.id===drag.id);
+    const changed=!!(note && (note.start!==drag.origStart || note.dur!==drag.origDur || note.pitch!==drag.origPitch));
+    drag=null; dragActive=false;
+    try{ svgEl.releasePointerCapture(e.pointerId); }catch(_){}
+    if(!changed){
+      if(undoStack.length) undoStack.pop(); // drop no-op snapshot
+      updateSelectionUi();
+    }else renderPage();
+  }
+  svgEl.addEventListener("pointerup",endDrag);
+  svgEl.addEventListener("pointercancel",endDrag);
+  svgEl.addEventListener("dblclick",e=>{
+    // A render between clicks replaces the original SVG child, so fall back
+    // to the selected note if the browser targets their common SVG ancestor.
+    const g=e.target.closest("[data-id]");
+    const id=g?+g.getAttribute("data-id"):selectedId;
+    const note=notes.find(n=>n.id===id);
+    if(!note) return;
+    lastTap=null;
+    selectedId=id;
+    openLyricPopover(note);
+    e.preventDefault();
+  });
+
+  // ── edit operations ──────────────────────────────────────────────────────
+  function nextId(){ let m=0; for(const n of notes) if(n.id>m)m=n.id; return m+1; }
+  function canSplit(n){
+    if(!n) return false;
+    if(n.dur>=2) return true;
+    return nextNoteStartBeat(n)-(n.start+n.dur)>=1;
+  }
+  function splitNote(){
+    const n=notes.find(x=>x.id===selectedId); if(!canSplit(n)) return;
+    if(n.dur<2){
+      pushUndo();
+      const nb={id:nextId(),type:n.type,start:n.start+n.dur,dur:1,pitch:n.pitch,syl:"~"};
+      notes.splice(notes.findIndex(x=>x.id===n.id)+1,0,nb);
+      selectedId=nb.id;
+      renderPage();
+      return;
+    }
+    let b;
+    if(play.playheadMs!=null&&startMsOf(n)<play.playheadMs&&play.playheadMs<endMsOf(n)) b=msToBeat(play.playheadMs);
+    else b=Math.round(n.start+n.dur/2);
+    if(!(n.start<b&&b<n.start+n.dur)) return;
+    pushUndo();
+    const idx=notes.findIndex(x=>x.id===n.id);
+    const A={id:n.id,type:n.type,start:n.start,dur:b-n.start,pitch:n.pitch,syl:n.syl};
+    const B={id:nextId(),type:n.type,start:b,dur:n.start+n.dur-b,pitch:n.pitch,syl:"~"};
+    notes.splice(idx,1,A,B);
+    selectedId=B.id;
+    renderPage();
+  }
+  function mergeNote(){
+    const n=notes.find(x=>x.id===selectedId); if(!n) return;
+    const idx=notes.findIndex(x=>x.id===n.id);
+    if(idx+1>=notes.length) return;
+    const x=notes[idx+1];
+    if(x.type==="-") return;
+    pushUndo();
+    n.dur=x.start+x.dur-n.start;
+    n.syl=n.syl+x.syl;
+    notes.splice(idx+1,1);
+    renderPage();
+  }
+  function deleteNote(){
+    const n=notes.find(x=>x.id===selectedId); if(!n) return;
+    pushUndo();
+    notes.splice(notes.findIndex(x=>x.id===n.id),1);
+    selectedId=null;
+    renderPage();
+  }
+  function toggleGold(){
+    const n=notes.find(x=>x.id===selectedId); if(!n) return;
+    pushUndo();
+    n.type=n.type==="*"?":":"*";
+    renderPage();
+  }
+
+  // ── lyric popover ────────────────────────────────────────────────────────
+  function openLyricPopover(n){
+    cancelLyric();
+    const g=svgEl.querySelector(`g[data-id="${n.id}"] .bar`);
+    const rect=g?g.getBoundingClientRect():{left:100,top:100};
+    const inp=document.createElement("input");
+    inp.type="text"; inp.className="lyric-pop"; inp.value=n.syl.trim();
+    inp._note=n; inp._done=false;
+    document.body.appendChild(inp);
+    inp.style.left=Math.min(rect.left,window.innerWidth-160)+"px";
+    inp.style.top=(rect.top-4)+"px";
+    inp.focus(); inp.select();
+    inp.addEventListener("keydown",e=>{
+      e.stopPropagation();
+      if(e.key==="Enter"){ e.preventDefault(); commitLyric(); }
+      else if(e.key==="Escape"){ e.preventDefault(); cancelLyric(); }
+    });
+    inp.addEventListener("blur",()=>{ if(!inp._done) commitLyric(); });
+    lyricInput=inp;
+  }
+  function commitLyric(){
+    if(!lyricInput||lyricInput._done) return;
+    lyricInput._done=true;
+    const n=lyricInput._note, val=lyricInput.value;
+    removeLyricInput();
+    if(n&&val!==n.syl){ pushUndo(); n.syl=val; renderPage(); }
+  }
+  function cancelLyric(){
+    if(!lyricInput) return;
+    lyricInput._done=true;
+    removeLyricInput();
+  }
+  function removeLyricInput(){ if(lyricInput){ lyricInput.remove(); lyricInput=null; } }
+
+  // ── undo ─────────────────────────────────────────────────────────────────
+  function pushUndo(){
+    undoStack.push(JSON.stringify(notes));
+    if(undoStack.length>100) undoStack.shift();
+    updateToolbar();
+  }
+  function undo(){
+    if(!undoStack.length) return;
+    notes=JSON.parse(undoStack.pop());
+    selectedId=null;
+    renderPage();
+  }
+
+  // ── audio ────────────────────────────────────────────────────────────────
+  function ensureCtx(){
+    if(!audio.ctx){
+      audio.ctx=new (window.AudioContext||window.webkitAudioContext)();
+      audio.master=audio.ctx.createGain(); audio.master.gain.value=0.9; audio.master.connect(audio.ctx.destination);
+      audio.vocals=audio.ctx.createGain(); audio.vocals.gain.value=vocalsGain(); audio.vocals.connect(audio.master);
+      audio.notes=audio.ctx.createGain(); audio.notes.gain.value=notesGain(); audio.notes.connect(audio.master);
+      audio.metro=audio.ctx.createGain(); audio.metro.gain.value=metroGain(); audio.metro.connect(audio.master);
+    }
+    return audio.ctx;
+  }
+  function loadAudio(ab){
+    const ctx=ensureCtx();
+    ctx.decodeAudioData(ab).then(buf=>{
+      audio.buffer=buf; audio.error=null;
+      const drop=document.getElementById("drop"); if(drop) drop.style.display="none";
+      updateAudioChip(); lastFftKey=""; renderPage();
+    }).catch(e=>{ audio.error=String(e); updateAudioChip(); });
+  }
+  function updateAudioChip(){
+    const chip=document.getElementById("audioChip");
+    if(audio.buffer){ chip.textContent="audio: "+audio.buffer.duration.toFixed(1)+"s"; chip.className="chip ok"; }
+    else if(audio.error){ chip.textContent="audio decode failed"; chip.className="chip err"; }
+    else { chip.textContent="audio: not loaded"; chip.className="chip"; }
+  }
+  function updatePitchChip(name,count,ok){
+    const chip=document.getElementById("pitchChip");
+    if(!ok){ chip.textContent="pitch JSON failed"; chip.className="chip err"; return; }
+    chip.textContent=count?("pitch: "+name+" ("+count+" words)"):"pitch: none";
+    chip.className=ok?"chip ok":"chip";
+  }
+  function loadPitchFile(f){
+    if(!f) return;
+    f.text().then(txt=>{
+      const data=JSON.parse(txt);
+      const src=Array.isArray(data)?data:data.words;
+      if(!Array.isArray(src)) throw new Error("no 'words' array");
+      D.pitchWords=src.map(w=>({
+        word:w.word||"",
+        start_ms:(w.start||0)*1000,
+        end_ms:(w.end||0)*1000,
+        midi:w.midi||0,
+        frames:(w.pitchFrames||[]).map(pf=>({t_ms:(pf.time||0)*1000,m:pf.midi||0,conf:pf.confidence||0,amp:pf.amplitude||0}))
+      }));
+      updatePitchChip(f.name,D.pitchWords.length,true);
+      lastRefKey="";
+      renderPage();
+    }).catch(e=>updatePitchChip("",0,false));
+  }
+  function updateMetaChip(){
+    const lineCount=computeGroups(D.notes).length;
+    document.getElementById("meta").textContent=
+      `BPM ${D.bpm} · GAP ${D.gap}ms · ${D.notes.length} notes · ${lineCount} lines`;
+  }
+  function addRestOrCorrupted(afterDash,out){
+    if(!afterDash) return;
+    let beatText;
+    if(afterDash.includes(":")){
+      const ci=afterDash.indexOf(":");
+      const remainder=afterDash.slice(ci+1).trim();
+      const m2=/^(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$/.exec(remainder);
+      if(m2){ out.push({type:":",start:+m2[1],dur:+m2[2],pitch:+m2[3],syl:m2[4]||""}); return; }
+      beatText=afterDash.slice(0,ci).trim();
+    }else{
+      const parts=afterDash.split(/\s+/);
+      beatText=parts[0]||"";
+    }
+    beatText=beatText.split(":")[0].trim();
+    if(!/^-?\d+$/.test(beatText)) return;
+    out.push({type:"-",start:+beatText,dur:0,pitch:0,syl:""});
+  }
+  function parseUltrastarTxt(content){
+    const text=content.replace(/\r\n/g,"\n").replace(/\r/g,"\n");
+    const meta={}, notes=[], rawHeader=[];
+    let headerDone=false;
+    for(const line of text.split("\n")){
+      const trimmed=line.trim();
+      if(!headerDone){ if(trimmed.startsWith("#")) rawHeader.push(line); else headerDone=true; }
+      if(trimmed.startsWith("#")){
+        const colon=trimmed.indexOf(":");
+        if(colon>0) meta[trimmed.slice(1,colon).toUpperCase()]=trimmed.slice(colon+1).trim();
+      }else{
+        const m=/^\s*([:*])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$/.exec(trimmed);
+        if(m) notes.push({type:m[1],start:+m[2],dur:+m[3],pitch:+m[4],syl:m[5]||""});
+        else if(trimmed.startsWith("-")) addRestOrCorrupted(trimmed.slice(1).trim(),notes);
+      }
+    }
+    const bpm=parseFloat((meta.BPM||"120").replace(/,/g,"."))||120;
+    const gap=Math.trunc(parseFloat((meta.GAP||"0").replace(/,/g,".")))||0;
+    return {rawHeader,meta,notes,bpm,gap};
+  }
+  async function loadTxtFile(f){
+    if(!f) return;
+    const metaChip=document.getElementById("meta");
+    try{
+      const bytes=new Uint8Array(await f.arrayBuffer());
+      let text;
+      try{ text=new TextDecoder("utf-8",{fatal:true}).decode(bytes); }
+      catch{ text=new TextDecoder("windows-1252").decode(bytes); }
+      const p=parseUltrastarTxt(text);
+      if(!p.rawHeader.length&&!p.notes.length) throw new Error("no Ultrastar content");
+      D.rawHeader=p.rawHeader;
+      D.notes=p.notes.map((n,i)=>({id:i,type:n.type,start:n.start,dur:n.dur,pitch:n.pitch,syl:n.syl}));
+      D.bpm=p.bpm; D.gap=p.gap; D.beatMs=60000/p.bpm/4; D.pulseMs=60000/p.bpm;
+      D.meta={title:p.meta.TITLE||"",artist:p.meta.ARTIST||"",mp3:p.meta.MP3||"",bpm:p.bpm,gap:p.gap,video:p.meta.VIDEO||""};
+      D.srcName=f.name;
+      BPM=p.bpm; GAP=p.gap; BEAT_MS=D.beatMs; PULSE_MS=D.pulseMs;
+      stopPlay(); cancelLyric();
+      notes=D.notes.slice(); selectedId=null; undoStack=[]; currentPage=0;
+      lastRefKey=""; lastFftKey="";
+      document.getElementById("title").textContent=(D.meta.title||"(untitled)")+" — "+(D.meta.artist||"");
+      metaChip.className="chip";
+      updateMetaChip();
+      renderPage();
+    }catch(e){
+      metaChip.textContent="txt load failed";
+      metaChip.className="chip err";
+    }
+  }
+  function playLine(){
+    if(play.active){ stopPlay(); return; }
+    const pageNotes=groups[currentPage]||[];
+    if(!pageNotes.length) return;
+    const ctx=ensureCtx(); ctx.resume();
+    const lineStartMs=startMsOf(pageNotes[0]), lineEndMs=endMsOf(pageNotes[pageNotes.length-1]);
+    const t0ctx=ctx.currentTime+0.05;
+    play.active=true; play.t0ctx=t0ctx; play.lineStartMs=lineStartMs; play.lineEndMs=lineEndMs; play.sources=[];
+    if(audio.buffer){
+      const src=ctx.createBufferSource(); src.buffer=audio.buffer;
+      src.start(t0ctx,Math.max(0,lineStartMs/1000),(lineEndMs-lineStartMs)/1000+0.5);
+      src.connect(audio.vocals); play.sources.push(src);
+    }
+    for(const n of pageNotes){
+      const f=440*Math.pow(2,(n.pitch-69)/12);
+      const st=t0ctx+(startMsOf(n)-lineStartMs)/1000, dur=n.dur*BEAT_MS/1000;
+      if(dur<=0) continue;
+      const osc=ctx.createOscillator(); osc.type="triangle"; osc.frequency.value=f;
+      const g=ctx.createGain(), peak=0.9;
+      g.gain.setValueAtTime(0.0001,st);
+      g.gain.linearRampToValueAtTime(peak,st+0.015);
+      g.gain.setValueAtTime(peak,Math.max(st+0.015,st+dur-0.06));
+      g.gain.linearRampToValueAtTime(0.0001,st+dur);
+      osc.connect(g); g.connect(audio.notes);
+      osc.start(st); osc.stop(st+dur+0.02); play.sources.push(osc);
+    }
+    const METRO_MS=PULSE_MS*2;
+    const firstP=Math.ceil((lineStartMs-GAP)/METRO_MS), lastP=Math.floor((lineEndMs-GAP)/METRO_MS);
+    for(let i=firstP;i<=lastP;i++){
+      const bt=GAP+i*METRO_MS;
+      if(bt<lineStartMs-1||bt>lineEndMs+1) continue;
+      const t=t0ctx+(bt-lineStartMs)/1000, down=(i%2===0);
+      const osc=ctx.createOscillator(); osc.type="square"; osc.frequency.value=down?1320:880;
+      const g=ctx.createGain();
+      g.gain.setValueAtTime(down?0.22:0.14,t);
+      g.gain.exponentialRampToValueAtTime(0.0001,t+0.025);
+      osc.connect(g); g.connect(audio.metro);
+      osc.start(t); osc.stop(t+0.03); play.sources.push(osc);
+    }
+    updateToolbar();
+    play.rafId=requestAnimationFrame(playTick);
+  }
+  function playTick(){
+    if(!play.active) return;
+    const elapsed=audio.ctx.currentTime-play.t0ctx;
+    const ph=play.lineStartMs+elapsed*1000;
+    play.playheadMs=ph;
+    updatePlayhead(ph);
+    if(ph>=play.lineEndMs){ stopPlay(); return; }
+    play.rafId=requestAnimationFrame(playTick);
+  }
+  function stopPlay(){
+    if(!play.active) return;
+    play.active=false;
+    cancelAnimationFrame(play.rafId);
+    for(const s of play.sources){ try{ s.stop(); }catch(_){} try{ s.disconnect(); }catch(_){} }
+    play.sources=[]; play.playheadMs=null;
+    updatePlayhead(null); updateToolbar();
+  }
+  function updatePlayhead(phMs){
+    const line=document.getElementById("playhead");
+    if(!line) return;
+    if(phMs==null){ line.style.display="none"; svgEl.querySelectorAll(".bar.active").forEach(el=>el.classList.remove("active")); return; }
+    line.style.display="";
+    const x=tx(phMs); line.setAttribute("x1",x); line.setAttribute("x2",x);
+    const pageNotes=groups[currentPage]||[];
+    for(const n of pageNotes){
+      const el=svgEl.querySelector(`g[data-id="${n.id}"] .bar`);
+      if(!el) continue;
+      if(startMsOf(n)<=phMs&&phMs<endMsOf(n)) el.classList.add("active"); else el.classList.remove("active");
+    }
+  }
+
+  // ── save ─────────────────────────────────────────────────────────────────
+  function serializeTxt(){
+    const body=notes.map(n=>n.type==="-"?`- ${n.start}`:`${n.type} ${n.start} ${n.dur} ${n.pitch} ${n.syl}`).join("\n");
+    return D.rawHeader.join("\n")+"\n\n"+body+"\nE\n";
+  }
+  function downloadTxt(){
+    const blob=new Blob([serializeTxt()],{type:"text/plain;charset=utf-8"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(blob);
+    a.download=D.srcName||((D.meta.title||"song")+".txt");
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }
+
+  // ── navigation ───────────────────────────────────────────────────────────
+  function gotoPage(i){
+    stopPlay(); cancelLyric();
+    const g=computeGroups(notes);
+    currentPage=clamp(i,0,Math.max(0,g.length-1));
+    selectedId=null;
+    renderPage();
+  }
+
+  // ── events ───────────────────────────────────────────────────────────────
+  const volOf=id=>+document.getElementById(id).value/100;
+  const vocalsGain=()=>volOf("vocalsVol"), notesGain=()=>volOf("notesVol"), metroGain=()=>volOf("metroVol");
+  for(const [id,bus] of [["vocalsVol","vocals"],["notesVol","notes"],["metroVol","metro"]]){
+    const el=document.getElementById(id);
+    el.oninput=()=>{
+      document.getElementById(id+"Val").textContent=el.value;
+      if(audio[bus]) audio[bus].gain.value=volOf(id);
+    };
+  }
+  document.getElementById("lineSel").onchange=e=>gotoPage(+e.target.value);
+  document.getElementById("prevBtn").onclick=()=>gotoPage(currentPage-1);
+  document.getElementById("nextBtn").onclick=()=>gotoPage(currentPage+1);
+  document.getElementById("playBtn").onclick=playLine;
+  document.getElementById("splitBtn").onclick=splitNote;
+  document.getElementById("mergeBtn").onclick=mergeNote;
+  document.getElementById("delBtn").onclick=deleteNote;
+  document.getElementById("goldBtn").onclick=toggleGold;
+  document.getElementById("lyricBtn").onclick=()=>{ const n=notes.find(x=>x.id===selectedId); if(n) openLyricPopover(n); };
+  document.getElementById("undoBtn").onclick=undo;
+  const txtInput=document.getElementById("txtInput");
+  document.getElementById("txtBtn").onclick=()=>txtInput.click();
+  txtInput.onchange=e=>{ loadTxtFile(e.target.files[0]); e.target.value=""; };
+  const pitchInput=document.getElementById("pitchInput");
+  document.getElementById("pitchBtn").onclick=()=>pitchInput.click();
+  pitchInput.onchange=e=>{ loadPitchFile(e.target.files[0]); e.target.value=""; };
+  document.getElementById("saveBtn").onclick=downloadTxt;
+
+  const drop=document.getElementById("drop"), fileInput=document.getElementById("fileInput");
+  document.getElementById("dropHint").textContent=D.audioHint?("Suggested: "+D.audioHint):"";
+  function onFile(f){ if(!f) return; f.arrayBuffer().then(loadAudio).catch(e=>{ audio.error=String(e); updateAudioChip(); }); }
+  drop.onclick=()=>fileInput.click();
+  fileInput.onchange=e=>onFile(e.target.files[0]);
+  drop.ondragover=e=>{ e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave=()=>drop.classList.remove("over");
+  drop.ondrop=e=>{ e.preventDefault(); drop.classList.remove("over"); onFile(e.dataTransfer.files[0]); };
+
+  document.addEventListener("keydown",e=>{
+    if(lyricInput&&document.activeElement===lyricInput) return;
+    if(e.ctrlKey||e.metaKey){
+      if(e.key==="z"||e.key==="Z"){ e.preventDefault(); undo(); }
+      else if(e.key==="s"||e.key==="S"){ e.preventDefault(); downloadTxt(); }
+      return;
+    }
+    switch(e.key){
+      case " ": e.preventDefault(); playLine(); break;
+      case "ArrowLeft": case "PageUp": gotoPage(currentPage-1); break;
+      case "ArrowRight": case "PageDown": gotoPage(currentPage+1); break;
+      case "s": splitNote(); break;
+      case "m": mergeNote(); break;
+      case "g": toggleGold(); break;
+      case "l": { const n=notes.find(x=>x.id===selectedId); if(n) openLyricPopover(n); break; }
+      case "Delete": case "Backspace": deleteNote(); break;
+      case "Escape": if(play.active) stopPlay(); else if(selectedId!=null) select(null); break;
+    }
+  });
+
+  // ── init ─────────────────────────────────────────────────────────────────
+  document.getElementById("title").textContent=(D.meta.title||"(untitled)")+" — "+(D.meta.artist||"");
+  updateMetaChip();
+  updateAudioChip();
+  updatePitchChip("embedded",(D.pitchWords||[]).length,true);
+  renderPage();
+  if(D.audioB64){
+    const bin=atob(D.audioB64), bytes=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+    loadAudio(bytes.buffer);
+  }
+})();
+</script>
+</body>
+</html>
