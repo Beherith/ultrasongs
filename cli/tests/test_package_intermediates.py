@@ -159,3 +159,20 @@ class TestPackageOutputZip:
         with zipfile.ZipFile(out / "T.zip") as zf:
             names = set(zf.namelist())
         assert not any(n.startswith("intermediates/") for n in names)
+
+    def test_stem_only_without_txt(self, tmp_path: Path):
+        out = tmp_path / "out"
+        mp3 = _make_mp3(tmp_path / "song.mp3")
+        vocals = _make_mp3(tmp_path / "vocals.mp3")
+        acc = _make_mp3(tmp_path / "acc.mp3")
+        package_output(
+            mp3_path=mp3,
+            output_dir=out,
+            name="T",
+            vocals_path=vocals,
+            accompaniment_path=acc,
+        )
+        assert not (out / "T.txt").exists()
+        with zipfile.ZipFile(out / "T.zip") as zf:
+            names = set(zf.namelist())
+        assert names == {"T.mp3", "T_vocals.mp3", "T_accompaniment.mp3"}

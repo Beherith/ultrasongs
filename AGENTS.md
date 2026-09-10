@@ -98,7 +98,7 @@ Each processing run writes into its own per-song folder `<output_dir>/<artist> -
 
 - **Auth**: password from the `ULTRASONGS_WEB_PASSWORD` environment variable, falling back to a `ULTRASONGS_WEB_PASSWORD=...` entry in `./.env.local` (gitignored; env var wins) (constant-time compare, Flask session cookie). No TLS is provided — bind to `127.0.0.1` (default) or put a reverse proxy in front. `--no-auth` disables login but is rejected unless the host is `127.0.0.1`/`localhost`. Web server settings (host, port, `web_dir`, retention, upload cap, poll interval) live in `cli/web_config.jsonc` (`--web-config` to override).
 - **Queue**: one job at a time, FIFO (`cli/web/jobs.py`). Uploads are staged, validated (extension + size cap), then moved into the job dir. Each job gets `web_jobs/<id>/{upload,tmp,output}` plus a `job.json` manifest; jobs older than `job_retention_days` are pruned at startup and before each submission.
-- **UI**: one form (artist/title/lyrics + audio/video upload + lyrics `.txt` upload + optional JPEG cover upload) plus an auto-generated settings accordion with one control per `config.jsonc` key (40), driven by `cli/web/settings_meta.py`. Artist field comes before title. Uploading a media file prefills empty artist/title fields from an `Artist - Title` file name (`split_filename_artist_title`, split on the first dash). Lyrics can be pasted (a `dcc.Textarea`) or uploaded as a `.txt` file (decoded utf-8, falling back to windows-1252); Ultrastar `.txt` lyrics also prefill empty title/artist via `lyrics_prefill`. An optional JPEG cover (.jpg/.jpeg, 10 MB cap) can be uploaded; it is staged like the other uploads, stored in the job's `upload/` dir as `cover.<ext>`, copied into the package as `<name>_cover.<ext>`, and referenced by a `#COVER` tag in the generated `.txt`. Form text inputs are explicitly dark-styled (`CSS["input"]`) because the inherited page text color is light. Jobs show live status, queue position, log tail, and download links (ZIP, note editor, HTML preview, stems) served from `/download/<job_id>/<file>`.
+- **UI**: one form with a **Mode** radio (`full` | `split`) plus artist/title/lyrics + audio/video upload + lyrics `.txt` upload + optional JPEG cover upload, and an auto-generated settings accordion with one control per `config.jsonc` key (40), driven by `cli/web/settings_meta.py`. **Split mode** (`ProcessRequest.mode="split"`) only needs the media upload: the pipeline runs extract → single Demucs separation (`cli/transcribe.separate_stems`) → package (no `.txt`/editor/preview); lyrics/title/artist/cover are ignored (their fields are dimmed in the form) and the output base name falls back to the uploaded file name stem (`cli/pipeline.resolve_output_name`). Artist field comes before title. Uploading a media file prefills empty artist/title fields from an `Artist - Title` file name (`split_filename_artist_title`, split on the first dash). Lyrics can be pasted (a `dcc.Textarea`) or uploaded as a `.txt` file (decoded utf-8, falling back to windows-1252); Ultrastar `.txt` lyrics also prefill empty title/artist via `lyrics_prefill`. An optional JPEG cover (.jpg/.jpeg, 10 MB cap) can be uploaded; it is staged like the other uploads, stored in the job's `upload/` dir as `cover.<ext>`, copied into the package as `<name>_cover.<ext>`, and referenced by a `#COVER` tag in the generated `.txt`. Form text inputs are explicitly dark-styled (`CSS["input"]`) because the inherited page text color is light. Jobs show live status, queue position, log tail, and download links (ZIP, note editor, HTML preview, stems) served from `/download/<job_id>/<file>`.
 - **Per-job config**: form values override the base `Config` (revalidated via `config_from_dict`); the job's `temp_dir`/`output_dir` are forced to the job dir, and the ZIP includes intermediates.
 
 ## Code Conventions
@@ -115,12 +115,12 @@ Each processing run writes into its own per-song folder `<output_dir>/<artist> -
 | File | Purpose |
 |---|---|
 | `cli/__main__.py` | CLI entry point, argparse parser, thin adapters over `cli.pipeline` (5 logged steps) |
-| `cli/pipeline.py` | `ProcessRequest`/`ProcessResult` dataclasses, `run_process()` shared by CLI and web, `prepare_lyrics_input()`, `sanitize_filename()`, `sanitize_output_name()` |
+| `cli/pipeline.py` | `ProcessRequest`/`ProcessResult` dataclasses (`mode="full"|"split"`), `run_process()` shared by CLI and web (split mode = extract + `separate_stems` + package), `prepare_lyrics_input()`, `sanitize_filename()`, `sanitize_output_name()`, `resolve_output_name()` |
 | `cli/config.py` | JSONC loading/stripping (`load_jsonc`), `config_from_dict()`, frozen `Config` dataclass, validation |
 | `cli/pipeline_types.py` | Shared dataclasses: `PitchFrame`, `CharacterTimestamp`, `WordTimestamp`, `Pause`, `AlignedSyllable`, `BpmResult`, `TranscribeResult`, `UltrastarNote`, `UltrastarMeta` (with `to_dict`/`from_dict` for resume) |
 | `cli/ffmpeg_extract.py` | FFmpeg: video/audio → mono MP3 (128 kbps) in `tmp/` |
 | `cli/ffmpeg_pcm.py` | FFmpeg: MP3 → raw float32 PCM bytes (used for note-plot spectrograms) |
-| `cli/transcribe.py` | Orchestrates the transcribe stage: Demucs separation (N passes), ASR, consensus, pauses, hybrid chunking + WhisperX timing, stem saving, BPM, torchcrepe pitch + band-limited energy |
+| `cli/transcribe.py` | Orchestrates the transcribe stage: Demucs separation (N passes), ASR, consensus, pauses, hybrid chunking + WhisperX timing, stem saving, BPM, torchcrepe pitch + band-limited energy. Also `separate_stems()` for the web split-only mode (single Demucs pass → vocals/accompaniment MP3s) |
 | `cli/whisperx_transcribe.py` | WhisperX/faster-whisper adapters: model loading, transcription, `align_segments()` forced alignment with character timings, hallucination-artifact filters, Windows DLL setup |
 | `cli/hybrid_transcribe.py` | Hybrid path helpers: `align_lyrics_approximately()` (Smith-Waterman lyric→ASR mapping), `build_lyric_chunks()` (split at pause midpoints), `slice_audio()`, `offset_aligned_words()` |
 | `cli/consensus.py` | Multi-run consolidation: `word_similarity()`, `consolidate_transcription_runs()` (majority vote, coherent timing), `consolidate_timing_runs()` (median coherent candidate) |
@@ -236,9 +236,9 @@ Temp files in `./tmp/`, generated output in `./output/` (both gitignored):
 ./web_jobs/                       ← web UI jobs (gitignored)
   staging/                        ← in-flight uploads, deleted after submit
   <job_id>/job.json               ← manifest (id, title, status, created_at)
-  <job_id>/upload/original.*      ← the uploaded audio/video
+  <job_id>/upload/<name>.<ext>    ← the uploaded audio/video (sanitized original file name)
   <job_id>/tmp/                   ← per-job intermediate files
-  <job_id>/output/<artist> - <title>/   ← same package output as the CLI
+  <job_id>/output/<artist> - <title>/   ← same package output as the CLI (split mode: no .txt/editor/preview, base name from the upload)
 ```
 
 ## Testing

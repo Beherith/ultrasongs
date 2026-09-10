@@ -136,6 +136,39 @@ def separate_all(audio, sr: int, demucs_model: str = "htdemucs"):
         release_demucs_model()
 
 
+def separate_stems(mp3_path: Path, config: Config) -> tuple[Path, Path]:
+    """Run a single Demucs separation and save the vocal/accompaniment stems.
+
+    Writes ``<stem>_vocals.mp3`` and ``<stem>_accompaniment.mp3`` next to
+    ``mp3_path`` and returns their paths.
+    """
+    import soundfile as sf
+
+    global DEVICE
+    DEVICE = _get_device(config.device)
+
+    logger.info(f"Starting stem separation: {mp3_path}")
+    logger.info(f"Device: {DEVICE}, Demucs model: {config.demucs_model}")
+
+    base = mp3_path.with_suffix("")
+    vocals_mp3 = base.with_name(base.name + "_vocals.mp3")
+    acc_mp3 = base.with_name(base.name + "_accompaniment.mp3")
+
+    logger.info("Step 1/3: Loading audio…")
+    audio, sr = sf.read(str(mp3_path))
+
+    logger.info("Step 2/3: Separating with Demucs…")
+    vocals, accompaniment, out_sr = separate_all(audio, sr, config.demucs_model)
+
+    logger.info("Step 3/3: Saving stems…")
+    with open(vocals_mp3, "wb") as f:
+        f.write(to_mp3_bytes(vocals, out_sr))
+    with open(acc_mp3, "wb") as f:
+        f.write(to_mp3_bytes(accompaniment, out_sr))
+    logger.info("Stem separation complete")
+    return vocals_mp3, acc_mp3
+
+
 # ── Pitch analysis ──────────────────────────────────────────────────────────
 
 def _compute_band_energy(audio, sr: int, hop_length: int, fmin: float = 60.0, fmax: float = 4000.0, n_frames: int | None = None):

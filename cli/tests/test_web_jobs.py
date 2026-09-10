@@ -262,6 +262,38 @@ class TestSnapshotShape:
         finally:
             manager.stop()
 
+    def test_split_job_run_dir_from_input_stem(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cli.pipeline.run_process", lambda req: ProcessResult(ok=True))
+        manager = JobManager(web_dir=tmp_path / "jobs")
+        manager.start()
+        try:
+            req = dataclasses.replace(
+                _make_request(tmp_path), title="", artist="", mode="split",
+            )
+            job = manager.submit(req, b"x", "My Band - Cool Song.mp3")
+            assert job.title == "My Band - Cool Song.mp3"
+            snap = manager.snapshot(job.id)
+            assert snap["run_dir"] == "My Band - Cool Song"
+            assert snap["title"] == "My Band - Cool Song.mp3"
+            assert snap["zip_name"] is None
+            assert snap["html_name"] is None
+            assert snap["editor_name"] is None
+        finally:
+            manager.stop()
+
+    def test_split_job_keeps_title_artist_when_given(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("cli.pipeline.run_process", lambda req: ProcessResult(ok=True))
+        manager = JobManager(web_dir=tmp_path / "jobs")
+        manager.start()
+        try:
+            req = dataclasses.replace(_make_request(tmp_path), mode="split")
+            job = manager.submit(req, b"x", "song.mp3")
+            snap = manager.snapshot(job.id)
+            assert snap["run_dir"] == "Tester - Test Song"
+            assert snap["title"] == "Test Song"
+        finally:
+            manager.stop()
+
 
 class TestRetention:
     def test_prune_old_job_dirs(self, tmp_path):

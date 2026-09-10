@@ -102,7 +102,7 @@ python -m cli process ... --resume tmp/name_transcribe.json --stage align
 
 ## Web UI
 
-`python -m cli web` serves a single-page Dash app that runs the same pipeline the CLI uses. One job at a time (FIFO queue); each job shows live status, queue position, log tail, and download links (ZIP, HTML preview, stems).
+`python -m cli web` serves a single-page Dash app that runs the same pipeline the CLI uses. One job at a time (FIFO queue); each job shows live status, queue position, log tail, and download links (ZIP, HTML preview, stems). The form has a **Mode** toggle: the default **Full pipeline** builds an Ultrastar `.txt` from lyrics (needs title, artist and lyrics), while **Stems only** runs just the htdemucs split and returns the vocals and accompaniment MP3s — no lyrics, title, artist or cover required.
 
 - **Auth:** password from the `ULTRASONGS_WEB_PASSWORD` environment variable, or from a `ULTRASONGS_WEB_PASSWORD=...` entry in `./.env.local` (gitignored; env var wins) (session cookie, constant-time compare). There is no TLS — bind to `127.0.0.1` (default) or put a reverse proxy in front. `--no-auth` disables login but is only allowed on `127.0.0.1`/`localhost`.
 - **Flags:** `--host`, `--port`, `--no-auth`, `--web-config <path>` (defaults from `cli/web_config.jsonc`).
@@ -191,7 +191,7 @@ Generates HTML with SVG pitch visualization, beat grid, and confidence-colored d
 
 ./web_jobs/                     ← web UI job dirs (one per submitted song)
   <job_id>/job.json             ← manifest (id, title, status, created_at)
-  <job_id>/upload/original.*    ← uploaded audio/video
+  <job_id>/upload/<name>.<ext>  ← uploaded audio/video (sanitized file name)
   <job_id>/tmp/                 ← per-job intermediate files
   <job_id>/output/              ← same package output as the CLI (per-song subfolder)
 ```

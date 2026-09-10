@@ -118,7 +118,7 @@ class JobManager:
 
 - 1 daemon worker thread (created at app start), FIFO `queue.Queue`; exactly one `run_process` in flight.
 - `JobLogHandler(logging.Handler)` attached to the root logger for the duration of the job (safe: single-flight); pushes formatted lines into `job.logs`.
-- Upload: written to `<job_dir>/upload/original.<ext>`; whitelist `.mp3 .wav .flac .m4a .ogg .oga .mp4 .mkv .webm .mov .avi`; size cap `max_upload_mb`.
+- Upload: written to `<job_dir>/upload/<sanitized file name>.<ext>`; whitelist `.mp3 .wav .flac .m4a .ogg .oga .mp4 .mkv .webm .mov .avi`; size cap `max_upload_mb`.
 - Retention: prune job dirs + records older than `job_retention_days` at startup and on each submit.
 
 ## 5. `cli/web_config.jsonc`

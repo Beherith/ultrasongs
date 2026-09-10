@@ -13,7 +13,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from cli.logging_setup import get_logger
-from cli.pipeline import ProcessRequest, ProcessResult, sanitize_output_name
+from cli.pipeline import (
+    ProcessRequest,
+    ProcessResult,
+    resolve_output_name,
+    sanitize_filename,
+)
 
 logger = get_logger("cli.web.jobs")
 
@@ -72,7 +77,8 @@ class Job:
 
     @property
     def upload_path(self) -> Path:
-        return self.dir / "upload" / f"original{Path(self.upload_name).suffix.lower()}"
+        name = Path(self.upload_name)
+        return self.dir / "upload" / f"{sanitize_filename(name.stem)}{name.suffix.lower()}"
 
     @property
     def output_dir(self) -> Path:
@@ -166,7 +172,7 @@ class JobManager:
         job = Job(
             id=job_id,
             status=STATUS_QUEUED,
-            title=req.title,
+            title=req.title or upload_name,
             upload_name=upload_name,
             created_at=time.time(),
             dir=self.web_dir / job_id,
@@ -262,8 +268,12 @@ class JobManager:
         if job is None:
             return None
         # The pipeline writes all outputs into a per-song subfolder.
-        safe = sanitize_output_name(
-            job.request.artist if job.request else "", job.title)
+        req = job.request
+        safe = resolve_output_name(
+            req.artist if req else "",
+            req.title if req else "",
+            req.input_path if req else None,
+        )
         run_dir = job.output_dir / safe
         files: list[dict] = []
         if run_dir.is_dir():

@@ -101,10 +101,16 @@ def build_config_overrides(values: dict[str, object]) -> dict:
     return overrides
 
 
-def validate_process_inputs(upload_info, title: str, artist: str, lyrics: str) -> str | None:
-    """Return an error message, or None if the inputs are acceptable."""
+def validate_process_inputs(upload_info, title: str, artist: str, lyrics: str,
+                            mode: str = "full") -> str | None:
+    """Return an error message, or None if the inputs are acceptable.
+
+    Split (stems-only) mode only requires the audio/video upload.
+    """
     if not upload_info:
         return "Please upload an audio or video file first."
+    if mode == "split":
+        return None
     if not (title or "").strip():
         return "Please enter a song title."
     if not (artist or "").strip():
@@ -266,6 +272,26 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
                 html.Label("Convert any mp3 or video file to Ultrastar format. The uploaded files should be complete and of good quality. You can download MP3's off of YouTube with "),
                 html.A("https://cnvmp3.com/", href="https://cnvmp3.com/", style={"color": "#7dd3fc"}),
             ]),
+            html.Div([
+                html.Label("Mode", style=CSS["label"]),
+                dcc.RadioItems(
+                    id="mode",
+                    options=[
+                        {
+                            "label": "Full pipeline — Ultrastar .txt from lyrics (needs title, artist and lyrics)",
+                            "value": "full",
+                        },
+                        {
+                            "label": "Stems only — htdemucs split into vocals and accompaniment (no lyrics, title or artist needed)",
+                            "value": "split",
+                        },
+                    ],
+                    value="full",
+                    style={"display": "flex", "flexDirection": "column", "gap": "4px",
+                           "paddingLeft": "4px", "marginBottom": "14px",
+                           "fontSize": "14px", "color": "#e5e7eb"},
+                ),
+            ]),
 
             dcc.Upload(
                 id="upload",
@@ -285,6 +311,7 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
                             dcc.Input(id="artist", type="text", placeholder="Artist name",
                                       style=CSS["input"]),
                         ],
+                        id="artist-field",
                         style=CSS["col"],
                     ),
                     html.Div(
@@ -293,6 +320,7 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
                             dcc.Input(id="title", type="text", placeholder="Song title",
                                       style=CSS["input"]),
                         ],
+                        id="title-field",
                         style=CSS["col"],
                     ),
                 ],
@@ -316,11 +344,11 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
                 ]),
                 html.Div(id="lyrics-info"),
                 dcc.Textarea(id="lyrics", rows=14,
-                             placeholder="Paste the song lyrics here (plain text or an Ultrastar .txt). The pasted lyrics are the gold standard, and should be complete and accurate.",
-                             style={**CSS["input"],
-                                     "fontFamily": "ui-monospace, monospace",
-                                     "fontSize": "13px"}),
-            ]),
+                              placeholder="Paste the song lyrics here (plain text or an Ultrastar .txt). The pasted lyrics are the gold standard, and should be complete and accurate.",
+                              style={**CSS["input"],
+                                      "fontFamily": "ui-monospace, monospace",
+                                      "fontSize": "13px"}),
+            ], id="lyrics-field"),
             html.Div([
                 html.Div([
                     html.Label("Cover art (optional)",
@@ -338,7 +366,7 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
                     ),
                 ]),
                 html.Div(id="cover-info"),
-            ]),
+            ], id="cover-field"),
             html.Div(
                 [_setting_control(
                     settings_meta.SETTINGS_BY_KEY["whisper_language"],
@@ -600,6 +628,20 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
         return new_title, new_artist
 
     @app.callback(
+        Output("artist-field", "style"),
+        Output("title-field", "style"),
+        Output("lyrics-field", "style"),
+        Output("cover-field", "style"),
+        Input("mode", "value"),
+    )
+    def mode_changed(mode):
+        """Dim the artist/title/lyrics/cover fields in stems-only mode."""
+        if mode == "split":
+            dim = {"opacity": 0.45}
+            return {**CSS["col"], **dim}, {**CSS["col"], **dim}, dim, dim
+        return CSS["col"], CSS["col"], None, None
+
+    @app.callback(
         [Output(f"setting-{m.key}", "value") for m in settings_meta.SETTINGS],
         Input("reset-btn", "n_clicks"),
         prevent_initial_call=True,
@@ -622,16 +664,19 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
         State("artist", "value"),
         State("lyrics", "value"),
         State("cover-store", "data"),
+        State("mode", "value"),
         *[State(SETTING_ID.format(key=m.key), "value") for m in settings_meta.SETTINGS],
         prevent_initial_call=True,
     )
-    def process_click(n_clicks, upload_info, title, artist, lyrics, cover_info, *setting_values):
+    def process_click(n_clicks, upload_info, title, artist, lyrics, cover_info, mode,
+                      *setting_values):
         if not n_clicks:
             raise PreventUpdate
         title = (title or "").strip()
         artist = (artist or "").strip()
         lyrics = lyrics or ""
-        error = validate_process_inputs(upload_info, title, artist, lyrics)
+        split = mode == "split"
+        error = validate_process_inputs(upload_info, title, artist, lyrics, mode)
         if error:
             return no_update, html.Div(error, style=CSS["error"])
 
@@ -643,11 +688,11 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
         except (ValueError, TypeError) as exc:
             return no_update, html.Div(f"Invalid setting value: {exc}", style=CSS["error"])
 
-        lyrics_text, _ = prepare_lyrics_input(lyrics)
+        lyrics_text = "" if split else prepare_lyrics_input(lyrics)[0]
         base_dir = Path(upload_info["path"])
         cover_bytes = None
         cover_name = None
-        if cover_info:
+        if cover_info and not split:
             cover_file = Path(cover_info["path"])
             if not cover_file.is_file():
                 return no_update, html.Div(
@@ -666,6 +711,7 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
                 config=job_config,
                 output_dir=Path(job_config.output_dir),
                 include_intermediates=True,
+                mode="split" if split else "full",
             )
             job = manager.submit(req, upload_bytes, Path(upload_info["name"]).name,
                                  cover_bytes=cover_bytes, cover_name=cover_name)
@@ -674,7 +720,7 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
         finally:
             _remove_staged(upload_info)
             _remove_staged(cover_info)
-        logger.info(f"Job {job.id} submitted from web: {title!r}")
+        logger.info(f"Job {job.id} submitted from web: {title or upload_info['name']!r} ({mode})")
         return job.id, None
 
     @app.callback(

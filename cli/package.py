@@ -40,10 +40,10 @@ def collect_intermediates(temp_path: Path, since_ts: float | None = None) -> lis
 
 
 def package_output(
-    txt_content: str,
     mp3_path: Path,
     output_dir: Path,
     name: str,
+    txt_content: str | None = None,
     video_path: Path | None = None,
     vocals_path: Path | None = None,
     accompaniment_path: Path | None = None,
@@ -55,7 +55,7 @@ def package_output(
 
     Creates (all named after ``name``, typically ``<artist> - <title>``):
         output_dir/
-            <name>.txt
+            <name>.txt     (when txt_content is given)
             <name>.mp3     (copy of mp3_path)
             <name><ext>    (optional video, from video_path)
             <name>_vocals.mp3      (optional)
@@ -65,10 +65,10 @@ def package_output(
             <name>.zip     (ZIP of all above plus extra_files under intermediates/)
 
     Args:
-        txt_content: The Ultrastar .txt string.
         mp3_path: Path to the MP3 file.
         output_dir: Directory to write output.
         name: Output base name (used for all filenames).
+        txt_content: The Ultrastar .txt string; None skips the .txt (stem-only runs).
         video_path: Optional video file.
         vocals_path: Optional vocals stem.
         accompaniment_path: Optional accompaniment stem.
@@ -82,9 +82,10 @@ def package_output(
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    txt_path = output_dir / f"{name}.txt"
-    txt_path.write_text(txt_content, encoding="utf-8")
-    logger.info(f"Written: {txt_path}")
+    if txt_content is not None:
+        txt_path = output_dir / f"{name}.txt"
+        txt_path.write_text(txt_content, encoding="utf-8")
+        logger.info(f"Written: {txt_path}")
 
     mp3_out = output_dir / f"{name}.mp3"
     shutil.copy2(mp3_path, mp3_out)

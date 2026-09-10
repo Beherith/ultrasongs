@@ -50,7 +50,8 @@ class TestLayout:
                     "lyrics-info", "cover-upload", "cover-info", "process-btn",
                     "reset-btn", "job-status", "job-log", "job-result",
                     "upload-store", "cover-store", "active-job-store",
-                    "poll-interval"):
+                    "poll-interval", "mode", "artist-field", "title-field",
+                    "lyrics-field", "cover-field"):
             assert cid in ids, cid
 
     def test_artist_column_before_title(self, tmp_path):
@@ -134,6 +135,12 @@ class TestHelpers:
 
     def test_validate_ok(self):
         assert validate_process_inputs({"name": "x.mp3"}, "T", "A", "ly") is None
+
+    def test_validate_split_needs_only_upload(self):
+        assert validate_process_inputs({"name": "x.mp3"}, "", "", "", "split") is None
+
+    def test_validate_split_still_needs_upload(self):
+        assert validate_process_inputs(None, "T", "A", "ly", "split") is not None
 
     def test_parse_setting_value_kinds(self):
         num = settings_meta.SETTINGS_BY_KEY["whisperx_batch_size"]
@@ -284,7 +291,7 @@ class TestProcessClickCallback:
         staged = tmp_path / "staged.mp3"
         staged.write_bytes(b"x")
         upload_info = {"path": str(staged), "name": "song.mp3", "size": 1}
-        job_id, error = cb(1, upload_info, "", "Artist", "lyrics", None,
+        job_id, error = cb(1, upload_info, "", "Artist", "lyrics", None, "full",
                            *self._setting_values(tmp_path))
         assert job_id is no_update
         assert "title" in _text(error)
@@ -293,7 +300,7 @@ class TestProcessClickCallback:
     def test_rejects_missing_upload_without_submitting(self, tmp_path):
         app, manager = self._make_app(tmp_path)
         cb = _find_callback(app, "process_click")
-        job_id, error = cb(1, None, "Title", "Artist", "lyrics", None,
+        job_id, error = cb(1, None, "Title", "Artist", "lyrics", None, "full",
                            *self._setting_values(tmp_path))
         assert error is not None
         assert "upload" in _text(error)
@@ -305,7 +312,7 @@ class TestProcessClickCallback:
         staged = tmp_path / "staged.mp3"
         staged.write_bytes(b"ID3data")
         upload_info = {"path": str(staged), "name": "song.mp3", "size": 7}
-        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey you", None,
+        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey you", None, "full",
                            *self._setting_values(tmp_path))
         assert error is None
         assert job_id == "fakejob123"
@@ -314,6 +321,7 @@ class TestProcessClickCallback:
         assert req.title == "Title"
         assert req.artist == "Artist"
         assert req.lyrics_text == "Hey you"
+        assert req.mode == "full"
         assert upload_bytes == b"ID3data"
         assert name == "song.mp3"
         assert cover_bytes is None and cover_name is None
@@ -329,7 +337,7 @@ class TestProcessClickCallback:
         # whisperx_batch_size is index 5 in SETTINGS
         idx = [m.key for m in settings_meta.SETTINGS].index("whisperx_batch_size")
         values[idx] = "0"
-        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey", None, *values)
+        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey", None, "full", *values)
         assert error is not None
         assert "Invalid setting" in _text(error)
         assert manager.submitted == []
@@ -343,7 +351,7 @@ class TestProcessClickCallback:
         cover = tmp_path / "staged_cover.jpg"
         cover.write_bytes(b"jpegdata")
         cover_info = {"path": str(cover), "name": "cover.jpg", "size": 8}
-        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey you", cover_info,
+        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey you", cover_info, "full",
                            *self._setting_values(tmp_path))
         assert error is None
         assert job_id == "fakejob123"
@@ -362,11 +370,93 @@ class TestProcessClickCallback:
         staged.write_bytes(b"ID3data")
         upload_info = {"path": str(staged), "name": "song.mp3", "size": 7}
         cover_info = {"path": str(tmp_path / "gone.jpg"), "name": "gone.jpg", "size": 8}
-        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey you", cover_info,
+        job_id, error = cb(1, upload_info, "Title", "Artist", "Hey you", cover_info, "full",
                            *self._setting_values(tmp_path))
         assert job_id is no_update
         assert "missing" in _text(error)
         assert manager.submitted == []
+
+    def test_split_mode_submits_without_title_artist_lyrics(self, tmp_path):
+        app, manager = self._make_app(tmp_path)
+        cb = _find_callback(app, "process_click")
+        staged = tmp_path / "staged.mp3"
+        staged.write_bytes(b"ID3data")
+        upload_info = {"path": str(staged), "name": "song.mp3", "size": 7}
+        job_id, error = cb(1, upload_info, "", "", "", None, "split",
+                           *self._setting_values(tmp_path))
+        assert error is None
+        assert job_id == "fakejob123"
+        assert len(manager.submitted) == 1
+        req, upload_bytes, name, cover_bytes, cover_name = manager.submitted[0]
+        assert req.mode == "split"
+        assert req.lyrics_text == ""
+        assert req.title == "" and req.artist == ""
+        assert upload_bytes == b"ID3data"
+        assert cover_bytes is None and cover_name is None
+        assert not staged.exists()  # staging cleaned up
+
+    def test_split_mode_still_requires_upload(self, tmp_path):
+        app, manager = self._make_app(tmp_path)
+        cb = _find_callback(app, "process_click")
+        job_id, error = cb(1, None, "", "", "", None, "split",
+                           *self._setting_values(tmp_path))
+        assert job_id is no_update
+        assert "upload" in _text(error)
+        assert manager.submitted == []
+
+    def test_split_mode_ignores_cover(self, tmp_path):
+        app, manager = self._make_app(tmp_path)
+        cb = _find_callback(app, "process_click")
+        staged = tmp_path / "staged.mp3"
+        staged.write_bytes(b"ID3data")
+        upload_info = {"path": str(staged), "name": "song.mp3", "size": 7}
+        cover = tmp_path / "staged_cover.jpg"
+        cover.write_bytes(b"jpegdata")
+        cover_info = {"path": str(cover), "name": "cover.jpg", "size": 8}
+        job_id, error = cb(1, upload_info, "", "", "", cover_info, "split",
+                           *self._setting_values(tmp_path))
+        assert error is None
+        assert job_id == "fakejob123"
+        req, _, _, cover_bytes, cover_name = manager.submitted[0]
+        assert req.mode == "split"
+        assert cover_bytes is None and cover_name is None
+        assert not cover.exists()  # staged cover still cleaned up
+
+    def test_split_mode_uses_prefilled_title_artist(self, tmp_path):
+        app, manager = self._make_app(tmp_path)
+        cb = _find_callback(app, "process_click")
+        staged = tmp_path / "staged.mp3"
+        staged.write_bytes(b"ID3data")
+        upload_info = {"path": str(staged), "name": "song.mp3", "size": 7}
+        job_id, error = cb(1, upload_info, "Title", "Artist", "", None, "split",
+                           *self._setting_values(tmp_path))
+        assert error is None
+        req = manager.submitted[0][0]
+        assert req.mode == "split"
+        assert req.title == "Title" and req.artist == "Artist"
+
+
+class TestModeChangedCallback:
+    def _make_app(self, tmp_path):
+        config = Config(temp_dir=str(tmp_path / "tmp"), output_dir=str(tmp_path / "out"))
+        manager = _FakeManager(tmp_path / "jobs")
+        return create_app(WebConfig(), config, manager, password=None)
+
+    def test_split_mode_dimmed_fields(self, tmp_path):
+        cb = _find_callback(self._make_app(tmp_path), "mode_changed")
+        artist_style, title_style, lyrics_style, cover_style = cb("split")
+        assert artist_style.get("opacity") == 0.45
+        assert title_style.get("opacity") == 0.45
+        assert lyrics_style.get("opacity") == 0.45
+        assert cover_style.get("opacity") == 0.45
+
+    def test_full_mode_restores_fields(self, tmp_path):
+        cb = _find_callback(self._make_app(tmp_path), "mode_changed")
+        artist_style, title_style, lyrics_style, cover_style = cb("full")
+        assert artist_style == webapp.CSS["col"]
+        assert title_style == webapp.CSS["col"]
+        assert lyrics_style is None
+        assert cover_style is None
 
 
 class TestUploadCallback:

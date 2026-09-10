@@ -14,6 +14,7 @@ from cli.ultrastar import UltrastarMeta, extract_lyrics_from_ultrastar, parse_ul
 logger = get_logger("cli.pipeline")
 
 STAGES = ("extract", "transcribe", "align", "generate", "all")
+MODES = ("full", "split")
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class ProcessRequest:
     stage: str = "all"
     resume_path: Path | None = None
     include_intermediates: bool = True
+    mode: str = "full"
 
 
 @dataclass(frozen=True)
@@ -92,6 +94,15 @@ def sanitize_output_name(artist: str, title: str) -> str:
     return sanitize_filename(" - ".join(parts))
 
 
+def resolve_output_name(artist: str, title: str, input_path: Path | str | None = None) -> str:
+    """Output base name: ``<artist> - <title>``, or the input file stem when
+    both artist and title are missing (e.g. stem-only split runs)."""
+    name = sanitize_output_name(artist, title)
+    if name != "untitled" or input_path is None:
+        return name
+    return sanitize_filename(Path(input_path).stem)
+
+
 def run_process(req: ProcessRequest) -> ProcessResult:
     """Run the full or partial pipeline. Failures are returned, not raised."""
     config = req.config
@@ -129,6 +140,9 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
 
     audio_out = config.temp_path / f"{input_path.stem}.mp3"
     stage = req.stage
+
+    if req.mode == "split":
+        return _run_split(req, run_started, audio_out, video_path)
 
     result: TranscribeResult | None = None
 
@@ -276,5 +290,52 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
     return ProcessResult(
         ok=True,
         output_dir=Path(req.output_dir),
+        temp_dir=config.temp_path,
+    )
+
+
+def _run_split(req: ProcessRequest, run_started: float, audio_out: Path,
+               video_path: Path | None) -> ProcessResult:
+    """Stem-only run: extract, one Demucs separation, package the stems."""
+    from cli.ffmpeg_extract import extract_audio
+    from cli.transcribe import separate_stems
+    from cli.package import collect_intermediates, package_output
+
+    config = req.config
+    input_path = Path(req.input_path)
+
+    logger.info("Step 1/3: Extracting audio…")
+    extract_audio(input_path, audio_out, config)
+    logger.info("Step 1/3: Audio extracted")
+
+    logger.info("Step 2/3: Separating vocals and accompaniment…")
+    vocals_mp3, acc_mp3 = separate_stems(audio_out, config)
+    logger.info("Step 2/3: Separation complete")
+
+    logger.info("Step 3/3: Packaging stems…")
+    safe_name = resolve_output_name(req.artist, req.title, input_path)
+    run_dir = Path(req.output_dir) / safe_name
+    run_dir.mkdir(parents=True, exist_ok=True)
+    extra_files = (
+        collect_intermediates(config.temp_path, since_ts=run_started)
+        if req.include_intermediates
+        else []
+    )
+    package_output(
+        txt_content=None,
+        mp3_path=audio_out,
+        output_dir=run_dir,
+        name=safe_name,
+        video_path=video_path,
+        vocals_path=vocals_mp3,
+        accompaniment_path=acc_mp3,
+        extra_files=extra_files,
+    )
+    logger.info(f"Output packaged to {run_dir}")
+
+    return ProcessResult(
+        ok=True,
+        zip_path=run_dir / f"{safe_name}.zip",
+        output_dir=run_dir,
         temp_dir=config.temp_path,
     )

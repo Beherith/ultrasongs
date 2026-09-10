@@ -885,7 +885,7 @@
     const g=svgEl.querySelector(`g[data-id="${n.id}"] .bar`);
     const rect=g?g.getBoundingClientRect():{left:100,top:100};
     const inp=document.createElement("input");
-    inp.type="text"; inp.className="lyric-pop"; inp.value=n.syl.trim();
+    inp.type="text"; inp.className="lyric-pop"; inp.value=n.syl;
     inp._note=n; inp._done=false;
     document.body.appendChild(inp);
     inp.style.left=Math.min(rect.left,window.innerWidth-160)+"px";

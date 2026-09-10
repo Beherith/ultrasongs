@@ -1,6 +1,7 @@
 """Tests for cli/pipeline.py: lyrics prep, filename sanitizing, run_process orchestration."""
 
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from cli.pipeline import (
     ProcessRequest,
     looks_like_ultrastar,
     prepare_lyrics_input,
+    resolve_output_name,
     run_process,
     sanitize_filename,
     sanitize_output_name,
@@ -105,6 +107,23 @@ class TestSanitizeOutputName:
     def test_long_name_capped(self):
         out = sanitize_output_name("x" * 100, "y" * 100)
         assert len(out) <= 80
+
+
+class TestResolveOutputName:
+    def test_artist_and_title(self):
+        assert resolve_output_name("Tester", "Test Song", "song.mp3") == "Tester - Test Song"
+
+    def test_title_only(self):
+        assert resolve_output_name("", "Test Song", "song.mp3") == "Test Song"
+
+    def test_artist_only(self):
+        assert resolve_output_name("Tester", "", "song.mp3") == "Tester"
+
+    def test_falls_back_to_input_stem(self):
+        assert resolve_output_name("", "", "My Band - Cool Song.mp3") == "My Band - Cool Song"
+
+    def test_no_input_falls_back_to_untitled(self):
+        assert resolve_output_name("", "", None) == "untitled"
 
 
 def _make_transcribe_result(tmp: Path) -> TranscribeResult:
@@ -364,3 +383,62 @@ class TestRunProcess:
         calls.kwargs.clear()
         run_process(_make_request(tmp_path, include_intermediates=False))
         assert calls.kwargs["package"]["extra_files"] == []
+
+
+class TestRunProcessSplit:
+    def _patch_split(self, monkeypatch, calls: _Calls):
+        def fake_extract(src, dst, config):
+            calls.order.append("extract")
+            dst.write_bytes(b"ID3mono")
+
+        def fake_separate_stems(mp3_path, config):
+            calls.order.append("separate")
+            base = Path(mp3_path).with_suffix("")
+            vocals = base.with_name(base.name + "_vocals.mp3")
+            acc = base.with_name(base.name + "_accompaniment.mp3")
+            vocals.write_bytes(b"v")
+            acc.write_bytes(b"a")
+            return vocals, acc
+
+        monkeypatch.setattr("cli.ffmpeg_extract.extract_audio", fake_extract)
+        monkeypatch.setattr("cli.ffmpeg_extract.is_video_path", lambda p: False)
+        monkeypatch.setattr("cli.transcribe.separate_stems", fake_separate_stems)
+
+    def test_split_run_sequence_and_outputs(self, monkeypatch, tmp_path):
+        calls = _Calls()
+        self._patch_split(monkeypatch, calls)
+        result = run_process(_make_request(tmp_path, mode="split"))
+        assert result.ok
+        assert calls.order == ["extract", "separate"]
+        safe = "Tester - Test Song"
+        run_dir = tmp_path / "out" / safe
+        assert result.output_dir == run_dir
+        assert result.txt_path is None
+        assert result.html_path is None
+        assert result.editor_path is None
+        assert result.zip_path == run_dir / f"{safe}.zip"
+        assert (run_dir / f"{safe}.mp3").is_file()
+        assert (run_dir / f"{safe}_vocals.mp3").is_file()
+        assert (run_dir / f"{safe}_accompaniment.mp3").is_file()
+        assert not (run_dir / f"{safe}.txt").exists()
+        with zipfile.ZipFile(run_dir / f"{safe}.zip") as zf:
+            names = set(zf.namelist())
+        assert names == {f"{safe}.mp3", f"{safe}_vocals.mp3", f"{safe}_accompaniment.mp3"}
+
+    def test_split_run_names_from_input_stem_without_title_artist(self, monkeypatch, tmp_path):
+        calls = _Calls()
+        self._patch_split(monkeypatch, calls)
+        req = _make_request(tmp_path, title="", artist="",
+                            input_name="My Band - Cool Song.mp3", mode="split")
+        result = run_process(req)
+        assert result.ok
+        assert result.output_dir == tmp_path / "out" / "My Band - Cool Song"
+        assert result.zip_path == tmp_path / "out" / "My Band - Cool Song" / "My Band - Cool Song.zip"
+
+    def test_split_run_ignores_lyrics(self, monkeypatch, tmp_path):
+        calls = _Calls()
+        self._patch_split(monkeypatch, calls)
+        req = _make_request(tmp_path, lyrics_text="", mode="split")
+        result = run_process(req)
+        assert result.ok
+        assert calls.order == ["extract", "separate"]
