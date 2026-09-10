@@ -1156,7 +1156,7 @@
   document.getElementById("lineSel").onchange=e=>gotoPage(+e.target.value);
   document.getElementById("prevBtn").onclick=()=>gotoPage(currentPage-1);
   document.getElementById("nextBtn").onclick=()=>gotoPage(currentPage+1);
-  document.getElementById("playBtn").onclick=playLine;
+  document.getElementById("playBtn").onclick=()=>playLine();
   document.getElementById("playFromSelBtn").onclick=()=>{
     const sel=notes.find(n=>n.id===selectedId);
     if(sel&&sel.type!=="-") playLine(startMsOf(sel));
