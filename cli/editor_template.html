@@ -42,6 +42,10 @@
   .drop.over { border-color: #4fc3f7; background: #16213e; }
   .drop b { color: #cde; }
   .lyric-pop { position: fixed; z-index: 50; background: #0d1b2e; color: #fff; border: 1px solid #4fc3f7; border-radius: 4px; padding: 4px 6px; font: 13px ui-monospace, monospace; min-width: 120px; }
+  .repeat-pop { position: fixed; z-index: 50; background: #0d1b2e; color: #cde; border: 1px solid #4fc3f7; border-radius: 4px; padding: 8px 10px; font: 13px/1.5 system-ui, sans-serif; min-width: 280px; max-width: 400px; }
+  .repeat-pop h3 { margin: 0 0 6px; font-size: 13px; color: #fff; }
+  .repeat-pop label { display: flex; align-items: center; gap: 7px; padding: 2px 0; cursor: pointer; }
+  .repeat-pop .rp-actions { display: flex; gap: 8px; margin-top: 8px; }
   .help { font-size: 12px; color: #667; padding: 0 16px 10px; }
   kbd { background: #0f3460; border-radius: 3px; padding: 1px 5px; font-family: ui-monospace, monospace; color: #cde; }
   .legend { display: flex; gap: 10px 26px; flex-wrap: wrap; padding: 0 16px 16px; border-top: 1px solid #0f3460; }
@@ -77,6 +81,9 @@
     <button id="lyricBtn" title="Edit lyric (L / double-click)">Lyric</button>
     <button id="addLineBtn" title="Insert a new lyric line after the current one, with a single &lsquo;New Line&rsquo; note at its start">+ Line</button>
     <button id="delLineBtn" title="Remove the entire current lyric line">&minus; Line</button>
+    <button id="shiftLBtn" title="Shift every note of the current line one beat earlier">&#9664; 1 beat</button>
+    <button id="shiftRBtn" title="Shift every note of the current line one beat later">1 beat &#9654;</button>
+    <button id="repeatBtn" title="Overwrite the other lines with identical lyrics with this line (e.g. a repaired chorus onto its repeats)">Copy to repeats</button>
     <span class="sep"></span>
     <button id="undoBtn" title="Undo (Ctrl+Z)">&#8630; Undo</button>
     <span class="sep"></span>
@@ -113,7 +120,8 @@
     <kbd>Space</kbd> play &middot; <kbd>&#8592;</kbd>/<kbd>&#8594;</kbd> line &middot; <kbd>S</kbd> split &middot; <kbd>M</kbd> merge &middot;
     <kbd>G</kbd> gold &middot; <kbd>L</kbd> lyric &middot; <kbd>Del</kbd> delete &middot; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &middot; <kbd>Ctrl</kbd>+<kbd>S</kbd> download &middot;
     toolbar: <b>Load Ultrastar .txt</b> reloads a saved song &middot; <b>Load pitch JSON</b> swaps the pitch overlay &middot;
-    <b>+ Line</b>/<b>&minus; Line</b> add/remove entire lyric lines &middot; <b>Load vocals</b> swaps the audio track (FFT + playback)
+    <b>+ Line</b>/<b>&minus; Line</b> add/remove entire lyric lines &middot; <b>&#9664; 1 beat</b>/<b>1 beat &#9654;</b> shift the current line &middot;
+    <b>Copy to repeats</b> overwrites the other identical lines (e.g. choruses) with the current one &middot; <b>Load vocals</b> swaps the audio track (FFT + playback)
   </div>
 
   <div class="legend">
@@ -391,6 +399,13 @@
     document.getElementById("goldBtn").disabled=!sel;
     document.getElementById("lyricBtn").disabled=!sel;
     document.getElementById("delLineBtn").disabled=!groups.length;
+    const pg=groups[currentPage]||[];
+    document.getElementById("shiftLBtn").disabled=!pg.length;
+    document.getElementById("shiftRBtn").disabled=!pg.length;
+    const rc=repeatCountFor(pg);
+    const rb=document.getElementById("repeatBtn");
+    rb.disabled=!rc;
+    rb.title=rc?("Overwrite the other "+rc+" line(s) with identical lyrics with this line"):"No other lines with identical lyrics";
     document.getElementById("prevBtn").disabled=currentPage<=0;
     document.getElementById("nextBtn").disabled=currentPage>=groups.length-1;
     document.getElementById("playBtn").innerHTML=play.active?"&#9632; Stop":"&#9654; Play";
@@ -750,6 +765,116 @@
     selectedId=null;
     renderPage();
   }
+  function lineKey(g){
+    return verseTextLive(g).toLowerCase().replace(/[^\p{L}\p{N}]+/gu," ").replace(/\s+/g," ").trim();
+  }
+  function repeatCountFor(pg){
+    if(!pg.length) return 0;
+    const key=lineKey(pg);
+    let c=0;
+    for(let i=0;i<groups.length;i++){ if(i!==currentPage&&lineKey(groups[i])===key) c++; }
+    return c;
+  }
+  function shiftLineBy(d){
+    const pageNotes=groups[currentPage]||[];
+    if(!pageNotes.length) return;
+    pushUndo();
+    for(const n of pageNotes) n.start=Math.max(0,n.start+d);
+    renderPage();
+  }
+  function fmtTime(ms){
+    const s=Math.max(0,Math.round(ms/1000));
+    return Math.floor(s/60)+":"+String(s%60).padStart(2,"0");
+  }
+  let metaTimer=null;
+  function flashMeta(msg,warn){
+    const chip=document.getElementById("meta");
+    clearTimeout(metaTimer);
+    chip.textContent=msg;
+    chip.className=warn?"chip err":"chip ok";
+    metaTimer=setTimeout(()=>{ chip.className="chip"; updateMetaChip(); },6000);
+  }
+
+  // ── copy to repeats ──────────────────────────────────────────────────────
+  let repeatPop=null;
+  function closeRepeatPop(){
+    if(!repeatPop) return;
+    repeatPop.remove(); repeatPop=null;
+    document.removeEventListener("click",onDocClickForPop,true);
+  }
+  function onDocClickForPop(e){
+    if(repeatPop&&!repeatPop.contains(e.target)) closeRepeatPop();
+  }
+  function openRepeatPopover(){
+    closeRepeatPop();
+    const pg=groups[currentPage]||[];
+    if(!pg.length) return;
+    const key=lineKey(pg);
+    const targets=[];
+    for(let i=0;i<groups.length;i++){ if(i!==currentPage&&lineKey(groups[i])===key) targets.push(i); }
+    if(!targets.length) return;
+    const r=document.getElementById("repeatBtn").getBoundingClientRect();
+    const pop=document.createElement("div");
+    pop.className="repeat-pop";
+    const h=document.createElement("h3");
+    h.textContent="Overwrite the other identical line(s) with this line";
+    pop.appendChild(h);
+    const boxes=[];
+    for(const i of targets){
+      const g=groups[i];
+      const lab=document.createElement("label");
+      const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=true; boxes.push(cb);
+      const span=document.createElement("span");
+      span.textContent=`line ${i+1} · ${fmtTime(startMsOf(g[0]))} · ${g.length} notes`;
+      lab.appendChild(cb); lab.appendChild(span); pop.appendChild(lab);
+    }
+    const act=document.createElement("div"); act.className="rp-actions";
+    const ok=document.createElement("button"); ok.className="primary"; ok.textContent="Apply";
+    const no=document.createElement("button"); no.textContent="Cancel";
+    ok.onclick=()=>{
+      const sel=targets.filter((_,k)=>boxes[k].checked);
+      closeRepeatPop();
+      applyOverwrite(sel);
+    };
+    no.onclick=closeRepeatPop;
+    act.appendChild(ok); act.appendChild(no); pop.appendChild(act);
+    document.body.appendChild(pop);
+    pop.style.left=Math.max(8,Math.min(r.left,window.innerWidth-410))+"px";
+    pop.style.top=(r.bottom+6)+"px";
+    repeatPop=pop;
+    setTimeout(()=>document.addEventListener("click",onDocClickForPop,true),0);
+  }
+  function applyOverwrite(targetIdxs){
+    const src=groups[currentPage];
+    if(!src.length) return;
+    const targets=targetIdxs.map(i=>groups[i]).filter(g=>g&&g.length);
+    if(!targets.length) return;
+    const base=src[0].start;
+    pushUndo();
+    const firstIds=[];
+    for(const tgt of targets){
+      const lo=notes.findIndex(n=>n.id===tgt[0].id);
+      if(lo<0) continue;
+      const anchor=tgt[0].start;
+      const repl=src.map(n=>({id:nextId(),type:n.type,start:anchor+(n.start-base),dur:n.dur,pitch:n.pitch,syl:n.syl}));
+      notes.splice(lo,tgt.length,...repl);
+      firstIds.push(repl[0].id);
+    }
+    renderPage();
+    let overlap=0;
+    for(const id of firstIds){
+      const idx=notes.findIndex(n=>n.id===id);
+      if(idx<0) continue;
+      let i=idx, end=0;
+      for(;i<notes.length&&notes[i].type!=="-";i++) end=Math.max(end,notes[i].start+notes[i].dur);
+      let ns=Infinity;
+      for(;i<notes.length;i++){ if(notes[i].type!=="-"){ ns=notes[i].start; break; } }
+      if(end>ns) overlap++;
+    }
+    const msg=`overwrote ${firstIds.length} line(s) from line ${currentPage+1}`+
+      (overlap?` · ${overlap} now overlap the next line — use the 1-beat shift buttons`:"");
+    flashMeta(msg,overlap>0);
+  }
 
   // ── lyric popover ────────────────────────────────────────────────────────
   function openLyricPopover(n){
@@ -848,9 +973,9 @@
     }).catch(e=>updatePitchChip("",0,false));
   }
   function updateMetaChip(){
-    const lineCount=computeGroups(D.notes).length;
+    const lineCount=computeGroups(notes).length;
     document.getElementById("meta").textContent=
-      `BPM ${D.bpm} · GAP ${D.gap}ms · ${D.notes.length} notes · ${lineCount} lines`;
+      `BPM ${D.bpm} · GAP ${D.gap}ms · ${notes.length} notes · ${lineCount} lines`;
   }
   function addRestOrCorrupted(afterDash,out){
     if(!afterDash) return;
@@ -907,7 +1032,7 @@
       D.meta={title:p.meta.TITLE||"",artist:p.meta.ARTIST||"",mp3:p.meta.MP3||"",bpm:p.bpm,gap:p.gap,video:p.meta.VIDEO||""};
       D.srcName=f.name;
       BPM=p.bpm; GAP=p.gap; BEAT_MS=D.beatMs; PULSE_MS=D.pulseMs;
-      stopPlay(); cancelLyric();
+      stopPlay(); cancelLyric(); closeRepeatPop();
       notes=D.notes.slice(); selectedId=null; undoStack=[]; currentPage=0;
       lastRefKey=""; lastFftKey="";
       document.getElementById("title").textContent=(D.meta.title||"(untitled)")+" — "+(D.meta.artist||"");
@@ -1008,7 +1133,7 @@
 
   // ── navigation ───────────────────────────────────────────────────────────
   function gotoPage(i){
-    stopPlay(); cancelLyric();
+    stopPlay(); cancelLyric(); closeRepeatPop();
     const g=computeGroups(notes);
     currentPage=clamp(i,0,Math.max(0,g.length-1));
     selectedId=null;
@@ -1036,6 +1161,9 @@
   document.getElementById("lyricBtn").onclick=()=>{ const n=notes.find(x=>x.id===selectedId); if(n) openLyricPopover(n); };
   document.getElementById("addLineBtn").onclick=addLine;
   document.getElementById("delLineBtn").onclick=removeLine;
+  document.getElementById("shiftLBtn").onclick=()=>shiftLineBy(-1);
+  document.getElementById("shiftRBtn").onclick=()=>shiftLineBy(1);
+  document.getElementById("repeatBtn").onclick=openRepeatPopover;
   document.getElementById("undoBtn").onclick=undo;
   const txtInput=document.getElementById("txtInput");
   document.getElementById("txtBtn").onclick=()=>txtInput.click();
@@ -1059,6 +1187,7 @@
 
   document.addEventListener("keydown",e=>{
     if(lyricInput&&document.activeElement===lyricInput) return;
+    if(repeatPop){ if(e.key==="Escape"){ e.preventDefault(); closeRepeatPop(); } return; }
     if(e.ctrlKey||e.metaKey){
       if(e.key==="z"||e.key==="Z"){ e.preventDefault(); undo(); }
       else if(e.key==="s"||e.key==="S"){ e.preventDefault(); downloadTxt(); }

@@ -344,8 +344,71 @@ class TestGenerateEditor:
         assert 'id="vocalsBtn"' in html
         assert 'id="vocalsInput"' in html
         assert 'document.getElementById("vocalsBtn").onclick=()=>vocalsInput.click();' in html
-        assert 'vocalsInput.onchange=e=>{ onFile(e.target.files[0]); e.target.value=""; };' in html
+        assert 'vocalsInput.onchange=e=>{ onFile(e.target.files[0]); e.target.value=""; };'
 
+
+class TestLineShiftAndCopyToRepeats:
+    def test_shift_line_buttons(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        assert 'id="shiftLBtn"' in html
+        assert 'id="shiftRBtn"' in html
+        assert "function shiftLineBy(d){" in html
+        assert "for(const n of pageNotes) n.start=Math.max(0,n.start+d);" in html
+        assert 'document.getElementById("shiftLBtn").onclick=()=>shiftLineBy(-1);' in html
+        assert 'document.getElementById("shiftRBtn").onclick=()=>shiftLineBy(1);' in html
+        shift_body = html.split("function shiftLineBy(d){", 1)[1].split("\n  }", 1)[0]
+        assert "pushUndo();" in shift_body
+
+    def test_copy_to_repeats_buttons(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        assert 'id="repeatBtn"' in html
+        assert "function lineKey(g){" in html
+        assert "function repeatCountFor(pg){" in html
+        assert "function openRepeatPopover(){" in html
+        assert "function applyOverwrite(targetIdxs){" in html
+        assert 'document.getElementById("repeatBtn").onclick=openRepeatPopover;' in html
+        assert "rb.disabled=!rc;" in html
+
+    def test_line_key_matches_displayed_lyrics(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        key_body = html.split("function lineKey(g){", 1)[1].split("\n  }", 1)[0]
+        # matching runs on the displayed line text (verseTextLive skips '~' notes)
+        assert "return verseTextLive(g)" in key_body
+        # and is case- and punctuation-insensitive
+        assert r'.toLowerCase().replace(/[^\p{L}\p{N}]+/gu," ").replace(/\s+/g," ").trim()' in key_body
+
+    def test_overwrite_copies_source_shape(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        body = html.split("function applyOverwrite(targetIdxs){", 1)[1].split("\n  }", 1)[0]
+        # each target is anchored at its own first note's start
+        assert "const anchor=tgt[0].start;" in body
+        assert "const base=src[0].start;" in body
+        assert "start:anchor+(n.start-base)" in body
+        # the source shape (type incl. gold, dur, pitch, text) is copied verbatim
+        assert "type:n.type" in body and "dur:n.dur" in body and "pitch:n.pitch" in body and "syl:n.syl" in body
+        # the whole target group is replaced (spread so splice inserts each note)
+        assert "notes.splice(lo,tgt.length,...repl);" in body
+        # one undo entry covers every target line
+        assert body.count("pushUndo();") == 1
+        # lines that end up longer than the next line get a warning
+        assert "overlap the next line" in body
+
+    def test_repeat_popover_lists_targets_with_checkboxes(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        body = html.split("function openRepeatPopover(){", 1)[1].split("\n  }", 1)[0]
+        assert 'cb.type="checkbox"; cb.checked=true;' in body
+        assert "pop.className=\"repeat-pop\";" in html
+        assert "line ${i+1}" in body
+        assert "overwrote ${firstIds.length} line(s) from line ${currentPage+1}" in html
+
+    def test_help_mentions_new_toolbar_buttons(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        help_block = html.split('<div class="help">', 1)[1].split("</div>", 1)[0]
+        assert "1 beat" in help_block
+        assert "Copy to repeats" in help_block
+
+
+class TestOutputAndEmbed:
     def test_output_path_honored(self, tmp_path):
         txt = _write_txt(tmp_path)
         target = tmp_path / "sub" / "custom.html"

@@ -122,7 +122,7 @@ A standalone wrapper is available at the repo root: `python extract_lyrics.py so
 
 ### `edit` — Generate a self-contained HTML note editor
 
-Generates a single self-contained HTML file (no server, no network) for hand-tuning a `.txt`: drag notes (pitch/start), edge-drag (duration), split/merge/delete/gold/lyric, undo, live FFT spectrogram background, audio + MIDI + metronome playback. Save is a browser download of the edited `.txt` (header tags preserved verbatim).
+Generates a single self-contained HTML file (no server, no network) for hand-tuning a `.txt`: drag notes (pitch/start), edge-drag (duration), split/merge/delete/gold/lyric, shift a line ±1 beat, copy a repaired line onto its repeats (identical-lyrics matching, e.g. choruses), undo, live FFT spectrogram background, audio + MIDI + metronome playback. Save is a browser download of the edited `.txt` (header tags preserved verbatim).
 
 ```bash
 python -m cli edit \

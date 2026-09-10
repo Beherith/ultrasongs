@@ -87,6 +87,7 @@ Each processing run writes into its own per-song folder `<output_dir>/<artist> -
 - **Source of truth**: the parsed notes list. `start`/`dur` are beats (int), `pitch` is MIDI (int); ms is derived as `gap + start*beatMs` with `beatMs = 60000/bpm/4`. The file's `#BPM` is used verbatim (it already bakes in `beat_resolution_multiplier`).
 - **Two beat concepts**: `beatMs` (16th note at the listed BPM) is the note **snap grid**; `pulseMs = 60000/bpm` (quarter note) is the **visual grid + metronome** spacing.
 - **Header**: leading `#` lines are preserved verbatim (incl. `#COVER`/`#BACKGROUND`/`#CREATOR`); CRLF→LF on save. The body is serialized in the same shape as `build_ultrastar_txt`.
+- **Line shift + copy to repeats**: the **◀ 1 beat** / **1 beat ▶** buttons shift every note of the current line by ±1 beat (clamped at 0), e.g. to reposition a line after its shape changed. **Copy to repeats** (enabled only when matches exist) finds the other lines whose *displayed* lyrics equal the current line's (key = `verseTextLive` output — `~` notes ignored — lowercased, punctuation stripped, whitespace collapsed) and, through a checkbox popover (all pre-checked), overwrites the selected lines' entire shape with the current line's (pitches, durations, text, gold flags, `~` notes, splits/merges), anchoring each target at its own first-note start. One undo entry covers all targets; if an overwritten line now ends after the next line's first note starts, the meta chip warns to use the 1-beat shift buttons.
 - **Reloading progress**: the toolbar's **Load .txt** button imports a saved Ultrastar `.txt` (UTF-8, falling back to Windows-1252 on decode failure), replacing notes, raw header, `#BPM`/`#GAP` (and derived `beatMs`/`pulseMs`), and title/artist in the top bar. The in-browser parser mirrors `cli/ultrastar.parse_ultrastar_txt` (note regex, rest/corrupted-note recovery, comma-decimal BPM). It resets selection, undo stack, and page, and keeps the audio + pitch overlay as-is; `srcName` follows the loaded file so the next download reuses its name. Failures show "txt load failed" in the meta chip.
 - **Pitch overlay**: `--pitch` embeds the full `whisperx_pitch.json` word/frame list (s→ms) as `pitchWords`; the JS slices it into the live page window, so overlays stay correct under edits that change line structure. The toolbar's **Load pitch JSON** button can replace `pitchWords` at runtime by loading a `whisperx_pitch.json` file (same format as `--pitch`; accepts a bare `words` array or a `{words:[...]}` object), which re-renders the whisper word labels + CREPE dots; a top-bar chip shows the loaded file name + word count. `--vocals` names the suggested audio file; `--embed-audio` base64-embeds it.
 - **Payload** is injected into `cli/editor_template.html` via `__EDITOR_DATA__`; a 64-entry magma LUT is injected via `__MAGMA__` (both escaped so `</` can't close the script).
@@ -244,6 +245,12 @@ Temp files in `./tmp/`, generated output in `./output/` (both gitignored):
 
 ```bash
 pytest cli/tests/
+```
+
+Always pass a **fresh `--basetemp`** on each run. The default `Temp\pytest-of-Peti` dir can be left locked by a previous run (or an antivirus scan), which surfaces as a wall of `PermissionError`s unrelated to the tests. Point `--basetemp` at a unique directory per invocation, e.g.:
+
+```powershell
+pytest cli/tests/ --basetemp "$env:TEMP\pytest-ultrasongs-$([guid]::NewGuid().ToString('N'))"
 ```
 
 | Test File | Coverage |
