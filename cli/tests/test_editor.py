@@ -386,6 +386,9 @@ class TestLineShiftAndCopyToRepeats:
         assert "start:anchor+(n.start-base)" in body
         # the source shape (type incl. gold, dur, pitch, text) is copied verbatim
         assert "type:n.type" in body and "dur:n.dur" in body and "pitch:n.pitch" in body and "syl:n.syl" in body
+        # every new note gets a unique id (nextId() sees stale notes during the map)
+        assert "let nid=nextId();" in body
+        assert "id:nid++" in body
         # the whole target group is replaced (spread so splice inserts each note)
         assert "notes.splice(lo,tgt.length,...repl);" in body
         # one undo entry covers every target line

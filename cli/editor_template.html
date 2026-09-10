@@ -68,6 +68,7 @@
     <select id="lineSel" title="Jump to line"></select>
     <button id="nextBtn" title="Next line (Right / PageDown)">Next &#9654;</button>
     <button id="playBtn" class="primary" title="Play / stop line (Space)">&#9654; Play</button>
+    <button id="playFromSelBtn" title="Play from the start of the selected note">&#9654; Play from selected</button>
     <span class="metro" title="Vocals audio volume">Vocals <input type="range" id="vocalsVol" min="0" max="100" value="100"><span id="vocalsVolVal">100</span></span>
     <span class="metro" title="MIDI note volume">Notes <input type="range" id="notesVol" min="0" max="100" value="100"><span id="notesVolVal">100</span></span>
     <span class="metro" title="Metronome volume">Metronome <input type="range" id="metroVol" min="0" max="100" value="20"><span id="metroVolVal">20</span></span>
@@ -400,6 +401,7 @@
     document.getElementById("lyricBtn").disabled=!sel;
     document.getElementById("delLineBtn").disabled=!groups.length;
     const pg=groups[currentPage]||[];
+    document.getElementById("playFromSelBtn").disabled=!(sel&&sel.type!=="-"&&pg.some(n=>n.id===sel.id));
     document.getElementById("shiftLBtn").disabled=!pg.length;
     document.getElementById("shiftRBtn").disabled=!pg.length;
     const rc=repeatCountFor(pg);
@@ -856,7 +858,8 @@
       const lo=notes.findIndex(n=>n.id===tgt[0].id);
       if(lo<0) continue;
       const anchor=tgt[0].start;
-      const repl=src.map(n=>({id:nextId(),type:n.type,start:anchor+(n.start-base),dur:n.dur,pitch:n.pitch,syl:n.syl}));
+      let nid=nextId();
+      const repl=src.map(n=>({id:nid++,type:n.type,start:anchor+(n.start-base),dur:n.dur,pitch:n.pitch,syl:n.syl}));
       notes.splice(lo,tgt.length,...repl);
       firstIds.push(repl[0].id);
     }
@@ -1044,12 +1047,12 @@
       metaChip.className="chip err";
     }
   }
-  function playLine(){
+  function playLine(fromMs){
     if(play.active){ stopPlay(); return; }
     const pageNotes=groups[currentPage]||[];
     if(!pageNotes.length) return;
     const ctx=ensureCtx(); ctx.resume();
-    const lineStartMs=startMsOf(pageNotes[0]), lineEndMs=endMsOf(pageNotes[pageNotes.length-1]);
+    const lineStartMs=fromMs!=null?fromMs:startMsOf(pageNotes[0]), lineEndMs=endMsOf(pageNotes[pageNotes.length-1]);
     const t0ctx=ctx.currentTime+0.05;
     play.active=true; play.t0ctx=t0ctx; play.lineStartMs=lineStartMs; play.lineEndMs=lineEndMs; play.sources=[];
     if(audio.buffer){
@@ -1154,6 +1157,10 @@
   document.getElementById("prevBtn").onclick=()=>gotoPage(currentPage-1);
   document.getElementById("nextBtn").onclick=()=>gotoPage(currentPage+1);
   document.getElementById("playBtn").onclick=playLine;
+  document.getElementById("playFromSelBtn").onclick=()=>{
+    const sel=notes.find(n=>n.id===selectedId);
+    if(sel&&sel.type!=="-") playLine(startMsOf(sel));
+  };
   document.getElementById("splitBtn").onclick=splitNote;
   document.getElementById("mergeBtn").onclick=mergeNote;
   document.getElementById("delBtn").onclick=deleteNote;
