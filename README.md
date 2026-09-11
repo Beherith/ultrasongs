@@ -4,7 +4,16 @@ Generate [Ultrastar Deluxe](https://ultrastar-deluxe.org/) compatible `.txt` son
 
 **Pipeline:** FFmpeg extract → Demucs vocal separation → multi-pass faster-whisper consensus → Smith-Waterman lyric alignment → pause-delimited lyric/vocal chunks → multi-pass WhisperX exact word/character timing → BPM + torchcrepe analysis → `.txt` + ZIP export.
 
+### Note Editor Screenshots
+
+<img width="1897" height="1097" alt="image" src="https://github.com/user-attachments/assets/c0ef578f-0514-427d-91a2-bbb706ba7f45" />
+
+
 ## Web UI
+Screenshot:
+
+<img width="904" height="966" alt="image" src="https://github.com/user-attachments/assets/516f5e65-b593-46b6-8592-66c82529ea0e" />
+
 
 The web UI is the easiest way to run the pipeline: upload media + lyrics in the browser, watch the job run, and download the results (including the note editor).
 
