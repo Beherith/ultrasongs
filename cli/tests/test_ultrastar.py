@@ -1,9 +1,14 @@
 """Tests for Ultrastar format parser and builder."""
 
+import re
+from datetime import datetime, timezone
+
 import pytest
 from cli.pipeline_types import UltrastarMeta, UltrastarNote
 from cli.ultrastar import (
+    CREATOR_URL,
     build_ultrastar_txt,
+    creator_value,
     extract_lyrics_from_ultrastar,
     ms_to_beats,
     parse_ultrastar_txt,
@@ -26,6 +31,19 @@ class TestMsToBeats:
         assert result < 0
 
 
+class TestCreatorValue:
+    def test_default_format(self):
+        value = creator_value()
+        assert re.fullmatch(
+            r"https://github\.com/Beherith/ultrasongs  - \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+00:00",
+            value,
+        )
+
+    def test_explicit_timestamp(self):
+        value = creator_value(datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc))
+        assert value == "https://github.com/Beherith/ultrasongs  - 2026-01-02T03:04:05+00:00"
+
+
 class TestBuildUltrastarTxt:
     def test_minimal(self):
         meta = UltrastarMeta(title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500)
@@ -40,6 +58,28 @@ class TestBuildUltrastarTxt:
         assert "#GAP:500" in txt
         assert ": 0 4 60 hello" in txt
         assert txt.strip().endswith("E")
+
+    def test_with_creator(self):
+        meta = UltrastarMeta(
+            title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500,
+            creator=CREATOR_URL + "  - 2026-01-01T00:00:00+00:00",
+        )
+        notes = []
+        txt = build_ultrastar_txt(notes, meta)
+        header = txt.split("\n\n")[0].split("\n")
+        assert header == [
+            "#TITLE:Test",
+            "#ARTIST:Artist",
+            f"#CREATOR:{CREATOR_URL}  - 2026-01-01T00:00:00+00:00",
+            "#MP3:test.mp3",
+            "#BPM:120.00",
+            "#GAP:500",
+        ]
+
+    def test_without_creator(self):
+        meta = UltrastarMeta(title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500)
+        txt = build_ultrastar_txt([], meta)
+        assert "#CREATOR:" not in txt
 
     def test_with_video(self):
         meta = UltrastarMeta(title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500, video="test.mp4")
@@ -102,6 +142,39 @@ class TestBuildUltrastarTxt:
             "#GAP:500",
         ]
 
+    def test_with_start_end(self):
+        meta = UltrastarMeta(
+            title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500,
+            start=1.5, end_ms=678000,
+        )
+        notes = []
+        txt = build_ultrastar_txt(notes, meta)
+        header = txt.split("\n\n")[0].split("\n")
+        assert header[-2:] == ["#START:1.5", "#END:678000"]
+
+    def test_without_start_end(self):
+        meta = UltrastarMeta(title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500)
+        txt = build_ultrastar_txt([], meta)
+        assert "#START:" not in txt
+        assert "#END:" not in txt
+
+    def test_with_medley_tags(self):
+        meta = UltrastarMeta(
+            title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500,
+            medley_start_beat=10, medley_end_beat=20, preview_start=12.34,
+        )
+        notes = []
+        txt = build_ultrastar_txt(notes, meta)
+        header = txt.split("\n\n")[0].split("\n")
+        assert header[-3:] == ["#MEDLEYSTARTBEAT:10", "#MEDLEYENDBEAT:20", "#PREVIEWSTART:12,34"]
+
+    def test_medley_tags_omitted_without_values(self):
+        meta = UltrastarMeta(title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500)
+        txt = build_ultrastar_txt([], meta)
+        assert "#MEDLEYSTARTBEAT:" not in txt
+        assert "#MEDLEYENDBEAT:" not in txt
+        assert "#PREVIEWSTART:" not in txt
+
     def test_line_break(self):
         meta = UltrastarMeta(title="Test", artist="Artist", mp3="test.mp3", bpm=120.0, gap=500)
         notes = [
@@ -133,6 +206,24 @@ E
         assert len(notes) == 2
         assert notes[0].syllable == "hello"
         assert notes[1].syllable == "world"
+
+    def test_freestyle_note(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:120.00
+#GAP:500
+
+F 0 1 8 Freestyle
+E
+"""
+        _, notes = parse_ultrastar_txt(content)
+        assert len(notes) == 1
+        assert notes[0].note_type == "F"
+        assert notes[0].start_beat == 0
+        assert notes[0].duration == 1
+        assert notes[0].pitch == 8
+        assert notes[0].syllable == "Freestyle"
 
     def test_with_video(self):
         content = """#TITLE:Test
@@ -191,6 +282,130 @@ E
 """
         meta, notes = parse_ultrastar_txt(content)
         assert meta.cover is None
+
+    def test_with_creator(self):
+        content = f"""#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#CREATOR:{CREATOR_URL}  - 2026-01-01T00:00:00+00:00
+#BPM:120.00
+#GAP:500
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.creator == f"{CREATOR_URL}  - 2026-01-01T00:00:00+00:00"
+
+    def test_without_creator(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:120.00
+#GAP:500
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.creator is None
+
+    def test_with_start_end(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:120.00
+#GAP:500
+#START:1.5
+#END:678000
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.start == 1.5
+        assert meta.end_ms == 678000
+
+    def test_without_start_end(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:120.00
+#GAP:500
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.start is None
+        assert meta.end_ms is None
+
+    def test_with_medley_tags(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:120.00
+#GAP:500
+#MEDLEYSTARTBEAT:10
+#MEDLEYENDBEAT:20
+#PREVIEWSTART:12,34
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.medley_start_beat == 10
+        assert meta.medley_end_beat == 20
+        assert meta.preview_start == 12.34
+
+    def test_without_medley_tags(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:120.00
+#GAP:500
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.medley_start_beat is None
+        assert meta.medley_end_beat is None
+        assert meta.preview_start is None
+
+    def test_malformed_medley_tags(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:120.00
+#GAP:500
+#MEDLEYSTARTBEAT:abc
+#MEDLEYENDBEAT:xyz
+#PREVIEWSTART:1.2.3
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.medley_start_beat is None
+        assert meta.medley_end_beat is None
+        assert meta.preview_start is None
+
+    def test_malformed_start_end(self):
+        content = """#TITLE:Test
+#ARTIST:Artist
+#MP3:test.mp3
+#BPM:120.00
+#GAP:500
+#START:abc
+#END:xyz
+
+: 0 4 60 hi
+E
+"""
+        meta, notes = parse_ultrastar_txt(content)
+        assert meta.start is None
+        assert meta.end_ms is None
 
     def test_without_stems(self):
         content = """#TITLE:Test
@@ -499,6 +714,26 @@ class TestRoundTrip:
             assert parsed.duration == orig.duration
             assert parsed.pitch == orig.pitch
             assert parsed.syllable == orig.syllable
+
+    def test_build_then_parse_preserves_medley_tags(self):
+        meta = UltrastarMeta(
+            title="Round", artist="Trip", mp3="r.mp3", bpm=120.0, gap=300,
+            medley_start_beat=10, medley_end_beat=20, preview_start=12.34,
+        )
+        notes = [UltrastarNote(note_type=":", start_beat=0, duration=4, pitch=64, syllable="hello")]
+        parsed_meta, _ = parse_ultrastar_txt(build_ultrastar_txt(notes, meta))
+        assert parsed_meta.medley_start_beat == 10
+        assert parsed_meta.medley_end_beat == 20
+        assert parsed_meta.preview_start == 12.34
+
+    def test_build_then_parse_preserves_creator(self):
+        meta = UltrastarMeta(
+            title="Round", artist="Trip", mp3="r.mp3", bpm=120.0, gap=0,
+            creator=creator_value(datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)),
+        )
+        notes = [UltrastarNote(note_type=":", start_beat=0, duration=4, pitch=64, syllable="hello")]
+        parsed_meta, _ = parse_ultrastar_txt(build_ultrastar_txt(notes, meta))
+        assert parsed_meta.creator == meta.creator
 
     def test_preserves_leading_word_space_and_empty_continuation(self):
         meta = UltrastarMeta(title="Test", artist="A", mp3="a.mp3", bpm=120, gap=0)

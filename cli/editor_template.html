@@ -79,6 +79,7 @@
     <button id="mergeBtn" title="Merge selected with next (M)">Merge</button>
     <button id="delBtn" title="Delete selected (Del)">Delete</button>
     <button id="goldBtn" title="Toggle gold note (G)">Gold</button>
+    <button id="freestyleBtn" title="Toggle freestyle note (F) — sung free, drawn grey">Freestyle</button>
     <button id="lyricBtn" title="Edit lyric (L / double-click)">Lyric</button>
     <button id="addLineBtn" title="Insert a new lyric line after the current one, with a single &lsquo;New Line&rsquo; note at its start">+ Line</button>
     <button id="delLineBtn" title="Remove the entire current lyric line">&minus; Line</button>
@@ -119,7 +120,7 @@
   <div class="help">
     Drag a note up/down = pitch, left/right = start &middot; drag an edge = duration &middot; double-click = edit lyric (empty canvas = insert <i>~</i> note) &middot;
     <kbd>Space</kbd> play &middot; <kbd>&#8592;</kbd>/<kbd>&#8594;</kbd> line &middot; <kbd>S</kbd> split &middot; <kbd>M</kbd> merge &middot;
-    <kbd>G</kbd> gold &middot; <kbd>L</kbd> lyric &middot; <kbd>Del</kbd> delete &middot; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &middot; <kbd>Ctrl</kbd>+<kbd>S</kbd> download &middot;
+    <kbd>G</kbd> gold &middot; <kbd>F</kbd> freestyle &middot; <kbd>L</kbd> lyric &middot; <kbd>Del</kbd> delete &middot; <kbd>Ctrl</kbd>+<kbd>Z</kbd> undo &middot; <kbd>Ctrl</kbd>+<kbd>S</kbd> download &middot;
     toolbar: <b>Load Ultrastar .txt</b> reloads a saved song &middot; <b>Load pitch JSON</b> swaps the pitch overlay &middot;
     <b>+ Line</b>/<b>&minus; Line</b> add/remove entire lyric lines &middot; <b>&#9664; 1 beat</b>/<b>1 beat &#9654;</b> shift the current line &middot;
     <b>Copy to repeats</b> overwrites the other identical lines (e.g. choruses) with the current one &middot; <b>Load vocals</b> swaps the audio track (FFT + playback)
@@ -330,8 +331,9 @@
     // note bars
     for(const n of pageNotes){
       const x=tx(startMsOf(n)), w=Math.max(tx(endMsOf(n))-x,2), y=ty(n.pitch);
-      const gold=n.type==="*";
-      const fill=gold?"rgba(232,190,60,0.7)":"rgba(15,52,96,0.7)", stroke=gold?"#ffd54a":"#4fc3f7", tfill=gold?"#1a1a2e":"#cde";
+      const gold=n.type==="*", free=n.type==="F";
+      const fill=gold?"rgba(232,190,60,0.7)":free?"rgba(105,105,112,0.75)":"rgba(15,52,96,0.7)",
+              stroke=gold?"#ffd54a":free?"#a8a8b0":"#4fc3f7", tfill=gold?"#1a1a2e":free?"#f0f0f2":"#cde";
       const sel=n.id===selectedId;
       const label=(n.syl.trim()||"&nbsp;");
       const fs=Math.max(7,Math.min(12,w/(Math.max(1,n.syl.trim().length)*0.55)));
@@ -341,7 +343,7 @@
       s+=`<rect data-handle="left" x="${(x-4).toFixed(1)}" y="${hy.toFixed(1)}" width="8" height="${hh.toFixed(1)}" fill="transparent" style="cursor:ew-resize"/>`;
       s+=`<rect data-handle="right" x="${(x+w-4).toFixed(1)}" y="${hy.toFixed(1)}" width="8" height="${hh.toFixed(1)}" fill="transparent" style="cursor:ew-resize"/>`;
       s+=`<text x="${(x+w/2).toFixed(1)}" y="${(y+bar_h/2).toFixed(1)}" fill="${tfill}" font-size="${fs.toFixed(1)}" text-anchor="middle" dominant-baseline="central">${esc(label)}</text>`;
-      s+=`<title>${esc(n.syl)} (${pitchToNote(n.pitch)}) ${msToSec(startMsOf(n))} +${(n.dur*BEAT_MS).toFixed(0)}ms</title>`;
+      s+=`<title>${esc(n.syl)} (${pitchToNote(n.pitch)})${free?" (freestyle)":""} ${msToSec(startMsOf(n))} +${(n.dur*BEAT_MS).toFixed(0)}ms</title>`;
       s+=`</g>`;
     }
     // whisper word labels
@@ -398,6 +400,7 @@
     document.getElementById("mergeBtn").disabled=!(sel&&nextSung);
     document.getElementById("delBtn").disabled=!sel;
     document.getElementById("goldBtn").disabled=!sel;
+    document.getElementById("freestyleBtn").disabled=!sel;
     document.getElementById("lyricBtn").disabled=!sel;
     document.getElementById("delLineBtn").disabled=!groups.length;
     const pg=groups[currentPage]||[];
@@ -419,7 +422,7 @@
       const n=g?notes.find(x=>x.id===+g.getAttribute("data-id")):null;
       const selected=!!(n&&n.id===selectedId);
       bar.classList.toggle("sel",selected);
-      bar.setAttribute("stroke",selected?"#ffffff":n&&n.type==="*"?"#ffd54a":"#4fc3f7");
+      bar.setAttribute("stroke",selected?"#ffffff":n?(n.type==="*"?"#ffd54a":n.type==="F"?"#a8a8b0":"#4fc3f7"):"#4fc3f7");
       bar.setAttribute("stroke-width",selected?"2":"0.8");
     }
     updateTransport(groups[currentPage]||[]);
@@ -722,6 +725,12 @@
     n.type=n.type==="*"?":":"*";
     renderPage();
   }
+  function toggleFreestyle(){
+    const n=notes.find(x=>x.id===selectedId); if(!n) return;
+    pushUndo();
+    n.type=n.type==="F"?":":"F";
+    renderPage();
+  }
   function addLine(){
     const pageNotes=groups[currentPage]||[];
     pushUndo();
@@ -1008,7 +1017,7 @@
         const colon=trimmed.indexOf(":");
         if(colon>0) meta[trimmed.slice(1,colon).toUpperCase()]=trimmed.slice(colon+1).trim();
       }else{
-        const m=/^\s*([:*])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$/.exec(line);
+        const m=/^\s*([:*F])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$/.exec(line);
         if(m) notes.push({type:m[1],start:+m[2],dur:+m[3],pitch:+m[4],syl:m[5]||""});
         else if(trimmed.startsWith("-")) addRestOrCorrupted(trimmed.slice(1).trim(),notes);
       }
@@ -1121,9 +1130,18 @@
   }
 
   // ── save ─────────────────────────────────────────────────────────────────
+  const CREATOR_URL="https://github.com/Beherith/ultrasongs";
+  function creatorLine(){
+    const ts=new Date().toISOString().replace(/\.\d{3}Z$/,"+00:00");
+    return "#CREATOR:"+CREATOR_URL+"  - "+ts;
+  }
   function serializeTxt(){
+    const header=D.rawHeader.filter(l=>!/^\s*#CREATOR:/i.test(l));
+    const line=creatorLine();
+    const ai=header.findIndex(l=>/^\s*#ARTIST:/i.test(l));
+    if(ai>=0) header.splice(ai+1,0,line); else header.push(line);
     const body=notes.map(n=>n.type==="-"?`- ${n.start}`:`${n.type} ${n.start} ${n.dur} ${n.pitch} ${n.syl}`).join("\n");
-    return D.rawHeader.join("\n")+"\n\n"+body+"\nE\n";
+    return header.join("\n")+"\n\n"+body+"\nE\n";
   }
   function downloadTxt(){
     const blob=new Blob([serializeTxt()],{type:"text/plain;charset=utf-8"});
@@ -1165,6 +1183,7 @@
   document.getElementById("mergeBtn").onclick=mergeNote;
   document.getElementById("delBtn").onclick=deleteNote;
   document.getElementById("goldBtn").onclick=toggleGold;
+  document.getElementById("freestyleBtn").onclick=toggleFreestyle;
   document.getElementById("lyricBtn").onclick=()=>{ const n=notes.find(x=>x.id===selectedId); if(n) openLyricPopover(n); };
   document.getElementById("addLineBtn").onclick=addLine;
   document.getElementById("delLineBtn").onclick=removeLine;
@@ -1207,6 +1226,7 @@
       case "s": splitNote(); break;
       case "m": mergeNote(); break;
       case "g": toggleGold(); break;
+      case "f": toggleFreestyle(); break;
       case "l": { const n=notes.find(x=>x.id===selectedId); if(n) openLyricPopover(n); break; }
       case "Delete": case "Backspace": deleteNote(); break;
       case "Escape": if(play.active) stopPlay(); else if(selectedId!=null) select(null); break;

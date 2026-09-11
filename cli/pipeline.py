@@ -123,6 +123,7 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
     from cli.package import collect_intermediates, package_output
     from cli.html_preview import generate_preview
     from cli.editor import generate_editor
+    from cli.song_bounds import detect_song_bounds
 
     title = req.title
     artist = req.artist
@@ -216,6 +217,18 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
             if cover_path is not None and cover_path.is_file()
             else None
         )
+
+        # #START/#END tags: first/last audible time slot of the full track.
+        start_sec: float | None = None
+        end_ms: int | None = None
+        if audio_out.exists():
+            try:
+                bound_start, bound_end = detect_song_bounds(audio_out)
+                start_sec = round(bound_start, 1)
+                end_ms = max(0, round(bound_end)) * 1000
+            except Exception as exc:
+                logger.warning(f"Song bound detection failed, omitting #START/#END: {exc}")
+
         txt_content = generate_ultrastar(
             aligned_syllables=aligned,
             bpm=bpm_result.bpm,
@@ -228,6 +241,9 @@ def _run_process(req: ProcessRequest, run_started: float) -> ProcessResult:
             vocals_filename=f"{safe_name}_vocals.mp3" if Path(result.vocals_path).exists() else None,
             instrumental_filename=f"{safe_name}_accompaniment.mp3" if Path(result.accompaniment_path).exists() else None,
             cover_filename=cover_filename,
+            start_sec=start_sec,
+            end_ms=end_ms,
+            lyrics_text=req.lyrics_text,
             config=config,
         )
         logger.info("Step 5/5: Ultrastar file generated")

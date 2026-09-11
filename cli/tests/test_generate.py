@@ -33,6 +33,55 @@ class TestGenerateUltrastar:
         assert "#ARTIST:Artist" in txt
         assert "E" in txt
 
+    def test_creator_tag_stamped(self):
+        syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            config=Config(),
+        )
+        meta, _ = parse_ultrastar_txt(txt)
+        assert meta.creator is not None
+        assert meta.creator.startswith("https://github.com/Beherith/ultrasongs  - ")
+        header = txt.split("\n\n")[0].split("\n")
+        assert header.index("#CREATOR:" + meta.creator) == header.index("#ARTIST:Artist") + 1
+
+    def test_start_end_tags(self):
+        syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            start_sec=1.5,
+            end_ms=678000,
+            config=Config(),
+        )
+        meta, _ = parse_ultrastar_txt(txt)
+        assert meta.start == 1.5
+        assert meta.end_ms == 678000
+
+    def test_no_start_end_tags(self):
+        syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            config=Config(),
+        )
+        meta, _ = parse_ultrastar_txt(txt)
+        assert meta.start is None
+        assert meta.end_ms is None
+
     def test_line_break_handling(self):
         syls = self._make_syllables([
             ("first", 0.5, 1.0, 60),
@@ -154,6 +203,80 @@ class TestGenerateUltrastar:
         )
         meta, _ = parse_ultrastar_txt(txt)
         assert meta.gap == 1000
+
+    def test_medley_tags_from_lyrics(self):
+        lyrics = "\n".join([
+            "verse line one",
+            "verse line two",
+            "chorus line a",
+            "chorus line b",
+            "verse line three",
+            "verse line four",
+            "chorus line a",
+            "chorus line b",
+        ])
+        syls = self._make_syllables([
+            (line.split()[0], index * 1.0, index * 1.0 + 0.5, 60)
+            for index, line in enumerate(lyrics.split("\n"))
+        ])
+        for index in range(7):
+            syls.insert((index + 1) * 2 - 1, AlignedSyllable(syllable="", start=(index + 1) * 1.0, end=(index + 1) * 1.0, midi=0, is_line_break=True))
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            first_beat_ms=0.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            lyrics_text=lyrics,
+            config=Config(),
+        )
+        meta, _ = parse_ultrastar_txt(txt)
+        # output_bpm = 240 (beat resolution multiplier 2), beat = 250 ms, gap = 0
+        # chorus lines are 0-based lines 2-3 -> first note at beat 32, last ends at beat 56
+        assert meta.medley_start_beat == 32
+        assert meta.medley_end_beat == 56
+        assert meta.preview_start == 8.0
+
+    def test_no_medley_tags_without_lyrics(self):
+        syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            config=Config(),
+        )
+        meta, _ = parse_ultrastar_txt(txt)
+        assert meta.medley_start_beat is None
+        assert meta.medley_end_beat is None
+        assert meta.preview_start is None
+
+    def test_no_medley_tags_when_lyrics_do_not_repeat(self):
+        syls = self._make_syllables([
+            ("one", 0.5, 1.0, 60),
+            ("two", 1.2, 1.7, 62),
+            ("three", 2.2, 2.7, 64),
+            ("four", 3.2, 3.7, 65),
+        ])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            first_beat_ms=0.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            lyrics_text="one\ntwo\nthree\nfour",
+            config=Config(),
+        )
+        meta, _ = parse_ultrastar_txt(txt)
+        assert meta.medley_start_beat is None
+        assert meta.medley_end_beat is None
+        assert meta.preview_start is None
 
     def test_video_filename(self):
         syls = self._make_syllables([("hi", 0.5, 1.0, 60)])

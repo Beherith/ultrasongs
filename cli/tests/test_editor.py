@@ -255,6 +255,35 @@ class TestSerializeEditorTxt:
         assert "* 16 4 66  are" in serialized
         assert "- 10" in serialized and "- 22" in serialized
 
+    def test_freestyle_note_survives(self):
+        raw, _ = extract_raw_header(CONTENT)
+        payload_notes = [note_to_payload(n, i) for i, n in enumerate(_parse(CONTENT)[1])]
+        payload_notes[1]["type"] = "F"
+        serialized = serialize_editor_txt(raw, payload_notes)
+        assert "F 4 4 62  world" in serialized
+        _, notes2 = _parse(serialized)
+        assert notes2[1].note_type == "F"
+        assert notes2[1].syllable == " world"
+
+
+class TestSaveCreatorStamp:
+    def test_js_serializer_stamps_creator_line(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        assert 'const CREATOR_URL="https://github.com/Beherith/ultrasongs";' in html
+        body = html.split("function serializeTxt(){", 1)[1].split("\n  }", 1)[0]
+        assert "creatorLine()" in body
+        assert "#CREATOR:" in body
+        assert r"header.findIndex(l=>/^\s*#ARTIST:/i.test(l))" in body
+        assert "header.splice(ai+1,0,line)" in body
+        assert "header.push(line)" in body
+
+    def test_js_creator_line_uses_iso_timestamp(self, tmp_path):
+        html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")
+        creator_body = html.split("function creatorLine(){", 1)[1].split("\n  }", 1)[0]
+        assert "new Date().toISOString()" in creator_body
+        assert "+00:00" in creator_body
+        assert "#CREATOR:" in creator_body
+
 
 class TestEmbedAudioB64:
     def test_returns_b64_and_mime(self, tmp_path):

@@ -167,7 +167,7 @@ class TranscribeResult:
 
 @dataclass
 class UltrastarNote:
-    note_type: str       # ":", "*", "-"
+    note_type: str       # ":", "*", "F" (freestyle), "-"
     start_beat: int
     duration: int        # 0 for line breaks
     pitch: int           # 0 for line breaks
@@ -185,3 +185,9 @@ class UltrastarMeta:
     vocals: str | None = None       # filename within output package
     instrumental: str | None = None # filename within output package
     cover: str | None = None        # filename within output package
+    creator: str | None = None      # value of the #CREATOR tag (url + timestamp)
+    start: float | None = None      # seconds from audio start to song start
+    end_ms: int | None = None       # milliseconds from audio start to song end
+    medley_start_beat: int | None = None  # start beat of the medley (chorus) section
+    medley_end_beat: int | None = None    # end beat of the medley (chorus) section
+    preview_start: float | None = None    # seconds from audio start where the preview begins

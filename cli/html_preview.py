@@ -122,7 +122,7 @@ def parse_ultrastar(filepath: Path) -> dict:
     for line in text.splitlines():
         if not line:
             continue
-        if line.startswith(":") or line.startswith("*"):
+        if line.startswith(":") or line.startswith("*") or line.startswith("F"):
             parts = line[1:].split(None, 3)
             if len(parts) >= 4:
                 current_verse.append(convert_note(parts, line.startswith("*")))

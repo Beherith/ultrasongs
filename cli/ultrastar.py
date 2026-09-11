@@ -1,9 +1,18 @@
 """Ultrastar format: parser and builder for .txt song files."""
 
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from cli.pipeline_types import UltrastarMeta, UltrastarNote
+
+CREATOR_URL = "https://github.com/Beherith/ultrasongs"
+
+
+def creator_value(timestamp: datetime | None = None) -> str:
+    """Value for the #CREATOR tag: ``<url>  - <ISO-8601 UTC timestamp>``."""
+    ts = (timestamp or datetime.now(timezone.utc)).isoformat(timespec="seconds")
+    return f"{CREATOR_URL}  - {ts}"
 
 
 def read_text_fallback(path: Path) -> str:
@@ -21,7 +30,7 @@ def read_text_fallback(path: Path) -> str:
     return data.decode("latin-1", errors="replace")
 
 
-_NOTE_RE = re.compile(r"^\s*([:*])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$")
+_NOTE_RE = re.compile(r"^\s*([:*F])\s+(-?\d+)\s+(\d+)\s+(-?\d+)(?: (.*))?$")
 # Note field sequence without the leading ':'/'*' type char. Used to recover the
 # real note from corrupted rest lines such as "-348: 348 2 69 Om", where a stray
 # "-<beat>: " prefix is followed by a valid "<beat> <dur> <pitch> <syllable>".
@@ -42,6 +51,7 @@ def build_ultrastar_txt(notes: list[UltrastarNote], meta: UltrastarMeta) -> str:
     Format:
         #TITLE:Title
         #ARTIST:Artist
+        #CREATOR:url - timestamp  (optional)
         #MP3:file.mp3
         #COVER:file_cover.jpeg  (optional)
         #VIDEO:file.mp4  (optional)
@@ -49,6 +59,11 @@ def build_ultrastar_txt(notes: list[UltrastarNote], meta: UltrastarMeta) -> str:
         #INSTRUMENTAL:file_accompaniment.mp3  (optional)
         #BPM:120.00
         #GAP:500
+        #START:1.5  (optional, seconds)
+        #END:678000  (optional, milliseconds)
+        #MEDLEYSTARTBEAT:10  (optional, start beat of the medley/chorus section)
+        #MEDLEYENDBEAT:20  (optional, end beat of the medley/chorus section)
+        #PREVIEWSTART:12,34  (optional, seconds from audio start where the preview begins)
 
         : 0 4 60 hello
         * 5 4 62 world
@@ -58,8 +73,10 @@ def build_ultrastar_txt(notes: list[UltrastarNote], meta: UltrastarMeta) -> str:
     header_lines = [
         f"#TITLE:{meta.title}",
         f"#ARTIST:{meta.artist}",
-        f"#MP3:{meta.mp3}",
     ]
+    if meta.creator:
+        header_lines.append(f"#CREATOR:{meta.creator}")
+    header_lines.append(f"#MP3:{meta.mp3}")
     if meta.cover:
         header_lines.append(f"#COVER:{meta.cover}")
     if meta.video:
@@ -72,6 +89,17 @@ def build_ultrastar_txt(notes: list[UltrastarNote], meta: UltrastarMeta) -> str:
         f"#BPM:{meta.bpm:.2f}",
         f"#GAP:{round(meta.gap)}",
     ])
+    if meta.start is not None:
+        header_lines.append(f"#START:{meta.start:.1f}")
+    if meta.end_ms is not None:
+        header_lines.append(f"#END:{meta.end_ms}")
+    if meta.medley_start_beat is not None:
+        header_lines.append(f"#MEDLEYSTARTBEAT:{meta.medley_start_beat}")
+    if meta.medley_end_beat is not None:
+        header_lines.append(f"#MEDLEYENDBEAT:{meta.medley_end_beat}")
+    if meta.preview_start is not None:
+        preview_start = f"{meta.preview_start:.2f}".replace(".", ",")
+        header_lines.append(f"#PREVIEWSTART:{preview_start}")
 
     header = "\n".join(header_lines)
 
@@ -216,6 +244,31 @@ def parse_ultrastar_txt(content: str) -> tuple[UltrastarMeta, list[UltrastarNote
     bpm = float(meta.get("BPM", "120").replace(",", "."))
     gap = int(float(meta.get("GAP", "0").replace(",", ".")))
 
+    try:
+        start = float(meta["START"].replace(",", ".")) if "START" in meta else None
+    except ValueError:
+        start = None
+    try:
+        end_ms = int(float(meta["END"].replace(",", "."))) if "END" in meta else None
+    except ValueError:
+        end_ms = None
+    try:
+        medley_start_beat = (
+            int(float(meta["MEDLEYSTARTBEAT"].replace(",", "."))) if "MEDLEYSTARTBEAT" in meta else None
+        )
+    except ValueError:
+        medley_start_beat = None
+    try:
+        medley_end_beat = (
+            int(float(meta["MEDLEYENDBEAT"].replace(",", "."))) if "MEDLEYENDBEAT" in meta else None
+        )
+    except ValueError:
+        medley_end_beat = None
+    try:
+        preview_start = float(meta["PREVIEWSTART"].replace(",", ".")) if "PREVIEWSTART" in meta else None
+    except ValueError:
+        preview_start = None
+
     return (
         UltrastarMeta(
             title=meta.get("TITLE", ""),
@@ -227,6 +280,12 @@ def parse_ultrastar_txt(content: str) -> tuple[UltrastarMeta, list[UltrastarNote
             vocals=meta.get("VOCALS"),
             instrumental=meta.get("INSTRUMENTAL"),
             cover=meta.get("COVER"),
+            creator=meta.get("CREATOR"),
+            start=start,
+            end_ms=end_ms,
+            medley_start_beat=medley_start_beat,
+            medley_end_beat=medley_end_beat,
+            preview_start=preview_start,
         ),
         notes,
     )

@@ -1,9 +1,9 @@
 """Generate a self-contained, in-browser Ultrastar note editor from a .txt file.
 
 The editor is a single HTML file (no server, no build step) that visually matches
-``cli/html_preview.py`` and lets the user hand-tune notes by drag/resize/split/merge/
-delete/gold/lyric with an undo stack, a live FFT background, and audio + MIDI +
-metronome playback. See ``docs/note_editor_plan.md``.
+ ``cli/html_preview.py`` and lets the user hand-tune notes by drag/resize/split/merge/
+ delete/gold/freestyle/lyric with an undo stack, a live FFT background, and audio +
+ MIDI + metronome playback. See ``docs/note_editor_plan.md``.
 """
 
 import base64
@@ -140,7 +140,8 @@ def serialize_editor_txt(raw_header: list[str], notes_payload: list[dict]) -> st
 
     The body is byte-identical in shape to ``build_ultrastar_txt``; the header is
     the caller's verbatim raw lines (preserving non-standard tags). This is the
-    Python mirror of the JS download serializer (plan §14).
+    Python mirror of the JS download serializer (plan §14); the JS version
+    additionally stamps a fresh ``#CREATOR`` line on every save.
     """
     header = "\n".join(raw_header)
     body_lines = []
