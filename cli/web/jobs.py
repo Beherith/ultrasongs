@@ -56,6 +56,9 @@ class JobLogHandler(logging.Handler):
         ))
 
     def emit(self, record: logging.LogRecord) -> None:
+        # Dash's request-access records are unrelated to pipeline progress.
+        if record.name == "werkzeug":
+            return
         try:
             self._job.logs.append(self.format(record))
         except Exception:

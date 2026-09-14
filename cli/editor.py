@@ -138,16 +138,29 @@ def build_payload(
 def serialize_editor_txt(raw_header: list[str], notes_payload: list[dict]) -> str:
     """Serialize the raw header + compact notes to an Ultrastar ``.txt`` string.
 
-    The body is byte-identical in shape to ``build_ultrastar_txt``; the header is
-    the caller's verbatim raw lines (preserving non-standard tags). This is the
+    The body is byte-identical in shape to ``build_ultrastar_txt``; line-break
+    beats are recalculated from their adjacent note lines. The header is the
+    caller's verbatim raw lines (preserving non-standard tags). This is the
     Python mirror of the JS download serializer (plan §14); the JS version
     additionally stamps a fresh ``#CREATOR`` line on every save.
     """
     header = "\n".join(raw_header)
     body_lines = []
-    for n in notes_payload:
+    for index, n in enumerate(notes_payload):
         if n["type"] == "-":
-            body_lines.append(f"- {n['start']}")
+            previous = next((
+                note for note in reversed(notes_payload[:index]) if note["type"] != "-"
+            ), None)
+            following = next((
+                note for note in notes_payload[index + 1:] if note["type"] != "-"
+            ), None)
+            if previous is None or following is None:
+                line_break_beat = n["start"]
+            else:
+                previous_end = previous["start"] + previous["dur"]
+                gap_beats = following["start"] - previous_end
+                line_break_beat = previous_end + gap_beats // 3 if gap_beats > 3 else previous_end
+            body_lines.append(f"- {line_break_beat}")
         else:
             body_lines.append(f"{n['type']} {n['start']} {n['dur']} {n['pitch']} {n['syl']}")
     body = "\n".join(body_lines)

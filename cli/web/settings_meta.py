@@ -147,7 +147,7 @@ SETTINGS: list[SettingMeta] = [
                 "Fallback lead-in before the first note for #GAP when no first beat is detected (ms).",
                 min_value=0, max_value=10000),
     SettingMeta("linebreak_beat_offset", "number", GROUP_OUTPUT,
-                "Beats before the next note to insert a line break (4 = one 4/4 measure).",
+                "Deprecated; delimiters are placed from the surrounding note timings.",
                 min_value=0, max_value=32),
     SettingMeta("beat_resolution_multiplier", "number", GROUP_OUTPUT,
                 "Scales the exported BPM for a finer Ultrastar beat grid (>=1).", min_value=1, max_value=16),

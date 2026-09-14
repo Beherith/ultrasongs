@@ -108,6 +108,34 @@ class TestGenerateUltrastar:
         assert previous.start_beat + previous.duration <= line_break.start_beat
         assert line_break.start_beat <= following.start_beat
 
+    def test_line_break_uses_one_third_of_a_wide_gap_or_previous_end_when_tight(self):
+        syls = self._make_syllables([
+            ("first", 0.5, 0.75, 60),
+        ])
+        syls.append(AlignedSyllable(syllable="", start=1.0, end=1.0, midi=0, is_line_break=True))
+        syls.extend(self._make_syllables([
+            ("second", 1.75, 2.0, 62),
+        ]))
+        syls.append(AlignedSyllable(syllable="", start=2.0, end=2.0, midi=0, is_line_break=True))
+        syls.extend(self._make_syllables([
+            ("third", 2.125, 2.25, 64),
+        ]))
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            first_beat_ms=500.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            config=Config(),
+        )
+        _, notes = parse_ultrastar_txt(txt)
+        line_breaks = [note.start_beat for note in notes if note.note_type == "-"]
+        # The first gap is 16 beats (4 to 20), so 4 + 16 // 3 = 9.
+        # The second is two beats (24 to 26), so the marker stays at 24.
+        assert line_breaks == [9, 24]
+
     def test_overlap_prevention(self):
         syls = self._make_syllables([
             ("a", 0.5, 1.0, 60),
@@ -233,13 +261,13 @@ class TestGenerateUltrastar:
             config=Config(),
         )
         meta, _ = parse_ultrastar_txt(txt)
-        # output_bpm = 240 (beat resolution multiplier 2), beat = 250 ms, gap = 0
+        # output_bpm = 240 (beat resolution multiplier 2), grid beat = 62.5 ms, gap = 0
         # chorus lines are 0-based lines 2-3 -> first note at beat 32, last ends at beat 56
         assert meta.medley_start_beat == 32
         assert meta.medley_end_beat == 56
-        assert meta.preview_start == 8.0
+        assert meta.preview_start == 2.0
 
-    def test_no_medley_tags_without_lyrics(self):
+    def test_preview_starts_at_first_line_without_lyrics(self):
         syls = self._make_syllables([("hi", 0.5, 1.0, 60)])
         txt = generate_ultrastar(
             aligned_syllables=syls,
@@ -253,9 +281,9 @@ class TestGenerateUltrastar:
         meta, _ = parse_ultrastar_txt(txt)
         assert meta.medley_start_beat is None
         assert meta.medley_end_beat is None
-        assert meta.preview_start is None
+        assert meta.preview_start == 0.5
 
-    def test_no_medley_tags_when_lyrics_do_not_repeat(self):
+    def test_preview_starts_at_first_line_when_lyrics_do_not_repeat(self):
         syls = self._make_syllables([
             ("one", 0.5, 1.0, 60),
             ("two", 1.2, 1.7, 62),
@@ -276,7 +304,7 @@ class TestGenerateUltrastar:
         meta, _ = parse_ultrastar_txt(txt)
         assert meta.medley_start_beat is None
         assert meta.medley_end_beat is None
-        assert meta.preview_start is None
+        assert meta.preview_start == 0.5
 
     def test_video_filename(self):
         syls = self._make_syllables([("hi", 0.5, 1.0, 60)])

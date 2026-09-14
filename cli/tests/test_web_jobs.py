@@ -209,6 +209,7 @@ class TestLogCapture:
 
         def fake_run(req):
             logging.getLogger("test.job").info("hello from job")
+            logging.getLogger("werkzeug").info("POST /_dash-update-component 200")
             return ProcessResult(ok=True)
 
         monkeypatch.setattr("cli.pipeline.run_process", fake_run)
@@ -220,6 +221,7 @@ class TestLogCapture:
             assert any("hello from job" in line for line in job.logs)
             # Lines are formatted [timestamp] [name] message
             assert any(line.startswith("[") and "[test.job]" in line for line in job.logs)
+            assert not any("_dash-update-component" in line for line in job.logs)
         finally:
             manager.stop()
 

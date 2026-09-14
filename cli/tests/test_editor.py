@@ -216,10 +216,14 @@ class TestSerializeEditorTxt:
         serialized = serialize_editor_txt(raw, payload_notes)
         meta2, notes2 = _parse(serialized)
         assert len(notes2) == len(notes)
-        for a, b in zip(notes, notes2):
+        for a, b in zip(
+            (note for note in notes if note.note_type != "-"),
+            (note for note in notes2 if note.note_type != "-"),
+        ):
             assert (a.note_type, a.start_beat, a.duration, a.pitch, a.syllable) == (
                 b.note_type, b.start_beat, b.duration, b.pitch, b.syllable,
             )
+        assert [note.start_beat for note in notes2 if note.note_type == "-"] == [9, 21]
         assert meta2.bpm == meta.bpm and meta2.gap == meta.gap
 
     def test_header_preserved_verbatim(self):
@@ -253,7 +257,19 @@ class TestSerializeEditorTxt:
         payload_notes = [note_to_payload(n, i) for i, n in enumerate(_parse(CONTENT)[1])]
         serialized = serialize_editor_txt(raw, payload_notes)
         assert "* 16 4 66  are" in serialized
-        assert "- 10" in serialized and "- 22" in serialized
+        assert "- 9" in serialized and "- 21" in serialized
+
+    def test_line_breaks_are_recalculated_for_wide_and_tight_gaps(self):
+        raw = ["#BPM:120", "#GAP:0"]
+        payload_notes = [
+            {"type": ":", "start": 0, "dur": 4, "pitch": 60, "syl": "first"},
+            {"type": "-", "start": 999, "dur": 0, "pitch": 0, "syl": ""},
+            {"type": ":", "start": 20, "dur": 4, "pitch": 62, "syl": " second"},
+            {"type": "-", "start": 999, "dur": 0, "pitch": 0, "syl": ""},
+            {"type": ":", "start": 26, "dur": 4, "pitch": 64, "syl": " third"},
+        ]
+        _, notes = _parse(serialize_editor_txt(raw, payload_notes))
+        assert [note.start_beat for note in notes if note.note_type == "-"] == [9, 24]
 
     def test_freestyle_note_survives(self):
         raw, _ = extract_raw_header(CONTENT)
@@ -276,6 +292,8 @@ class TestSaveCreatorStamp:
         assert r"header.findIndex(l=>/^\s*#ARTIST:/i.test(l))" in body
         assert "header.splice(ai+1,0,line)" in body
         assert "header.push(line)" in body
+        assert "const previousEnd=previous.start+previous.dur, gapBeats=following.start-previousEnd;" in body
+        assert "gapBeats>3?previousEnd+Math.floor(gapBeats/3):previousEnd" in body
 
     def test_js_creator_line_uses_iso_timestamp(self, tmp_path):
         html = generate_editor(_write_txt(tmp_path)).read_text(encoding="utf-8")

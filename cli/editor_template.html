@@ -1140,7 +1140,15 @@
     const line=creatorLine();
     const ai=header.findIndex(l=>/^\s*#ARTIST:/i.test(l));
     if(ai>=0) header.splice(ai+1,0,line); else header.push(line);
-    const body=notes.map(n=>n.type==="-"?`- ${n.start}`:`${n.type} ${n.start} ${n.dur} ${n.pitch} ${n.syl}`).join("\n");
+    const body=notes.map((n,index)=>{
+      if(n.type!=="-") return `${n.type} ${n.start} ${n.dur} ${n.pitch} ${n.syl}`;
+      const previous=[...notes.slice(0,index)].reverse().find(note=>note.type!=="-");
+      const following=notes.slice(index+1).find(note=>note.type!=="-");
+      if(!previous||!following) return `- ${n.start}`;
+      const previousEnd=previous.start+previous.dur, gapBeats=following.start-previousEnd;
+      const marker=gapBeats>3?previousEnd+Math.floor(gapBeats/3):previousEnd;
+      return `- ${marker}`;
+    }).join("\n");
     return header.join("\n")+"\n\n"+body+"\nE\n";
   }
   function downloadTxt(){

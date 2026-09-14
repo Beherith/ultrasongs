@@ -57,8 +57,9 @@ def generate_ultrastar(
              energy bounds); written as the #END tag.
          lyrics_text: Plain lyrics the notes were aligned from. When given,
              the medley (largest, most frequently repeated section) is located
-             and written as #MEDLEYSTARTBEAT/#MEDLEYENDBEAT, and its first
-             occurrence as #PREVIEWSTART.
+              and written as #MEDLEYSTARTBEAT/#MEDLEYENDBEAT; the preview starts
+              at its first occurrence. Without a medley, the preview starts at
+              the first lyric line.
          config: Pipeline configuration.
 
     Returns:
@@ -100,8 +101,6 @@ def generate_ultrastar(
         if starts[i] is not None:
             next_start = starts[i]
 
-    offset = config.linebreak_beat_offset * config.beat_resolution_multiplier
-
     for i, syl in enumerate(aligned_syllables):
         if syl.is_line_break:
             next_note_beat = next_starts[i]
@@ -110,8 +109,10 @@ def generate_ultrastar(
 
             last = ultra_notes[-1] if ultra_notes else None
             previous_end = last.start_beat + last.duration if last and last.note_type == ":" else 0
-            target = max(0, next_note_beat - offset)
-            line_break_beat = min(next_note_beat, max(target, previous_end))
+            gap_beats = next_note_beat - previous_end
+            # Put a visible separator into substantial rests; tight or
+            # overlapping lines keep it at the preceding note's end.
+            line_break_beat = previous_end + gap_beats // 3 if gap_beats > 3 else previous_end
 
             ultra_notes.append(UltrastarNote(
                 note_type="-",
@@ -190,17 +191,25 @@ def _detect_medley_beats(
             multiplier), used to convert beats to milliseconds.
 
     Returns:
-        (medley_start_beat, medley_end_beat, preview_start); all None when no
-        medley is detected or the mapping is not possible.
+        (medley_start_beat, medley_end_beat, preview_start). Medley beats are
+        None when no medley is detected or it cannot be mapped; preview_start
+        falls back to the first singing note.
     """
-    if lyrics_text is None:
+    first_note = next((note for note in ultra_notes if note.note_type != "-"), None)
+    if first_note is None:
         return None, None, None
+
+    # Ultrastar note beats are sixteenth-note grid units (see ms_to_beats()).
+    beat_ms = 60000.0 / output_bpm / 4.0
+    first_line_preview = (gap + first_note.start_beat * beat_ms) / 1000.0
+    if lyrics_text is None:
+        return None, None, first_line_preview
 
     lyric_lines = [line.strip() for line in lyrics_text.split("\n") if line.strip()]
     medley = detect_medley(lyric_lines)
     if medley is None:
         logger.info("No medley (repeated chorus section) detected")
-        return None, None, None
+        return None, None, first_line_preview
 
     medley_start, medley_end = medley
 
@@ -221,15 +230,14 @@ def _detect_medley_beats(
         logger.warning(
             f"Medley found at lyric lines {medley_start + 1}-{medley_end + 1} but the "
             f"generated note lines ({len(line_groups)}) do not match the lyric lines "
-            f"({len(lyric_lines)}); omitting medley tags"
+            f"({len(lyric_lines)}); omitting medley tags and using the first line for preview"
         )
-        return None, None, None
+        return None, None, first_line_preview
 
     first_note = line_groups[medley_start][0]
     last_note = line_groups[medley_end][-1]
     medley_start_beat = first_note.start_beat
     medley_end_beat = last_note.start_beat + last_note.duration
-    beat_ms = 60000.0 / output_bpm
     preview_start = (gap + medley_start_beat * beat_ms) / 1000.0
     logger.info(
         f"Medley detected: lines {medley_start + 1}-{medley_end + 1} of {len(lyric_lines)} "

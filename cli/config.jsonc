@@ -151,10 +151,8 @@
   // value), i.e. 500ms of lead-in before the first sung note.
   "gap_lead_in_ms": 500,
 
-  // Line break offset: number of beats before the next note to insert a line break.
-  // 4 beats corresponds to one full measure in 4/4 time (the most common meter).
-  // Ultrastar uses line breaks to separate lyric lines on screen. If line breaks
-  // appear too early or too late, adjust this value. For songs in 3/4 time, try 3.
+  // Deprecated compatibility setting. Line delimiters are now placed one-third
+  // into rests longer than three beats, otherwise at the preceding note's end.
   "linebreak_beat_offset": 4,
 
   // Beat resolution multiplier: scales the exported BPM to a finer Ultrastar
