@@ -24,15 +24,15 @@ pip install -e "cli/[web]"    # adds the optional Dash dependency
 ULTRASONGS_WEB_PASSWORD=secret python -m cli web
 ```
 
-- **Flags:** `--host`, `--port`, `--no-auth`, `--web-config <path>`. Defaults come from `cli/web_config.jsonc` (port 8030).
-- **Auth:** password from the `ULTRASONGS_WEB_PASSWORD` environment variable, or from a `ULTRASONGS_WEB_PASSWORD=...` entry in `./.env.local` (gitignored; env var wins). Flask session cookie, constant-time compare. There is no TLS — keep the default localhost bind or put a reverse proxy in front. `--no-auth` disables login but is rejected unless the host is `127.0.0.1`/`localhost`.
+- **Flags:** `--host`, `--port`, `--no-auth`, `--web-config <path>`. Host/port come from `cli/web_config.jsonc` (code defaults `127.0.0.1:8030`).
+- **Auth:** password from the `ULTRASONGS_WEB_PASSWORD` environment variable, or from a `ULTRASONGS_WEB_PASSWORD=...` entry in `./.env.local` (gitignored; env var wins). Flask session cookie, constant-time compare. There is no TLS — bind to `127.0.0.1` or put a reverse proxy in front. `--no-auth` disables login but is rejected unless the host is `127.0.0.1`/`localhost`.
 
 ### Processing a song
 
 1. **Mode** — pick one:
    - **Full pipeline** (default): builds an Ultrastar `.txt` from lyrics. Needs the media upload, artist, title, and lyrics.
    - **Stems only**: runs just the htdemucs split and returns the vocals and accompaniment MP3s. Only the media upload is used — lyrics, title, artist, and cover fields are ignored (dimmed in the form).
-2. **Upload** — drag & drop (or browse) an audio/video file (MP3, MP4, MKV, WEBM, MOV, AVI, FLAC, OGG, M4A, WAV). If the file name looks like `Artist - Title`, the artist and title fields are prefilled for you.
+2. **Upload** — drag & drop (or browse) an audio/video file (MP3, MP4, MKV, WEBM, MOV, AVI, FLAC, OGG/OGA, M4A, WAV). If the file name looks like `Artist - Title`, the artist and title fields are prefilled for you.
 3. **Artist / Title** — required for the full pipeline; edit the prefilled values if needed.
 4. **Lyrics** — paste the lyrics, or upload a lyrics `.txt` file. Plain text is the gold standard and should be complete and accurate. An existing Ultrastar `.txt` also works: the plain lyrics are extracted from it, and empty title/artist fields are filled from its `#TITLE`/`#ARTIST` tags.
 5. **Cover art** (optional) — upload a JPEG (10 MB cap); it is written as `<name>_cover.jpg` and referenced by a `#COVER` tag in the generated `.txt`.
@@ -191,7 +191,7 @@ Global flags:
 | Flag | Description |
 |---|---|
 | `-c, --config <path>` | Custom `config.jsonc` (default: `cli/config.jsonc`) |
-| `-o, --override <spec>` | Override config keys (repeatable; takes precedence over `-c`). A JSON object (`'{"whisper_model": "small"}`) or comma-separated `key=value` pairs (`transcribe_runs=5,whisper_model=small`) |
+| `-o, --override <spec>` | Override config keys (repeatable; takes precedence over `-c`). A JSON object (`'{"whisper_model": "small"}'`) or comma-separated `key=value` pairs (`transcribe_runs=5,whisper_model=small`) |
 | `-v, --verbose` | DEBUG logging |
 | `-q, --quiet` | WARNING and above only |
 
