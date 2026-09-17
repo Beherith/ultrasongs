@@ -425,6 +425,8 @@ def build_layout(web_cfg: WebConfig, pipeline_config: Config) -> html.Div:
             dcc.Store(id="upload-store"),
             dcc.Store(id="cover-store"),
             dcc.Store(id="active-job-store"),
+            dcc.Store(id="downloaded-job-store"),
+            html.Div(id="auto-download"),
             dcc.Interval(id="poll-interval", interval=web_cfg.poll_interval_s * 1000),
         ],
         style={"background": "#0f1117", "minHeight": "100vh"},
@@ -735,18 +737,21 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
         Output("process-btn", "disabled"),
         Output("process-btn", "children"),
         Output("active-job-store", "data", allow_duplicate=True),
+        Output("auto-download", "children"),
+        Output("downloaded-job-store", "data"),
         Input("poll-interval", "n_intervals"),
         State("active-job-store", "data"),
+        State("downloaded-job-store", "data"),
         prevent_initial_call=True,
     )
-    def poll(n_intervals, active_job_id):
+    def poll(n_intervals, active_job_id, downloaded_job_id):
         if not active_job_id:
             raise PreventUpdate
         snap = manager.snapshot(active_job_id)
         if snap is None:
             return (None, CSS["pill"], "", "", None,
                     "", {**CSS["log"], "display": "none"}, None,
-                    False, "Process", None)
+                    False, "Process", None, None, no_update)
         label, color = PILL_COLORS.get(snap["status"], (snap["status"], "#e5e7eb"))
         position = snap["position"]
         if position is not None:
@@ -762,6 +767,8 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
         if snap["status"] == "failed":
             banner_children = html.Div(snap["error"] or "Job failed", style=CSS["error"])
         result_children = None
+        auto_download = None
+        downloaded_job = no_update
         if snap["status"] == "succeeded":
             def download_href(filename: str) -> str:
                 return f"/download/{snap['id']}/{quote(snap['run_dir'])}/{quote(filename)}"
@@ -798,6 +805,14 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
                            "color": "#7dd3fc", "fontSize": "13px"}))
             result_children = html.Div([html.Div("Done!", style=CSS["ok"]),
                                         html.Div(links)])
+            if snap["zip_name"] and downloaded_job_id != snap["id"]:
+                # Navigating an iframe starts a normal attachment download without
+                # loading the potentially large ZIP into Dash's callback payload.
+                auto_download = html.Iframe(
+                    src=download_href(snap["zip_name"]),
+                    style={"display": "none"},
+                )
+                downloaded_job = snap["id"]
 
         busy = snap["status"] in ("queued", "running")
         btn_label = "Processing…" if snap["status"] == "running" else (
@@ -805,7 +820,7 @@ def _register_callbacks(app: dash.Dash, web_cfg: WebConfig, pipeline_config: Con
         return (label, {**CSS["pill"], "color": color}, elapsed_text,
                 f" {snap['title']}", banner_children,
                 "\n".join(snap["logs_tail"]), log_style, result_children,
-                busy, btn_label, active_job_id)
+                busy, btn_label, active_job_id, auto_download, downloaded_job)
 
 
 def _remove_staged(store: dict | None) -> None:

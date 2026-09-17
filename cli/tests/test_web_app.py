@@ -50,6 +50,7 @@ class TestLayout:
                     "lyrics-info", "cover-upload", "cover-info", "process-btn",
                     "reset-btn", "job-status", "job-log", "job-result",
                     "upload-store", "cover-store", "active-job-store",
+                    "downloaded-job-store", "auto-download",
                     "poll-interval", "mode", "artist-field", "title-field",
                     "lyrics-field", "cover-field"):
             assert cid in ids, cid
@@ -246,6 +247,7 @@ class _FakeManager:
         self.web_dir = Path(web_dir)
         self.max_upload_bytes = int(max_upload_mb * 1024 * 1024)
         self.submitted = []
+        self.snapshot_data = None
 
     def submit(self, req, upload_bytes, upload_name, cover_bytes=None, cover_name=None):
         self.submitted.append((req, upload_bytes, upload_name, cover_bytes, cover_name))
@@ -255,7 +257,7 @@ class _FakeManager:
         return None
 
     def snapshot(self, job_id):
-        return None
+        return self.snapshot_data
 
 
 def _find_callback(app, name):
@@ -457,6 +459,37 @@ class TestModeChangedCallback:
         assert title_style == webapp.CSS["col"]
         assert lyrics_style is None
         assert cover_style is None
+
+
+class TestPollCallback:
+    def test_starts_zip_download_once_when_job_succeeds(self, tmp_path):
+        config = Config(temp_dir=str(tmp_path / "tmp"), output_dir=str(tmp_path / "out"))
+        manager = _FakeManager(tmp_path / "jobs")
+        manager.snapshot_data = {
+            "id": "finished123",
+            "title": "Title",
+            "status": "succeeded",
+            "position": None,
+            "logs_tail": [],
+            "error": None,
+            "files": [],
+            "run_dir": "Artist - Title",
+            "zip_name": "Artist - Title.zip",
+            "html_name": None,
+            "editor_name": None,
+            "elapsed_s": 65,
+        }
+        app = create_app(WebConfig(), config, manager, password=None)
+        cb = _find_callback(app, "poll")
+
+        result = cb(1, "finished123", None)
+        download = result[11]
+        assert download.src == "/download/finished123/Artist%20-%20Title/Artist%20-%20Title.zip"
+        assert result[12] == "finished123"
+
+        result = cb(2, "finished123", "finished123")
+        assert result[11] is None
+        assert result[12] is no_update
 
 
 class TestUploadCallback:

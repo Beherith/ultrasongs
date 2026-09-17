@@ -218,6 +218,58 @@ class TestGenerateUltrastar:
         meta, _ = parse_ultrastar_txt(txt)
         assert meta.gap == 735
 
+    def test_gap_shifted_back_by_whole_beats_before_first_note(self):
+        syls = self._make_syllables([("hi", 1.5, 2.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=120.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            first_beat_ms=5000.0,
+            config=Config(),
+        )
+        meta, notes = parse_ultrastar_txt(txt)
+        assert meta.gap == 1500
+        assert all(note.start_beat >= 0 for note in notes)
+
+    def test_gap_shift_preserves_bpm_phase(self):
+        syls = self._make_syllables([("hi", 1.5, 2.0, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=123.05,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            first_beat_ms=5000.0,
+            config=Config(),
+        )
+        meta, notes = parse_ultrastar_txt(txt)
+        beat_ms = 60000.0 / (123.05 * 2) / 4.0
+        # 5000 - 1500 is 57.42 grid beats, so shift back 58 whole beats.
+        assert meta.gap == round(5000.0 - 58 * beat_ms)
+        phase = (5000.0 - meta.gap) % beat_ms
+        assert min(phase, beat_ms - phase) < 1.0
+        assert all(note.start_beat >= 0 for note in notes)
+
+    def test_gap_shift_clamped_at_zero(self):
+        syls = self._make_syllables([("hi", 0.05, 0.2, 60)])
+        txt = generate_ultrastar(
+            aligned_syllables=syls,
+            bpm=60.0,
+            gap_ms=500,
+            title="Test",
+            artist="Artist",
+            mp3_filename="test.mp3",
+            first_beat_ms=100.0,
+            config=Config(),
+        )
+        meta, notes = parse_ultrastar_txt(txt)
+        assert meta.gap == 0
+        assert all(note.start_beat >= 0 for note in notes)
+
     def test_gap_falls_back_to_first_note_without_first_beat(self):
         syls = self._make_syllables([("hi", 1.5, 2.0, 60)])
         txt = generate_ultrastar(

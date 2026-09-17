@@ -1,5 +1,7 @@
 """Note generation: convert aligned syllables to Ultrastar .txt format."""
 
+import math
+
 from cli.config import Config
 from cli.logging_setup import get_logger
 from cli.medley import detect_medley
@@ -51,6 +53,10 @@ def generate_ultrastar(
         first_beat_ms: Time in milliseconds of the song's first beat
             (BpmResult.first_beat_ms). Used as #GAP so the beat grid aligns
             with the actual groove. Falls back to first note minus gap_ms.
+            When it would land after the first note (negative note beats),
+            it is shifted back by a whole number of grid beats to just
+            before the first note (keeping the detected phase), clamped
+            at 0 since a negative #GAP is not allowed.
          start_sec: Song start in seconds from the audio start (acoustic
              energy bounds); written as the #START tag.
          end_ms: Song end in milliseconds from the audio start (acoustic
@@ -72,12 +78,33 @@ def generate_ultrastar(
 
     # Anchor the beat grid: #GAP is the offset from the audio start to the
     # first beat, so a note sung on the downbeat lands on an integer beat.
+    output_bpm = bpm * config.beat_resolution_multiplier
+    first_syl = next((s for s in aligned_syllables if not s.is_line_break), None)
     if first_beat_ms is not None:
         gap = max(0, round(first_beat_ms))
     else:
-        first_syl = next((s for s in aligned_syllables if not s.is_line_break), None)
         gap = max(0, round(first_syl.start * 1000 - gap_ms)) if first_syl else 0
-    output_bpm = bpm * config.beat_resolution_multiplier
+    # A note before #GAP would get a negative beat, so #GAP must not land
+    # after the first note. Shift it back by a whole number of grid beats to
+    # keep the detected phase, clamping at 0 (a negative #GAP is not allowed).
+    if first_syl is not None:
+        first_note_ms = round(first_syl.start * 1000)
+        if gap > first_note_ms:
+            beat_ms = 60000.0 / output_bpm / 4.0
+            shift_beats = math.ceil((gap - first_note_ms) / beat_ms)
+            shifted = round(gap - shift_beats * beat_ms)
+            if shifted < 0:
+                logger.warning(
+                    f"#GAP {gap} ms is {shift_beats} beats after the first note "
+                    f"({first_note_ms} ms) and shifting back would go negative; using #GAP:0"
+                )
+                gap = 0
+            else:
+                logger.warning(
+                    f"#GAP shifted back {shift_beats} beats: {gap} ms -> {shifted} ms "
+                    f"so it lands before the first note ({first_note_ms} ms)"
+                )
+                gap = shifted
 
     # Quantize every onset once. Notes need distinct grid positions because an
     # Ultrastar note must have a duration of at least one beat.
